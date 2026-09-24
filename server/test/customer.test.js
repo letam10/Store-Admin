@@ -61,7 +61,8 @@ test('customer rewards require recorded payment, accumulate exact points and con
     assert.equal(issue.status, 201)
     const code = (await issue.json()).voucher.code
     assert.match(code, /^[A-Z2-9]{10}$/)
-    const body = { items: [{ id: 1, quantity: 1 }], fulfillment: 'delivery', region: 'hcm', voucherCodes: [code] }
+    const body = { items: [{ id: 1, quantity: 1 }], fulfillment: 'delivery', region: 'hcm', voucherCodes: [code],
+      recipient: 'Tam', phone: '0901234567', address: '123 Nguyễn Huệ, Quận 1' }
     const quote = await write(root, '/api/customer/quote', cookie, account.csrfToken, body)
     assert.equal(quote.status, 200)
     assert.deepEqual(((await quote.json()).total), 820000)

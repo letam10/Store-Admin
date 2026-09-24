@@ -86,7 +86,8 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     CREATE INDEX IF NOT EXISTS idx_product_reviews_product ON product_reviews(product_id, created_at);
     CREATE TABLE IF NOT EXISTS customer_orders (
       id TEXT PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-      items_json TEXT NOT NULL, fulfillment TEXT NOT NULL, region TEXT NOT NULL,
+      items_json TEXT NOT NULL, recipient TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '',
+      address TEXT NOT NULL DEFAULT '', fulfillment TEXT NOT NULL, region TEXT NOT NULL,
       distance_km INTEGER NOT NULL DEFAULT 0, subtotal INTEGER NOT NULL,
       discount INTEGER NOT NULL, goods_total INTEGER NOT NULL, shipping_fee INTEGER NOT NULL,
       total INTEGER NOT NULL, voucher_codes_json TEXT NOT NULL, tier TEXT NOT NULL,
@@ -95,6 +96,10 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     );
     CREATE INDEX IF NOT EXISTS idx_customer_orders_owner ON customer_orders(customer_id, created_at);
   `)
+  const orderColumns = sql.prepare('PRAGMA table_info(customer_orders)').all().map((column) => column.name)
+  for (const field of ['recipient', 'phone', 'address']) {
+    if (!orderColumns.includes(field)) sql.exec(`ALTER TABLE customer_orders ADD COLUMN ${field} TEXT NOT NULL DEFAULT ''`)
+  }
 
   const customerLimiter = new Map()
   function limited(ip) {
@@ -297,15 +302,20 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
   })
   app.post('/api/customer/orders', requireCustomer, customerCsrf, (req, res) => {
     try {
+      const recipient = String(req.body?.recipient || '').trim()
+      const phone = String(req.body?.phone || '').trim()
+      const address = String(req.body?.address || '').trim()
+      if (recipient.length < 2 || recipient.length > 100 || !/^[+0-9 ()-]{9,20}$/.test(phone) ||
+        (req.body?.fulfillment === 'delivery' && (address.length < 5 || address.length > 300))) throw new Error('INVALID_ORDER')
       const order = sql.transaction(() => {
         const fresh = sql.prepare('SELECT * FROM customers WHERE id = ?').get(req.customer.id)
         const data = quote(fresh, req.body)
         const id = 'ST-' + randomUUID().slice(0, 12).toUpperCase()
         const createdAt = now().toISOString()
-        sql.prepare(`INSERT INTO customer_orders (id, customer_id, items_json, fulfillment, region, distance_km,
+        sql.prepare(`INSERT INTO customer_orders (id, customer_id, items_json, recipient, phone, address, fulfillment, region, distance_km,
           subtotal, discount, goods_total, shipping_fee, total, voucher_codes_json, tier, status, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`).run(id, fresh.id,
-          JSON.stringify(data.items), data.fulfillment, data.region, data.distanceKm, data.subtotal,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`).run(id, fresh.id,
+          JSON.stringify(data.items), recipient, phone, address, data.fulfillment, data.region, data.distanceKm, data.subtotal,
           data.discount, data.goodsTotal, data.shippingFee, data.total, JSON.stringify(data.voucherCodes), data.tier, createdAt)
         for (const code of data.voucherCodes) sql.prepare('DELETE FROM customer_vouchers WHERE customer_id = ? AND code = ?').run(fresh.id, code)
         return { id, ...data, status: 'pending', createdAt, pointsEarned: 0 }

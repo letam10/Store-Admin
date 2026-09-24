@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiJson } from '../api/chat'
 import { normalizeSearch } from '../storefront/state'
-import { demoVouchers, membershipPlans } from '../storefront/promotions'
+import { AdminCustomers, AdminFavorites, AdminOrders, AdminReviews, AdminVouchers } from './AdminCommerce'
 import './AdminModules.css'
 
 const datasets={
@@ -111,21 +111,6 @@ function Dashboard({ onNavigate }){
 }
 
 
-function RewardsWheelPreview(){
- const [spin,setSpin]=useState(0)
- return <section className="admin-module-card">
-   <div className="admin-module-head"><div><p className="admin-eyebrow">CAMPAIGN PREVIEW</p><h2>Quay thưởng, voucher & thành viên</h2><p>Xem thử vòng quay và cấu trúc ưu đãi. Không phát thưởng, không thu phí thành viên và không ghi dữ liệu nghiệp vụ thật.</p></div><span className="admin-preview-badge">Preview cục bộ</span></div>
-   <div className="reward-layout">
-     <div className="reward-wheel-wrap"><div className="reward-pointer">▼</div><div className="reward-wheel" style={{transform:'rotate('+spin+'deg)'}}><span>50K</span><span>10%</span><span>Quà</span><span>VIP</span><span>Lại</span><span>15%</span></div></div>
-     <div className="reward-config"><label>Tên chiến dịch<input defaultValue="Store Lucky Demo" /></label><label>Số lượt/người<input type="number" min="1" max="20" defaultValue="1" /></label><button type="button" onClick={()=>setSpin((value)=>value+497)}>Quay preview</button><small>Phần thưởng, ngân sách, xác suất và điều kiện phải được backend/pháp lý xác nhận trước khi triển khai thật.</small></div>
-   </div>
-   <div className="promo-admin-grid">
-     <section><div className="promo-admin-head"><b>Voucher demo</b><span>{demoVouchers.length} mã</span></div>{demoVouchers.map((voucher)=><article key={voucher.code}><code>{voucher.code}</code><div><b>{voucher.label}</b><small>{voucher.description}</small></div><span>{voucher.tiers.join(' / ')}</span></article>)}</section>
-     <section><div className="promo-admin-head"><b>Tier thành viên demo</b><span>{membershipPlans.length} hạng</span></div>{membershipPlans.map((plan)=><article key={plan.id}><strong>{plan.badge}</strong><div><b>{plan.name}</b><small>{plan.description}</small></div><span>{plan.price===0?'Miễn phí':new Intl.NumberFormat('vi-VN').format(plan.price)+' ₫/tháng'}</span></article>)}</section>
-   </div>
- </section>
-}
-
 function AppearancePreview(){
  const [headline,setHeadline]=useState('Mua sắm gọn hơn. Sống nhẹ hơn.')
  const [tone,setTone]=useState('sage')
@@ -149,29 +134,6 @@ function StaffAccessPreview(){
  </section>
 }
 
-
-function CustomersPreview(){
- const [query,setQuery]=useState('')
- const [segment,setSegment]=useState('Tất cả')
- const customers=[
-  {name:'Nguyễn An',group:'Thân thiết',order:'ST-1048',status:'Đang hoạt động'},
-  {name:'Trần Minh',group:'Mới',order:'ST-1046',status:'Cần chăm sóc'},
-  {name:'Lê Hương',group:'VIP',order:'ST-1032',status:'Ưu tiên'},
-  {name:'Hoàng Nam',group:'Mới',order:'ST-1029',status:'Đang hoạt động'},
-  {name:'Lead demo #01',group:'Tiềm năng',order:'Chưa mua',status:'Quan tâm VIP'},
- ]
- const visible=customers.filter((customer)=>{
-  const segmentMatch=segment==='Tất cả'||customer.group===segment||customer.status===segment
-  return segmentMatch&&normalizeSearch([customer.name,customer.group,customer.order,customer.status].join(' ')).includes(normalizeSearch(query).trim())
- })
- const segments=['Tất cả','VIP','Mới','Tiềm năng','Cần chăm sóc']
- return <section className="admin-module-card">
-   <div className="admin-module-head"><div><p className="admin-eyebrow">CUSTOMER SEGMENTS</p><h2>Quản lý khách hàng</h2><p>Tìm kiếm, phân nhóm khách hàng và lead để ưu tiên chăm sóc. Dữ liệu hiện là mẫu giao diện; form lead ngoài storefront chưa gửi backend.</p></div><span className="admin-preview-badge">{customers.length} khách demo</span></div>
-   <div className="customer-segments">{segments.map((item)=><button key={item} type="button" className={segment===item?'is-active':''} onClick={()=>setSegment(item)}>{item}<span>{item==='Tất cả'?customers.length:customers.filter((customer)=>customer.group===item||customer.status===item).length}</span></button>)}</div>
-   <div className="admin-module-toolbar"><label><span className="sr-only">Tìm khách hàng</span><input type="search" value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Tên, mã đơn, nhóm hoặc trạng thái…" /></label><span>{visible.length}/{customers.length} khách</span></div>
-   <div className="customer-grid">{visible.map((customer)=><article key={customer.name}><div className="customer-avatar" aria-hidden="true">{customer.name.slice(0,1)}</div><div><b>{customer.name}</b><small>{customer.group} · {customer.order}</small></div><span>{customer.status}</span><button type="button" disabled title="Chưa nối backend khách hàng">Mở hồ sơ</button></article>)}{visible.length===0&&<p className="admin-empty">Không có khách hàng phù hợp.</p>}</div>
- </section>
-}
 
 function OrderTypesPreview(){
  const types=[
@@ -222,8 +184,11 @@ export default function AdminModule({module,csrfToken,onNavigate}){
  if(module==='dashboard')return <Dashboard onNavigate={onNavigate}/>
  if(module==='products')return <ProductsCatalog csrfToken={csrfToken}/>
  if(module==='product-views')return <ProductViews/>
- if(module==='customers')return <CustomersPreview/>
- if(module==='rewards-wheel')return <RewardsWheelPreview/>
+ if(module==='customers')return <AdminCustomers/>
+ if(module==='favorites')return <AdminFavorites/>
+ if(module==='reviews')return <AdminReviews csrfToken={csrfToken}/>
+ if(module==='customer-orders')return <AdminOrders csrfToken={csrfToken}/>
+ if(module==='rewards-wheel')return <AdminVouchers csrfToken={csrfToken}/>
  if(module==='appearance')return <AppearancePreview/>
  if(module==='staff')return <StaffAccessPreview/>
  if(module==='order-types')return <OrderTypesPreview/>

@@ -11,7 +11,7 @@ import './Admin.css'
 const moduleGroups = [
   { title: 'Tổng quan', ids: ['dashboard', 'statistics', 'ai-local'] },
   { title: 'Hàng hóa & cửa hàng', ids: ['products', 'product-views', 'inventory', 'logistics', 'appearance'] },
-  { title: 'Khách hàng', ids: ['customers', 'support', 'rewards-wheel'] },
+  { title: 'Khách hàng', ids: ['customers', 'favorites', 'reviews', 'rewards-wheel', 'customer-orders', 'support'] },
   { title: 'Vận hành', ids: ['order-types', 'staff', 'overtime'] },
 ]
 const moduleById = new Map(adminModules.map((entry) => [entry[0], entry]))

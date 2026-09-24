@@ -1,0 +1,12 @@
+.admin-commerce-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.admin-commerce-form label { display: grid; gap: 5px; min-width: 160px; flex: 1; }
+.admin-commerce-form input, .admin-commerce-form select, .admin-commerce-list textarea { width: 100%; padding: 9px 10px; border: 1px solid #bdcfc2; border-radius: 8px; background: white; color: #173b28; font: inherit; }
+.admin-commerce-form button, .admin-commerce-list button { padding: 10px 14px; border: 0; border-radius: 8px; background: #256a43; color: white; font-weight: 700; cursor: pointer; }
+.admin-commerce-form button:disabled, .admin-commerce-list button:disabled { opacity: .5; cursor: not-allowed; }
+.admin-commerce-list { display: grid; gap: 14px; }
+.admin-commerce-list article { padding: 16px; border: 1px solid #dbe8dd; border-radius: 12px; }
+.admin-commerce-list h3 { margin: 0; }
+.admin-commerce-list blockquote { margin: 10px 0; padding: 10px 14px; border-left: 3px solid #39845b; background: #edf6ee; }
+.admin-commerce-list label { display: grid; gap: 5px; }
+.admin-commerce-list button { margin-top: 8px; }
+.admin-table-wrap td small { display: block; }

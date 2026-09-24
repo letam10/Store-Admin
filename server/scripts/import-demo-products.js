@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { config } from '../src/config.js'
 import { StoreDb } from '../src/db.js'
@@ -137,8 +137,11 @@ async function main() {
   } finally {
     db.close()
   }
-  writeFileSync(snapshotPath, JSON.stringify(records, null, 2) + '\n', 'utf8')
-  console.log(`Đã nhập ${records.length} sản phẩm demo vào SQLite và ${snapshotPath}`)
+  const previous = existsSync(snapshotPath) ? JSON.parse(readFileSync(snapshotPath, 'utf8')) : []
+  const baseIds = new Set(records.map((record) => record.id))
+  const extra = previous.filter((record) => !baseIds.has(record.id))
+  writeFileSync(snapshotPath, JSON.stringify([...records, ...extra], null, 2) + '\n', 'utf8')
+  console.log(`Đã nhập ${records.length} sản phẩm demo vào SQLite và giữ ${extra.length} mục bổ sung tại ${snapshotPath}`)
 }
 
 main().catch((error) => {

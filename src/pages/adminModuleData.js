@@ -1,6 +1,9 @@
 export const adminModules = [
   ['dashboard', 'Tổng quan', '⌂'],
   ['customers', 'Khách hàng', '◉'],
+  ['favorites', 'Yêu thích', '♥'],
+  ['reviews', 'Đánh giá', '★'],
+  ['customer-orders', 'Đơn thanh toán', '▤'],
   ['products', 'Hàng hóa', '◫'],
   ['product-views', 'Xem nhiều', '◕'],
   ['logistics', 'Lưu thông', '⇄'],
@@ -10,7 +13,7 @@ export const adminModules = [
   ['ai-local', 'AI local', '✺'],
   ['order-types', 'Loại đơn hàng', '≡'],
   ['support', 'CSKH', '☏'],
-  ['rewards-wheel', 'Quay thưởng', '◌'],
+  ['rewards-wheel', 'Cấp voucher', '◌'],
   ['staff', 'Nhân viên', '♙'],
   ['overtime', 'Tăng ca & khen thưởng', '★'],
 ]
