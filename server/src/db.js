@@ -275,6 +275,14 @@ export class StoreDb {
     return this.db.prepare('SELECT view_count FROM product_views WHERE product_id = ?').get(id).view_count
   }
 
+  getProductViewCount(id) {
+    return this.db.prepare('SELECT view_count FROM product_views WHERE product_id = ?').get(id)?.view_count || 0
+  }
+
+  totalProductViews() {
+    return this.db.prepare('SELECT COALESCE(SUM(view_count), 0) AS total FROM product_views').get().total
+  }
+
   clearOrders() {
     this.db.prepare('DELETE FROM orders').run()
   }

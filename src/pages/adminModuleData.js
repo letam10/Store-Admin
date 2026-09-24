@@ -2,6 +2,7 @@ export const adminModules = [
   ['dashboard', 'Tổng quan', '⌂'],
   ['customers', 'Khách hàng', '◉'],
   ['products', 'Hàng hóa', '◫'],
+  ['product-views', 'Xem nhiều', '◕'],
   ['logistics', 'Lưu thông', '⇄'],
   ['inventory', 'Xuất nhập kho', '▦'],
   ['appearance', 'Trang trí & chỉnh sửa', '✦'],

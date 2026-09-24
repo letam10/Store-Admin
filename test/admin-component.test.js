@@ -109,3 +109,17 @@ test('real Admin does not restore old history over a new live chat', async () =>
     assert.equal(document.querySelectorAll('.admin-chat__message').length, 2)
   })
 })
+
+test('grouped admin navigation and dashboard shortcut open top-view analytics', async () => {
+  await mounted(async (url) => {
+    if (url === '/api/admin/session') return json(session('owner'))
+    if (url === '/api/admin/settings') return json(settings)
+    if (url === '/api/admin/product-views') return json({ products: [{ id: '1', name: 'Tai nghe Everyday', category: 'Điện tử', image: null, symbol: '🎧', viewCount: 2, rank: 1 }], totalViews: 2 })
+    throw new Error('Unexpected URL ' + url)
+  }, async ({ click }) => {
+    assert.match(document.querySelector('.admin-sidebar').textContent, /Hàng hóa & cửa hàng/)
+    await click('Sản phẩm xem nhiều')
+    assert.match(document.querySelector('.admin-main').textContent, /20 sản phẩm được xem nhiều nhất/)
+    assert.match(document.querySelector('.admin-view-list').textContent, /Tai nghe Everyday/)
+  })
+})

@@ -81,9 +81,33 @@ function ProductsCatalog({ csrfToken }) {
   </section>
 }
 
-function Dashboard(){
+function ProductViews() {
+  const [report, setReport] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    const controller = new AbortController()
+    apiJson('/api/admin/product-views', { signal: controller.signal })
+      .then(setReport)
+      .catch((failure) => { if (!controller.signal.aborted) setError(failure.message) })
+    return () => controller.abort()
+  }, [])
+  const highest = report?.products[0]?.viewCount || 1
+  return <section className="admin-module-card">
+    <div className="admin-module-head"><div><p className="admin-eyebrow">THỐNG KÊ TRUY CẬP</p><h2>20 sản phẩm được xem nhiều nhất</h2><p>Mỗi lượt mở trang chi tiết được ghi nhận. Khi chưa có lượt xem, danh sách hiển thị thứ tự mặc định.</p></div><span className="admin-preview-badge">{report?.totalViews || 0} lượt xem</span></div>
+    {error && <p role="alert">Không tải được thống kê: {error}</p>}
+    {!report && !error && <p>Đang tải lượt xem…</p>}
+    {report && <div className="admin-view-list">{report.products.map((product) => <article key={product.id}>
+      <b className="admin-view-rank">{String(product.rank).padStart(2, '0')}</b>
+      {product.image ? <img src={product.image} alt="" width="48" height="48" loading="lazy" /> : <span className="admin-view-symbol" aria-hidden="true">{product.symbol}</span>}
+      <div><strong>{product.name}</strong><small>{product.category}</small><span className="admin-view-bar" style={{ '--view-width': `${product.viewCount / highest * 100}%` }} /></div>
+      <b>{product.viewCount} lượt</b>
+    </article>)}</div>}
+  </section>
+}
+
+function Dashboard({ onNavigate }){
  const stats=[['Doanh thu demo','128,4 triệu','+12.8%'],['Đơn hôm nay','42','+8.1%'],['Khách quay lại','31%','+2.0%'],['Ticket mở','7','-3']]
- return <><div className="admin-kpi-grid">{stats.map(([label,value,delta])=><article key={label}><span>{label}</span><strong>{value}</strong><small>{delta} so với kỳ trước</small></article>)}</div><div className="admin-dashboard-grid"><section className="admin-module-card"><p className="admin-eyebrow">Vận hành hôm nay</p><h2>Ưu tiên cần chú ý</h2><div className="admin-task-list"><div><b>07</b><span>Ticket CSKH đang mở</span></div><div><b>03</b><span>Phiếu kho chờ duyệt</span></div><div><b>02</b><span>Nhân viên đề nghị tăng ca</span></div></div></section><section className="admin-module-card"><p className="admin-eyebrow">Lối tắt</p><h2>Thao tác thường dùng</h2><div className="admin-quick-actions"><button type="button" disabled title="Chưa nối backend">+ Tạo hàng hóa</button><button type="button" disabled title="Chưa nối backend">+ Phiếu nhập kho</button><button type="button" disabled title="Chưa nối backend">+ Ticket CSKH</button><button type="button" disabled title="Chưa nối backend">+ Chiến dịch thưởng</button></div></section></div></>
+ return <><div className="admin-kpi-grid">{stats.map(([label,value,delta])=><article key={label}><span>{label}</span><strong>{value}</strong><small>{delta} so với kỳ trước</small></article>)}</div><div className="admin-dashboard-grid"><section className="admin-module-card"><p className="admin-eyebrow">Vận hành hôm nay</p><h2>Ưu tiên cần chú ý</h2><div className="admin-task-list"><div><b>07</b><span>Ticket CSKH đang mở</span></div><div><b>03</b><span>Phiếu kho chờ duyệt</span></div><div><b>02</b><span>Nhân viên đề nghị tăng ca</span></div></div></section><section className="admin-module-card"><p className="admin-eyebrow">Lối tắt</p><h2>Mở nhanh các mục</h2><div className="admin-quick-actions"><button type="button" onClick={()=>onNavigate('products')}>Quản lý hàng hóa</button><button type="button" onClick={()=>onNavigate('product-views')}>Sản phẩm xem nhiều</button><button type="button" onClick={()=>onNavigate('inventory')}>Xem xuất nhập kho</button><button type="button" onClick={()=>onNavigate('support')}>Xem CSKH</button></div></section></div></>
 }
 
 
@@ -187,7 +211,7 @@ function OvertimeRewardsPreview(){
  </section>
 }
 
-export default function AdminModule({module,csrfToken}){
+export default function AdminModule({module,csrfToken,onNavigate}){
  const [filter,setFilter]=useState('')
  const data=datasets[module]||datasets.statistics
  const rows=useMemo(()=>{
@@ -195,8 +219,9 @@ export default function AdminModule({module,csrfToken}){
    if(!needle)return data.rows
    return data.rows.filter((row)=>normalizeSearch(row.join(' ')).includes(needle))
  },[data,filter])
- if(module==='dashboard')return <Dashboard/>
+ if(module==='dashboard')return <Dashboard onNavigate={onNavigate}/>
  if(module==='products')return <ProductsCatalog csrfToken={csrfToken}/>
+ if(module==='product-views')return <ProductViews/>
  if(module==='customers')return <CustomersPreview/>
  if(module==='rewards-wheel')return <RewardsWheelPreview/>
  if(module==='appearance')return <AppearancePreview/>

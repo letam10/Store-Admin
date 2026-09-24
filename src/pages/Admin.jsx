@@ -8,6 +8,14 @@ import { adminModules } from './adminModuleData'
 import { normalizeSearch } from '../storefront/state'
 import './Admin.css'
 
+const moduleGroups = [
+  { title: 'Tổng quan', ids: ['dashboard', 'statistics', 'ai-local'] },
+  { title: 'Hàng hóa & cửa hàng', ids: ['products', 'product-views', 'inventory', 'logistics', 'appearance'] },
+  { title: 'Khách hàng', ids: ['customers', 'support', 'rewards-wheel'] },
+  { title: 'Vận hành', ids: ['order-types', 'staff', 'overtime'] },
+]
+const moduleById = new Map(adminModules.map((entry) => [entry[0], entry]))
+
 function localId() {
   return globalThis.crypto?.randomUUID?.() || String(Date.now()) + '-' + String(Math.random())
 }
@@ -285,7 +293,10 @@ export default function Admin() {
         <a className="admin-brand" href="/admin">store<span>.</span><small>ADMIN</small></a>
         <div className="admin-sidebar__profile"><span>{String(session.username || 'A').slice(0, 1).toUpperCase()}</span><div><b>{session.username}</b><small>Quản trị viên</small></div></div>
         <nav aria-label="Điều hướng quản trị">
-          {adminModules.map(([id, label, icon]) => <button key={id} type="button" aria-current={activeModule === id ? 'page' : undefined} className={activeModule === id ? 'is-active' : ''} onClick={() => setActiveModule(id)}><span aria-hidden="true">{icon}</span>{label}</button>)}
+          {moduleGroups.map((group) => <div className="admin-nav-group" key={group.title}><p>{group.title}</p>{group.ids.map((id) => {
+            const [, label, icon] = moduleById.get(id)
+            return <button key={id} type="button" aria-current={activeModule === id ? 'page' : undefined} className={activeModule === id ? 'is-active' : ''} onClick={() => setActiveModule(id)}><span aria-hidden="true">{icon}</span>{label}</button>
+          })}</div>)}
         </nav>
         <div className="admin-sidebar__footer"><a href={import.meta.env?.VITE_STOREFRONT_URL || 'http://localhost:5173'}>↗ Xem cửa hàng</a><button type="button" onClick={logout}>Đăng xuất</button></div>
       </aside>
@@ -301,7 +312,7 @@ export default function Admin() {
           <div className="admin-header__actions"><span className="admin-live-dot">● Hệ thống local</span><button type="button" onClick={logout}>Đăng xuất</button></div>
         </header>
         {pageError && <p className="admin-error" role="alert">{pageError}</p>}
-        {activeModule !== 'ai-local' && <AdminModule module={activeModule} csrfToken={session.csrfToken} />}
+        {activeModule !== 'ai-local' && <AdminModule module={activeModule} csrfToken={session.csrfToken} onNavigate={setActiveModule} />}
         {activeModule === 'ai-local' && <>
           <section className="admin-meta" aria-label="Cấu hình AI">
             <div><small>Model</small><strong>{settings?.model || 'qwen3.5:4b'}</strong></div>

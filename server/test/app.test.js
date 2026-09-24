@@ -401,3 +401,20 @@ test('admin offers feed public catalog and product views without exposing admin 
     assert.equal(adminCatalog.products.find((item) => item.id === id).discountPercent, 20)
   })
 })
+
+test('admin top-view report is private and ranks viewed products', async () => {
+  await withServer(async ({ baseUrl, storeDb }) => {
+    const unauthenticated = await fetch(baseUrl + '/api/admin/product-views')
+    assert.equal(unauthenticated.status, 401)
+    const { cookie } = await createAdminSession(baseUrl, storeDb)
+    const viewed = await fetch(baseUrl + '/api/storefront/products/1/view', { method: 'POST' })
+    assert.equal(viewed.status, 200)
+    const response = await fetch(baseUrl + '/api/admin/product-views', { headers: { cookie } })
+    assert.equal(response.status, 200)
+    const report = await response.json()
+    assert.equal(report.products.length, 4)
+    assert.equal(report.products[0].id, '1')
+    assert.equal(report.products[0].viewCount, 1)
+    assert.equal(report.totalViews, 1)
+  })
+})

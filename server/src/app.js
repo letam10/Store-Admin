@@ -1,4 +1,5 @@
 import express from 'express'
+import { products as originalProducts } from '../../shared/products.js'
 import { config, ALLOWED_CONTEXT_SIZES } from './config.js'
 import { StoreDb } from './db.js'
 import { ContextBudgetError, collectProductHints, prepareConversationContext } from './context.js'
@@ -527,6 +528,23 @@ export function createApp(overrides = {}) {
   app.get('/api/admin/products', requireAdmin, (req, res) => {
     const products = storeDb.listCatalogProducts()
     res.json({ total: products.length, products })
+  })
+
+  app.get('/api/admin/product-views', requireAdmin, (req, res) => {
+    const original = originalProducts.map((product) => ({
+      id: String(product.id), name: product.name, category: product.category,
+      image: null, symbol: product.symbol,
+      viewCount: storeDb.getProductViewCount(String(product.id)),
+    }))
+    const imported = storeDb.listCatalogProducts().map(({ id, name, category, image, viewCount }) => ({ id, name, category, image, viewCount }))
+    const products = [...original, ...imported]
+      .map((product, index) => ({ ...product, index }))
+      .sort((a, b) => b.viewCount - a.viewCount || a.index - b.index)
+      .slice(0, 20).map((entry, rank) => ({
+        id: entry.id, name: entry.name, category: entry.category, image: entry.image,
+        symbol: entry.symbol, viewCount: entry.viewCount, rank: rank + 1,
+      }))
+    res.json({ products, totalViews: storeDb.totalProductViews() })
   })
 
   app.patch('/api/admin/products/:id/offer', requireAdmin, requireCsrf, (req, res) => {
