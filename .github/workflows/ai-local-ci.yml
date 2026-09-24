@@ -1,0 +1,80 @@
+name: ai-local-ci
+
+on:
+  push:
+    branches:
+      - feat/ai-local
+      - main
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Pin npm
+        run: npm install --global npm@11.17.0
+
+      - name: Verify runtime
+        run: |
+          node -e "if (process.versions.node !== '24.19.0') process.exit(1)"
+          test "$(npm --version)" = "11.17.0"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Frontend regression tests
+        run: npm test
+
+      - name: Backend app regressions
+        working-directory: server
+        run: timeout 30s node --test test/app.test.js
+
+      - name: Backend context regressions
+        working-directory: server
+        run: timeout 30s node --test test/context.test.js
+
+      - name: Backend Ollama HTTP regressions
+        working-directory: server
+        run: timeout 30s node --test test/ollama-http.test.js
+
+      - name: Backend date regressions
+        working-directory: server
+        run: timeout 30s node --test test/dates.test.js
+
+      - name: Backend knowledge/data regressions
+        working-directory: server
+        run: timeout 30s node --test test/knowledge-db.test.js
+
+      - name: Backend security/queue regressions
+        working-directory: server
+        run: timeout 30s node --test test/security-queue.test.js
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
