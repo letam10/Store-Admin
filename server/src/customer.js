@@ -79,6 +79,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       source TEXT NOT NULL, created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_customer_vouchers_owner ON customer_vouchers(customer_id, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_customer_vouchers_expiry ON customer_vouchers(expires_at);
     CREATE TABLE IF NOT EXISTS customer_favorites (
       customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
       product_id TEXT NOT NULL, created_at TEXT NOT NULL,
