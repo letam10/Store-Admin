@@ -22,4 +22,4 @@ Node 24.19.0, npm 11.17.0 như Store; không tự nâng runtime.
 
 ## Khách trên cloud, backend local
 Store là frontend static. Ưu tiên reverse proxy HTTPS cùng origin: /api/support/* từ cloud tới backend local qua tunnel có kiểm soát. Chặn /api/admin/* ở cổng public; admin dùng mạng riêng. Không public cổng Ollama hoặc SQLite. Localhost trên trình duyệt khách là máy khách, không phải máy chủ của bạn.
-Chưa mở tunnel, firewall, DNS hoặc deploy. Backend local phải bật thì tính năng gọi API mới hoạt động. Xem Store/DEPLOYMENT.md để chọn cấu hình cookie/CORS phù hợp.
+Chưa mở tunnel, firewall, DNS hoặc deploy. Backend local phải bật thì tính năng gọi API mới hoạt động. Xem Store/DEPLOYMENT.md để chọn cấu hình cookie/CORS phù hợp
