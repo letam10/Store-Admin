@@ -5,7 +5,7 @@ import { AdminCustomers, AdminFavorites, AdminOrders, AdminReviews, AdminVoucher
 import './AdminModules.css'
 
 const datasets={
-  customers:{title:'Quản lý khách hàng',description:'Theo dõi tài khoản, phân nhóm và trạng thái chăm sóc.',columns:['Khách hàng','Nhóm','Đơn gần nhất','Trạng thái'],rows:[['Nguyễn An','Thân thiết','ST-1048','Đang hoạt động'],['Trần Minh','Mới','ST-1046','Cần chăm sóc'],['Lê Hương','VIP','ST-1032','Ưu tiên']]},
+  customers:{title:'Quản lý khách hàng',description:'Theo dõi tài khoản, phân nhóm và trạng thái chăm sóc.',columns:['Khách hàng','Nhóm','Đơn gần nhất','Trạng thái'],rows:[['Nguyễn An','Thân thiết','ST-1048','Đang hoạt động'],['Trần Minh','Mới','ST-1046','Cần chăm sóc'],['Lê Hương','Vàng','ST-1032','Ưu tiên']]},
   products:{title:'Quản lý hàng hóa',description:'Danh mục sản phẩm, giá niêm yết và trạng thái bán.',columns:['Sản phẩm','Danh mục','Giá','Trạng thái'],rows:[['Tai nghe Everyday','Công nghệ','890.000 ₫','Đang bán'],['Túi Everyday Tote','Phụ kiện','249.000 ₫','Đang bán'],['Đồng hồ Minimal','Phụ kiện','1.290.000 ₫','Đang bán']]},
   logistics:{title:'Quản lý lưu thông',description:'Theo dõi luân chuyển hàng giữa kho, cửa hàng và giao vận.',columns:['Mã','Tuyến','Tiến độ','Cập nhật'],rows:[['MV-221','Kho A → Store Central','72%','10 phút trước'],['MV-220','Store East → Kho A','Đã nhận','35 phút trước'],['MV-219','Kho A → Đơn online','Đang giao','1 giờ trước']]},
   inventory:{title:'Xuất nhập kho',description:'Giao diện kiểm soát phiếu nhập, phiếu xuất và tồn dự kiến.',columns:['Phiếu','Loại','Kho','Số lượng'],rows:[['IN-082','Nhập','Kho A','+128'],['OUT-117','Xuất','Kho A','-32'],['OUT-116','Xuất','Kho B','-18']]},

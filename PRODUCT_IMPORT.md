@@ -2,6 +2,7 @@
 
 - Nguồn dữ liệu mẫu: [Mock E-Commerce API](https://store.halukaksoy.dev/api/products), danh mục cố định có phân trang. Tên, ảnh và giá USD đầu vào được lấy qua API; dữ liệu này chỉ phục vụ dựng giao diện.
 - Ảnh gốc: [Amazon Berkeley Objects](https://amazon-berkeley-objects.s3.amazonaws.com/index.html), giấy phép [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Store đã chọn lọc và tải bản ảnh nhỏ vào hai thư mục `public/products/imported/`; cần giữ ghi nhận nguồn khi hiển thị.
+- Trang chi tiết có ảnh phụ thực từ cùng bộ dữ liệu cho 377/500 sản phẩm nhập; 123 sản phẩm còn lại chỉ có ảnh chính vì nguồn không cung cấp ảnh phụ hợp lệ. Ảnh phụ nằm trong `Store/public/products/gallery/`, thông số và mô tả có trong bản tĩnh. Không dùng ảnh lặp để giả nhiều góc.
 - Giá API là xu USD. Giá VND hiển thị được quy đổi theo **tỷ lệ minh họa cố định 25.000 ₫/USD**, làm tròn đến 1.000 ₫. Đây không phải báo giá hoặc tồn kho thực.
 - Dữ liệu được lưu trong bảng `catalog_products` của SQLite theo `DB_PATH` (mặc định `server/data/store.sqlite`). Bản xuất tĩnh cho Store nằm ở `../Store/src/data/imported-products.json`; trang Store hiện hiển thị 500 mục nhập và 4 mục demo có sẵn.
 - Ngày 24/09/2026 bổ sung 300 mục: 65 điện tử (ưu tiên máy tính, laptop và linh kiện), 150 sản phẩm nhóm Home và 85 đồ gia dụng chọn từ nhóm Lifestyle. Mã nguồn và ảnh được kiểm tra riêng; không ghi đè 200 mục trước đó.
