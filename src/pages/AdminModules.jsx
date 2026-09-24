@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { apiJson } from '../api/chat'
 import { normalizeSearch } from '../storefront/state'
 import { demoVouchers, membershipPlans } from '../storefront/promotions'
 import './AdminModules.css'
@@ -15,6 +16,69 @@ const datasets={
   'rewards-wheel':{title:'Chế độ quay thưởng',description:'Thiết kế chương trình mini-game và giới hạn phần thưởng.',columns:['Chiến dịch','Phần thưởng','Ngân sách','Trạng thái'],rows:[['Cuối tuần vui vẻ','Voucher 10%','2.000.000 ₫','Nháp'],['Khách thân thiết','Quà ngẫu nhiên','5.000.000 ₫','Tạm dừng']]},
   staff:{title:'Quản lý nhân viên',description:'Danh sách nhân viên, vai trò và ca làm việc.',columns:['Nhân viên','Vai trò','Ca hôm nay','Trạng thái'],rows:[['Mai Anh','CSKH','08:00–17:00','Đang làm'],['Quốc Bảo','Kho','13:00–22:00','Sắp vào ca'],['Thùy Linh','Cửa hàng','09:00–18:00','Đang làm']]},
   overtime:{title:'Tăng ca & khen thưởng',description:'Theo dõi đề xuất OT và ghi nhận thành tích nhân viên.',columns:['Nhân viên','Hạng mục','Thời lượng/Điểm','Trạng thái'],rows:[['Quốc Bảo','Tăng ca','2 giờ','Chờ duyệt'],['Mai Anh','Khen thưởng','120 điểm','Đã duyệt'],['Thùy Linh','Tăng ca','1.5 giờ','Đã duyệt']]},
+}
+
+function ProductOfferRow({ product, csrfToken, onSaved }) {
+  const [discountPercent, setDiscountPercent] = useState(product.discountPercent || 0)
+  const [stockCount, setStockCount] = useState(product.stockCount === null ? '' : String(product.stockCount))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState(false)
+  async function submit(event) {
+    event.preventDefault()
+    setError('')
+    setSaved(false)
+    setSaving(true)
+    try {
+      const offer = { discountPercent: Number(discountPercent), stockCount: stockCount === '' ? null : Number(stockCount) }
+      await apiJson('/api/admin/products/' + encodeURIComponent(product.id) + '/offer', {
+        method: 'PATCH', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(offer),
+      })
+      onSaved(product.id, offer)
+      setSaved(true)
+    } catch (failure) { setError(failure.message || 'Không lưu được ưu đãi.') }
+    finally { setSaving(false) }
+  }
+  return <tr>
+    <td><div className="admin-product-cell"><img src={product.image} alt="" width="44" height="44" loading="lazy" /><span>{product.name}</span></div></td>
+    <td>{product.category}</td><td>{new Intl.NumberFormat('vi-VN').format(product.price)} ₫</td>
+    <td><form id={'offer-' + product.id} className="admin-offer-form" onSubmit={submit}>
+      <label>Giảm %<input aria-label={'Giảm giá ' + product.name} type="number" min="0" max="90" step="1" value={discountPercent} onChange={(event) => setDiscountPercent(event.target.value)} required /></label>
+      <label>Tồn kho<input aria-label={'Tồn kho ' + product.name} type="number" min="0" max="999999" step="1" value={stockCount} onChange={(event) => setStockCount(event.target.value)} placeholder="Chưa rõ" /></label>
+      <button type="submit" disabled={saving}>{saving ? 'Đang lưu…' : 'Lưu'}</button>
+      {saved && <small role="status">Đã lưu</small>}{error && <small role="alert">{error}</small>}
+    </form></td><td>{product.viewCount || 0}</td>
+  </tr>
+}
+
+function ProductsCatalog({ csrfToken }) {
+  const [products, setProducts] = useState([])
+  const [filter, setFilter] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const controller = new AbortController()
+    apiJson('/api/admin/products', { signal: controller.signal })
+      .then((payload) => setProducts(payload.products || []))
+      .catch((failure) => { if (!controller.signal.aborted) setError(failure.message) })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [])
+
+  const visible = useMemo(() => {
+    const needle = normalizeSearch(filter).trim()
+    return needle ? products.filter((product) => normalizeSearch(product.name + ' ' + product.category).includes(needle)) : products
+  }, [filter, products])
+
+  return <section className="admin-module-card">
+    <div className="admin-module-head"><div><p className="admin-eyebrow">DANH MỤC DEMO</p><h2>Quản lý giá và giảm giá</h2><p>Giảm giá và tồn kho demo lưu trong SQLite, Store đọc qua API. Để trống tồn kho nếu chưa rõ; 0 là hết hàng.</p></div><span className="admin-preview-badge">{products.length} sản phẩm</span></div>
+    <div className="admin-module-toolbar"><label><span className="sr-only">Tìm sản phẩm</span><input type="search" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Tìm tên hoặc danh mục…" /></label><span>{visible.length}/{products.length} mục</span></div>
+    {loading && <p>Đang tải sản phẩm…</p>}
+    {error && <p role="alert">Không tải được danh mục: {error}</p>}
+    {!loading && !error && <div className="admin-table-wrap"><table><caption className="sr-only">Sản phẩm demo đã nhập</caption><thead><tr><th>Sản phẩm</th><th>Danh mục</th><th>Giá gốc demo</th><th>Giảm giá / tồn kho</th><th>Lượt xem</th></tr></thead><tbody>{visible.map((product) => <ProductOfferRow key={product.id} product={product} csrfToken={csrfToken} onSaved={(id, offer) => setProducts((current) => current.map((item) => item.id === id ? { ...item, ...offer } : item))} />)}</tbody></table>{visible.length === 0 && <p className="admin-empty">Không có sản phẩm phù hợp.</p>}</div>}
+    <p className="admin-demo-note">Ảnh từ <a href="https://amazon-berkeley-objects.s3.amazonaws.com/index.html" target="_blank" rel="noopener noreferrer">Amazon Berkeley Objects</a> (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>). Dữ liệu này chưa phải hàng đang kinh doanh.</p>
+  </section>
 }
 
 function Dashboard(){
@@ -123,7 +187,7 @@ function OvertimeRewardsPreview(){
  </section>
 }
 
-export default function AdminModule({module}){
+export default function AdminModule({module,csrfToken}){
  const [filter,setFilter]=useState('')
  const data=datasets[module]||datasets.statistics
  const rows=useMemo(()=>{
@@ -132,6 +196,7 @@ export default function AdminModule({module}){
    return data.rows.filter((row)=>normalizeSearch(row.join(' ')).includes(needle))
  },[data,filter])
  if(module==='dashboard')return <Dashboard/>
+ if(module==='products')return <ProductsCatalog csrfToken={csrfToken}/>
  if(module==='customers')return <CustomersPreview/>
  if(module==='rewards-wheel')return <RewardsWheelPreview/>
  if(module==='appearance')return <AppearancePreview/>

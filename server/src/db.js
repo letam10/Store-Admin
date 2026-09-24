@@ -131,6 +131,31 @@ export class StoreDb {
         refund_amount INTEGER NOT NULL DEFAULT 0 CHECK(refund_amount >= 0),
         is_demo INTEGER NOT NULL DEFAULT 0
       );
+
+      CREATE TABLE IF NOT EXISTS catalog_products (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        price INTEGER NOT NULL CHECK(price >= 0),
+        description TEXT NOT NULL,
+        image TEXT NOT NULL,
+        features_json TEXT NOT NULL DEFAULT '[]',
+        tone TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        label TEXT NOT NULL,
+        source_url TEXT NOT NULL,
+        source_price_cents INTEGER NOT NULL CHECK(source_price_cents >= 0),
+        source_currency TEXT NOT NULL,
+        imported_at TEXT NOT NULL,
+        UNIQUE(source, source_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_catalog_products_category ON catalog_products(category, name);
+      CREATE TABLE IF NOT EXISTS product_views (
+        product_id TEXT PRIMARY KEY,
+        view_count INTEGER NOT NULL DEFAULT 0 CHECK(view_count >= 0)
+      );
     `)
 
     const columns = this.db.prepare('PRAGMA table_info(conversations)').all().map((column) => column.name)
@@ -139,6 +164,12 @@ export class StoreDb {
     }
     const turnColumns = this.db.prepare('PRAGMA table_info(chat_turns)').all().map((column) => column.name)
     if (!turnColumns.includes('assistant_message_id')) this.db.exec('ALTER TABLE chat_turns ADD COLUMN assistant_message_id INTEGER')
+    const productColumns = this.db.prepare('PRAGMA table_info(catalog_products)').all().map((column) => column.name)
+    if (!productColumns.includes('discount_percent')) {
+      this.db.exec('ALTER TABLE catalog_products ADD COLUMN discount_percent INTEGER NOT NULL DEFAULT 0 CHECK(discount_percent BETWEEN 0 AND 90)')
+      this.db.prepare('UPDATE catalog_products SET discount_percent = 15 WHERE id IN (SELECT id FROM catalog_products ORDER BY rowid LIMIT 8)').run()
+    }
+    if (!productColumns.includes('stock_count')) this.db.exec('ALTER TABLE catalog_products ADD COLUMN stock_count INTEGER CHECK(stock_count IS NULL OR stock_count >= 0)')
   }
 
   claimBackend() {
@@ -170,6 +201,78 @@ export class StoreDb {
       for (const row of rows) insert.run(...row)
     })
     transaction(DEMO_ORDERS)
+  }
+
+  upsertCatalogProducts(products) {
+    const upsert = this.db.prepare(`
+      INSERT INTO catalog_products (
+        id, source, source_id, name, category, price, description, image,
+        features_json, tone, symbol, label, source_url, source_price_cents,
+        source_currency, imported_at, discount_percent
+      ) VALUES (
+        @id, @source, @sourceId, @name, @category, @price, @description, @image,
+        @featuresJson, @tone, @symbol, @label, @sourceUrl, @sourcePriceCents,
+        @sourceCurrency, @importedAt, @discountPercent
+      )
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name, category = excluded.category, price = excluded.price,
+        description = excluded.description, image = excluded.image,
+        features_json = excluded.features_json, tone = excluded.tone,
+        symbol = excluded.symbol, label = excluded.label, source_url = excluded.source_url,
+        source_price_cents = excluded.source_price_cents,
+        source_currency = excluded.source_currency, imported_at = excluded.imported_at
+    `)
+    this.db.transaction((items) => {
+      for (const [index, product] of items.entries()) {
+        upsert.run({
+          ...product,
+          featuresJson: JSON.stringify(product.features),
+          discountPercent: product.discountPercent ?? (index < 8 ? 15 : 0),
+        })
+      }
+    })(products)
+  }
+
+  listCatalogProducts() {
+    return this.db.prepare('SELECT p.*, COALESCE(v.view_count, 0) AS view_count FROM catalog_products p LEFT JOIN product_views v ON v.product_id = p.id ORDER BY p.category, p.name').all().map((row) => ({
+      id: row.id,
+      source: row.source,
+      sourceId: row.source_id,
+      name: row.name,
+      category: row.category,
+      price: row.price,
+      description: row.description,
+      image: row.image,
+      features: parseJson(row.features_json, []),
+      tone: row.tone,
+      symbol: row.symbol,
+      label: row.label,
+      sourceUrl: row.source_url,
+      sourcePriceCents: row.source_price_cents,
+      sourceCurrency: row.source_currency,
+      importedAt: row.imported_at,
+      discountPercent: row.discount_percent,
+      stockCount: row.stock_count,
+      viewCount: row.view_count,
+    }))
+  }
+
+  storefrontCatalog() {
+    const rows = this.db.prepare('SELECT p.id, p.discount_percent, p.stock_count, COALESCE(v.view_count, 0) AS view_count FROM catalog_products p LEFT JOIN product_views v ON v.product_id = p.id').all()
+    const featured = this.db.prepare("SELECT product_id AS id, view_count FROM product_views WHERE product_id IN ('1', '2', '3', '4')").all()
+    return [...rows.map((row) => ({ id: row.id, discountPercent: row.discount_percent, stockCount: row.stock_count, viewCount: row.view_count })), ...featured.map((row) => ({ id: row.id, discountPercent: 0, stockCount: null, viewCount: row.view_count }))]
+  }
+
+  updateCatalogOffer(id, { discountPercent, stockCount }) {
+    const result = this.db.prepare('UPDATE catalog_products SET discount_percent = ?, stock_count = ? WHERE id = ?').run(discountPercent, stockCount, id)
+    return result.changes > 0
+  }
+
+  recordProductView(id) {
+    const exists = /^[1-4]$/.test(id) || Boolean(this.db.prepare('SELECT 1 FROM catalog_products WHERE id = ?').get(id))
+    if (!exists) return null
+    this.db.prepare('INSERT INTO product_views (product_id, view_count) VALUES (?, 1) ON CONFLICT(product_id) DO UPDATE SET view_count = view_count + 1').run(id)
+    return this.db.prepare('SELECT view_count FROM product_views WHERE product_id = ?').get(id).view_count
   }
 
   clearOrders() {

@@ -12,6 +12,7 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "create-admin": "node scripts/create-admin.js",
+    "import:demo-products": "node scripts/import-demo-products.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {

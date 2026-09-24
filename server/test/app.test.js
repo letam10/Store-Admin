@@ -374,3 +374,30 @@ test('failed turns restore retry metadata and cannot retry behind a newer questi
     assert.equal(ollama.calls.length, 2)
   }, { ollama })
 })
+
+test('admin offers feed public catalog and product views without exposing admin writes', async () => {
+  await withServer(async ({ baseUrl, storeDb }) => {
+    const id = 'demo-11111111-1111-1111-1111-111111111111'
+    storeDb.upsertCatalogProducts([{
+      id, source: 'mock-store-api', sourceId: '11111111-1111-1111-1111-111111111111',
+      name: 'Test product', category: 'Điện tử', price: 100000, description: 'Demo',
+      image: '/products/imported/test.jpg', features: [], tone: 'blue', symbol: '◈', label: 'Demo',
+      sourceUrl: 'https://example.com/test', sourcePriceCents: 400, sourceCurrency: 'USD', importedAt: '2026-09-24T00:00:00.000Z',
+    }])
+    const { cookie, body } = await createAdminSession(baseUrl, storeDb)
+    const offerUrl = baseUrl + '/api/admin/products/' + id + '/offer'
+    const invalid = await fetch(offerUrl, { method: 'PATCH', headers: { cookie, 'content-type': 'application/json', 'x-csrf-token': body.csrfToken }, body: JSON.stringify({ discountPercent: 100, stockCount: 0 }) })
+    assert.equal(invalid.status, 400)
+    const noCsrf = await fetch(offerUrl, { method: 'PATCH', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ discountPercent: 20, stockCount: 0 }) })
+    assert.equal(noCsrf.status, 403)
+    const saved = await fetch(offerUrl, { method: 'PATCH', headers: { cookie, 'content-type': 'application/json', 'x-csrf-token': body.csrfToken }, body: JSON.stringify({ discountPercent: 20, stockCount: 0 }) })
+    assert.equal(saved.status, 200)
+    const viewed = await fetch(baseUrl + '/api/storefront/products/' + id + '/view', { method: 'POST' })
+    assert.equal((await viewed.json()).viewCount, 1)
+    const publicCatalog = await (await fetch(baseUrl + '/api/storefront/catalog')).json()
+    assert.deepEqual(publicCatalog.products.find((item) => item.id === id), { id, discountPercent: 20, stockCount: 0, viewCount: 1 })
+    assert.equal((await fetch(baseUrl + '/api/storefront/products/unknown/view', { method: 'POST' })).status, 404)
+    const adminCatalog = await (await fetch(baseUrl + '/api/admin/products', { headers: { cookie } })).json()
+    assert.equal(adminCatalog.products.find((item) => item.id === id).discountPercent, 20)
+  })
+})

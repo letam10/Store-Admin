@@ -301,7 +301,7 @@ export default function Admin() {
           <div className="admin-header__actions"><span className="admin-live-dot">● Hệ thống local</span><button type="button" onClick={logout}>Đăng xuất</button></div>
         </header>
         {pageError && <p className="admin-error" role="alert">{pageError}</p>}
-        {activeModule !== 'ai-local' && <AdminModule module={activeModule} />}
+        {activeModule !== 'ai-local' && <AdminModule module={activeModule} csrfToken={session.csrfToken} />}
         {activeModule === 'ai-local' && <>
           <section className="admin-meta" aria-label="Cấu hình AI">
             <div><small>Model</small><strong>{settings?.model || 'qwen3.5:4b'}</strong></div>

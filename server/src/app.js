@@ -134,6 +134,7 @@ export function createApp(overrides = {}) {
   const loginIpLimiter = new SlidingWindowLimiter({ limit: 20, windowMs: 10 * 60 * 1000, maxKeys: 5000 })
   const loginAccountLimiter = new SlidingWindowLimiter({ limit: 5, windowMs: 10 * 60 * 1000, maxKeys: 5000 })
   const chatLimiter = new SlidingWindowLimiter({ limit: 20, windowMs: 60 * 1000, maxKeys: 5000 })
+  const viewLimiter = new SlidingWindowLimiter({ limit: 120, windowMs: 60 * 1000, maxKeys: 5000 })
   const app = express()
 
   app.disable('x-powered-by')
@@ -521,6 +522,38 @@ export function createApp(overrides = {}) {
     const validation = validateDateRange(range.from, range.to)
     if (!validation.ok) return res.status(400).json({ error: validation.code })
     res.json({ report: storeDb.calculateRevenue(range), source: 'backend-sqlite' })
+  })
+
+  app.get('/api/admin/products', requireAdmin, (req, res) => {
+    const products = storeDb.listCatalogProducts()
+    res.json({ total: products.length, products })
+  })
+
+  app.patch('/api/admin/products/:id/offer', requireAdmin, requireCsrf, (req, res) => {
+    const body = req.body
+    if (!body || typeof body !== 'object' || Array.isArray(body)
+      || Object.keys(body).sort().join(',') !== 'discountPercent,stockCount'
+      || !Number.isInteger(body.discountPercent) || body.discountPercent < 0 || body.discountPercent > 90
+      || (body.stockCount !== null && (!Number.isInteger(body.stockCount) || body.stockCount < 0 || body.stockCount > 999999))) {
+      return res.status(400).json({ error: 'INVALID_PRODUCT_OFFER' })
+    }
+    if (!storeDb.updateCatalogOffer(req.params.id, body)) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    res.json({ ok: true, id: req.params.id, ...body })
+  })
+
+  app.get('/api/storefront/catalog', (req, res) => {
+    res.set('Cache-Control', 'no-store')
+    res.json({ products: storeDb.storefrontCatalog() })
+  })
+
+  app.post('/api/storefront/products/:id/view', (req, res) => {
+    const id = String(req.params.id)
+    if (!/^(?:[1-4]|demo-[a-f0-9-]{36})$/.test(id)) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    const rate = viewLimiter.consume(req.ip)
+    if (!rate.allowed) return res.status(429).json({ error: 'RATE_LIMITED' })
+    const viewCount = storeDb.recordProductView(id)
+    if (viewCount === null) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    res.json({ id, viewCount })
   })
 
   app.get('/api/admin/conversations/:id', requireAdmin, (req, res) => {
