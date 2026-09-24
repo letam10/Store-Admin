@@ -45,15 +45,12 @@ async function productDetail(product) {
 }
 
 async function imageBytes(path) {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const response = await fetch(imageRoot + path, { signal: AbortSignal.timeout(20000) })
-      if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) return null
-      const bytes = Buffer.from(await response.arrayBuffer())
-      return bytes.length > 100 && bytes.length < 1000000 ? bytes : null
-    } catch { /* Try once more. */ }
-  }
-  return null
+  try {
+    const response = await fetch(imageRoot + path, { signal: AbortSignal.timeout(8000) })
+    if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) return null
+    const bytes = Buffer.from(await response.arrayBuffer())
+    return bytes.length > 100 && bytes.length < 1000000 ? bytes : null
+  } catch { return null }
 }
 
 async function main() {
@@ -73,29 +70,29 @@ async function main() {
     const [id, , , path] = line.split(',')
     if (ids.has(id) && /^[0-9a-f]{2}\/[0-9a-f]{8}\.(jpg|png)$/.test(path || '')) paths.set(id, path)
   }
-  const updates = []
-  for (const product of products) {
+  async function enrich(product) {
     const detail = details.get(product.sourceId)
-    if (!detail) { updates.push({ ...product, images: product.images || [product.image] }); continue }
-    const candidates = (detail.other_image_ids || []).slice(0, 8).filter((id) => paths.has(id))
-    const gallery = []
-    for (let index = 0; index < candidates.length && gallery.length < 3; index += 4) {
-      const batch = candidates.slice(index, index + 4)
-      const loaded = await Promise.all(batch.map(async (id) => ({ id, bytes: await imageBytes(paths.get(id)) })))
-      for (const item of loaded) if (item.bytes && gallery.length < 3) gallery.push(item)
-    }
+    if (!detail) return { ...product, images: product.images || [product.image] }
+    const candidates = (detail.other_image_ids || []).filter((id) => paths.has(id)).slice(0, 3)
+    const loaded = await Promise.all(candidates.map(async (id) => ({ id, bytes: await imageBytes(paths.get(id)) })))
+    const gallery = loaded.filter((item) => item.bytes).slice(0, 2)
     const features = Array.isArray(detail.bullet_points)
       ? detail.bullet_points.filter((point) => typeof point === 'string' && point.trim() && point.length <= 300).slice(0, 5)
       : []
-    updates.push({ ...product,
+    const updated = { ...product,
       description: typeof detail.description === 'string' && detail.description.trim() ? detail.description.trim() : product.description,
       features: features.length ? features : product.features,
       images: [product.image, ...gallery.map((item, index) => `/products/gallery/${product.sourceId}-${index + 1}${extname(paths.get(item.id))}`)],
-    })
+    }
     gallery.forEach((item, index) => {
       item.destination = resolve(galleryDir, `${product.sourceId}-${index + 1}${extname(paths.get(item.id))}`)
     })
-    if (gallery.length) updates[updates.length - 1].galleryFiles = gallery
+    if (gallery.length) updated.galleryFiles = gallery
+    return updated
+  }
+  const updates = []
+  for (let start = 0; start < products.length; start += 16) {
+    updates.push(...await Promise.all(products.slice(start, start + 16).map(enrich)))
   }
   mkdirSync(galleryDir, { recursive: true })
   let imageCount = 0
