@@ -30,7 +30,16 @@ function cookiePair(response) {
 
 function ownerFromSupportCookie(cookie) {
   const raw = decodeURIComponent(cookie.split('=')[1])
-  return 'support:' + hashToken(raw)
+  return 'support:1:' + hashToken(raw)
+}
+
+let currentSupportAuth = null
+function fetchSupport(url, options = {}) {
+  if (!currentSupportAuth) throw new Error('Support test account is missing')
+  const headers = { ...(options.headers || {}) }
+  headers.cookie = [currentSupportAuth.cookie, headers.cookie].filter(Boolean).join('; ')
+  if (options.method === 'POST') headers['x-csrf-token'] = currentSupportAuth.csrfToken
+  return fetch(url, { ...options, headers })
 }
 
 function parseEvents(text) {
@@ -49,8 +58,12 @@ async function withServer(run, { ollama = new MockOllama(), queue, seedDemoData 
   const server = app.listen(0, '127.0.0.1')
   await new Promise((resolve) => server.once('listening', resolve))
   const baseUrl = 'http://127.0.0.1:' + server.address().port
+  const register = await fetch(baseUrl + '/api/customer/register', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: 'support-user', email: 'support@example.com', password: 'support-password-123' }) })
+  currentSupportAuth = { cookie: cookiePair(register), csrfToken: (await register.json()).account.csrfToken }
   try { await run({ baseUrl, storeDb, ollama }) }
   finally {
+    currentSupportAuth = null
     await new Promise((resolve) => server.close(resolve))
     storeDb.close()
     rmSync(directory, { recursive: true, force: true })
@@ -70,12 +83,12 @@ async function createAdminSession(baseUrl, storeDb, username = 'owner') {
 
 test('support forces think=false and client cannot choose privileged fields', async () => {
   await withServer(async ({ baseUrl, ollama }) => {
-    const invalid = await fetch(baseUrl + '/api/support/chat', {
+    const invalid = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: 'Xin chào', think: true }),
     })
     assert.equal(invalid.status, 400)
-    const response = await fetch(baseUrl + '/api/support/chat', {
+    const response = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: 'Xin chào', requestId: 'request_support_001' }),
     })
@@ -88,7 +101,7 @@ test('support forces think=false and client cannot choose privileged fields', as
 test('missing policy is backend deterministic and malicious model is never called', async () => {
   const ollama = new MockOllama([{ text: 'Đổi miễn phí và hoàn tiền 100%.' }])
   await withServer(async ({ baseUrl }) => {
-    const response = await fetch(baseUrl + '/api/support/chat', {
+    const response = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: 'Chính sách đổi trả và hoàn tiền?', requestId: 'request_policy_001' }),
     })
@@ -101,7 +114,7 @@ test('missing policy is backend deterministic and malicious model is never calle
 test('wrong product price from model is blocked while backend price stays verified', async () => {
   const ollama = new MockOllama([{ text: 'Tai nghe này chỉ 1 đồng, rất đáng mua.' }])
   await withServer(async ({ baseUrl }) => {
-    const response = await fetch(baseUrl + '/api/support/chat', {
+    const response = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: 'Tư vấn tai nghe Everyday', requestId: 'request_product_001' }),
     })
@@ -151,14 +164,14 @@ test('same requestId replays completed turn without duplicate generation or user
   const ollama = new MockOllama([{ text: 'Một câu trả lời.' }])
   await withServer(async ({ baseUrl, storeDb }) => {
     const requestId = 'request_retry_001'
-    const first = await fetch(baseUrl + '/api/support/chat', {
+    const first = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: 'Xin chào', requestId }),
     })
     const cookie = cookiePair(first)
     const events = parseEvents(await first.text())
     const conversationId = events.find((event) => event.type === 'conversation').conversationId
-    const second = await fetch(baseUrl + '/api/support/chat', {
+    const second = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json', cookie },
       body: JSON.stringify({ message: 'Xin chào', conversationId, requestId }),
     })
@@ -175,7 +188,7 @@ test('same conversation rejects concurrent second turn', async () => {
   const ollama = new MockOllama([{ wait, text: 'x' }])
   await withServer(async ({ baseUrl }) => {
     const controller = new AbortController()
-    const first = await fetch(baseUrl + '/api/support/chat', {
+    const first = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', signal: controller.signal,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: 'Xin chào', requestId: 'request_concurrent_1' }),
@@ -192,7 +205,7 @@ test('same conversation rejects concurrent second turn', async () => {
         try { const event = JSON.parse(line); if (event.type === 'conversation') conversationId = event.conversationId } catch { /* partial line; keep reading */ }
       }
     }
-    const second = await fetch(baseUrl + '/api/support/chat', {
+    const second = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json', cookie },
       body: JSON.stringify({ message: 'Lượt hai', conversationId, requestId: 'request_concurrent_2' }),
     })
@@ -209,21 +222,21 @@ test('queue full and abort while queued do not create turns, next request can pr
   const ollama = new MockOllama([{ wait, text: 'first' }, { text: 'third' }])
   const queue = new GenerationQueue({ concurrency: 1, maxQueued: 1 })
   await withServer(async ({ baseUrl, storeDb }) => {
-    const first = fetch(baseUrl + '/api/support/chat', {
+    const first = fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json', cookie: 'store_support_id=owner-a' },
       body: JSON.stringify({ message: 'first', requestId: 'request_queue_first' }),
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
 
     const abortController = new AbortController()
-    const queued = await fetch(baseUrl + '/api/support/chat', {
+    const queued = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', signal: abortController.signal,
       headers: { 'content-type': 'application/json', cookie: 'store_support_id=owner-b' },
       body: JSON.stringify({ message: 'queued', requestId: 'request_queue_abort' }),
     })
 
     // Kiểm tra queue-full khi slot chờ vẫn đang bị chiếm.
-    const full = await fetch(baseUrl + '/api/support/chat', {
+    const full = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json', cookie: 'store_support_id=owner-c' },
       body: JSON.stringify({ message: 'full', requestId: 'request_queue_full' }),
     })
@@ -239,7 +252,7 @@ test('queue full and abort while queued do not create turns, next request can pr
 
     releaseModel()
     await (await first).text()
-    const third = await fetch(baseUrl + '/api/support/chat', {
+    const third = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json', cookie: 'store_support_id=owner-d' },
       body: JSON.stringify({ message: 'third', requestId: 'request_queue_third' }),
     })
@@ -286,7 +299,7 @@ test('model prose and extra JSON fields cannot publish invented business claims'
   ]
   for (const text of malicious) {
     await withServer(async ({ baseUrl }) => {
-      const response = await fetch(baseUrl + '/api/support/chat', {
+      const response = await fetchSupport(baseUrl + '/api/support/chat', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ message: 'Tư vấn tai nghe', requestId: 'contract_bad_request' }),
       })
@@ -300,14 +313,14 @@ test('model prose and extra JSON fields cannot publish invented business claims'
 
 test('verified product metadata survives history reload without duplicate assistant', async () => {
   await withServer(async ({ baseUrl, ollama }) => {
-    const response = await fetch(baseUrl + '/api/support/chat', {
+    const response = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: 'Tư vấn tai nghe', requestId: 'history_contract_001' }),
     })
     const cookie = cookiePair(response)
     const events = parseEvents(await response.text())
     const id = events.find((item) => item.type === 'conversation').conversationId
-    const restored = await (await fetch(baseUrl + '/api/support/conversations/' + id, { headers: { cookie } })).json()
+    const restored = await (await fetchSupport(baseUrl + '/api/support/conversations/' + id, { headers: { cookie } })).json()
     assert.equal(restored.messages.length, 2)
     assert.equal(restored.messages[1].verified.items[0].price, 890000)
     assert.equal(restored.messages[1].requestId, 'history_contract_001')
@@ -319,7 +332,7 @@ test('verified product metadata survives history reload without duplicate assist
 test('failed database completion never publishes done or business content', async () => {
   await withServer(async ({ baseUrl, storeDb }) => {
     storeDb.completeTurn = () => false
-    const response = await fetch(baseUrl + '/api/support/chat', {
+    const response = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: 'Chính sách đổi trả?', requestId: 'db_failed_completion' }),
     })
@@ -349,23 +362,23 @@ test('admin report history survives reload and contract rejects word-only invent
 test('failed turns restore retry metadata and cannot retry behind a newer question', async () => {
   const ollama = new MockOllama([{ error: new Error('offline') }, { text: '{"responseKey":"greeting"}' }])
   await withServer(async ({ baseUrl }) => {
-    const first = await fetch(baseUrl + '/api/support/chat', {
+    const first = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: 'Xin chào', requestId: 'failed_history_001' }),
     })
     const cookie = cookiePair(first)
     const events = parseEvents(await first.text())
     const conversationId = events.find((item) => item.type === 'conversation').conversationId
-    const history = await (await fetch(baseUrl + '/api/support/conversations/' + conversationId, { headers: { cookie } })).json()
+    const history = await (await fetchSupport(baseUrl + '/api/support/conversations/' + conversationId, { headers: { cookie } })).json()
     assert.equal(history.messages[1].status, 'error')
     assert.equal(history.messages[1].requestId, 'failed_history_001')
     assert.equal(history.messages[1].retryContent, 'Xin chào')
-    const next = await fetch(baseUrl + '/api/support/chat', {
+    const next = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json', cookie },
       body: JSON.stringify({ message: 'Chào bạn', conversationId, requestId: 'newer_history_002' }),
     })
     await next.text()
-    const oldRetry = await fetch(baseUrl + '/api/support/chat', {
+    const oldRetry = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json', cookie },
       body: JSON.stringify({ message: 'Xin chào', conversationId, requestId: 'failed_history_001' }),
     })
@@ -418,3 +431,4 @@ test('admin top-view report is private and ranks viewed products', async () => {
     assert.equal(report.totalViews, 1)
   })
 })
+

@@ -159,7 +159,7 @@ export function createApp(overrides = {}) {
       token = randomToken()
       setCookie(res, SUPPORT_COOKIE, token, { maxAge: SUPPORT_COOKIE_SECONDS, secure: config.cookieSecure })
     }
-    return 'support:' + hashToken(token)
+    return 'support:' + req.customer.id + ':' + hashToken(token)
   }
 
   function adminSession(req, res) {
@@ -186,6 +186,8 @@ export function createApp(overrides = {}) {
     if (req.get('x-csrf-token') !== req.storeAdmin.csrfToken) return res.status(403).json({ error: 'CSRF_INVALID' })
     next()
   }
+
+  const { requireCustomer, customerCsrf } = registerCustomerRoutes(app, { storeDb, config, now, requireAdmin, requireCsrf })
 
   function ownedConversation(id, kind, ownerKey) {
     if (!id) return null
@@ -453,14 +455,14 @@ export function createApp(overrides = {}) {
     })
   })
 
-  app.get('/api/support/conversations/:id', (req, res) => {
+  app.get('/api/support/conversations/:id', requireCustomer, (req, res) => {
     const ownerKey = supportOwner(req, res)
     const conversation = ownedConversation(req.params.id, 'support', ownerKey)
     if (!conversation) return res.status(404).json({ error: 'CONVERSATION_NOT_FOUND' })
     res.json({ conversationId: conversation.id, compactStatus: conversation.compact_status, messages: publicMessages(conversation.id) })
   })
 
-  app.post('/api/support/chat', (req, res) => handleChat(req, res, { kind: 'support', ownerKey: supportOwner(req, res), isAdmin: false }))
+  app.post('/api/support/chat', requireCustomer, customerCsrf, (req, res) => handleChat(req, res, { kind: 'support', ownerKey: supportOwner(req, res), isAdmin: false }))
 
   app.post('/api/admin/login', (req, res) => {
     const usernameRaw = typeof req.body?.username === 'string' ? req.body.username : ''
@@ -586,8 +588,6 @@ export function createApp(overrides = {}) {
     const ownerKey = 'admin:' + req.storeAdmin.admin_id
     return handleChat(req, res, { kind: 'admin', ownerKey, isAdmin: true })
   })
-
-  registerCustomerRoutes(app, { storeDb, config, now, requireAdmin, requireCsrf })
 
   app.use('/api', (req, res) => res.status(404).json({ error: 'NOT_FOUND' }))
   app.use((error, req, res, next) => {

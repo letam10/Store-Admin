@@ -27,8 +27,16 @@ export function tierForPoints(points) {
 
 export function rewardPrizes() { return PRIZES }
 
+export function pointsForPaidGoods(amount, tier) {
+  const basePoints = Math.floor(Math.max(0, amount) / 1000)
+  return Math.floor(basePoints * (tier === 'diamond' ? 1.5 : tier === 'gold' ? 1.2 : 1))
+}
+
 export function shippingFee({ region, distanceKm = 0, fulfillment = 'delivery' }, tier) {
-  if (fulfillment === 'pickup' || tier === 'diamond') return 0
+  if (fulfillment === 'pickup') return 0
+  if (!['hcm', 'binh-duong', 'ba-ria-vung-tau', 'hanoi', 'nearby', 'far'].includes(region) ||
+    (region === 'far' && (!Number.isInteger(distanceKm) || distanceKm < 0 || distanceKm > 3000))) throw new Error('INVALID_DELIVERY_REGION')
+  if (tier === 'diamond') return 0
   if (region === 'hcm' || region === 'binh-duong' || region === 'ba-ria-vung-tau' || region === 'hanoi') return tier === 'gold' ? 0 : 30000
   if (region === 'nearby') return 60000
   if (region === 'far' && Number.isInteger(distanceKm) && distanceKm >= 0 && distanceKm <= 3000) return 60000 + distanceKm * 1000
@@ -278,7 +286,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     if (!Number.isInteger(rating) || rating < 1 || rating > 5 || comment.length < 3 || comment.length > 2000) return res.status(400).json({ error: 'INVALID_REVIEW' })
     sql.prepare(`INSERT INTO product_reviews (customer_id, product_id, rating, comment, created_at)
       VALUES (?, ?, ?, ?, ?) ON CONFLICT(customer_id, product_id) DO UPDATE SET rating=excluded.rating,
-      comment=excluded.comment, created_at=excluded.created_at`).run(req.customer.id, id, rating, comment, now().toISOString())
+      comment=excluded.comment, admin_reply='', replied_at=NULL, created_at=excluded.created_at`).run(req.customer.id, id, rating, comment, now().toISOString())
     res.json({ ok: true })
   })
   app.post('/api/customer/spin', requireCustomer, customerCsrf, (req, res) => {
@@ -368,7 +376,8 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     res.json({ ok: true, reply })
   })
   app.get('/api/admin/customer-orders', requireAdmin, (req, res) => {
-    const orders = sql.prepare(`SELECT o.id, o.goods_total AS goodsTotal, o.shipping_fee AS shippingFee,
+    const orders = sql.prepare(`SELECT o.id, o.recipient, o.phone, o.address, o.region,
+      o.distance_km AS distanceKm, o.goods_total AS goodsTotal, o.shipping_fee AS shippingFee,
       o.total, o.status, o.created_at AS createdAt, o.points_earned AS pointsEarned, c.username
       FROM customer_orders o JOIN customers c ON c.id = o.customer_id ORDER BY o.created_at DESC LIMIT 200`).all()
     res.json({ orders })
@@ -380,8 +389,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       if (order.status === 'paid') return { alreadyPaid: true, pointsEarned: order.points_earned }
       const account = sql.prepare('SELECT * FROM customers WHERE id = ?').get(order.customer_id)
       const tier = tierForPoints(account.points)
-      const factor = tier === 'diamond' ? 1.5 : tier === 'gold' ? 1.2 : 1
-      const pointsEarned = Math.floor(Math.floor(order.goods_total / 1000) * factor)
+      const pointsEarned = pointsForPaidGoods(order.goods_total, tier)
       const before = Math.floor(account.paid_goods_total / 100000)
       const after = Math.floor((account.paid_goods_total + order.goods_total) / 100000)
       sql.prepare('UPDATE customers SET points = points + ?, paid_goods_total = paid_goods_total + ?, spin_credits = spin_credits + ? WHERE id = ?')
@@ -393,4 +401,5 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     if (!result) return res.status(404).json({ error: 'ORDER_NOT_FOUND' })
     res.json(result)
   })
+  return { requireCustomer, customerCsrf }
 }
