@@ -2,6 +2,7 @@ import express from 'express'
 import { products as originalProducts } from '../../shared/products.js'
 import { config, ALLOWED_CONTEXT_SIZES } from './config.js'
 import { StoreDb } from './db.js'
+import { registerCustomerRoutes } from './customer.js'
 import { ContextBudgetError, collectProductHints, prepareConversationContext } from './context.js'
 import { validateDateRange } from './dates.js'
 import {
@@ -585,6 +586,8 @@ export function createApp(overrides = {}) {
     const ownerKey = 'admin:' + req.storeAdmin.admin_id
     return handleChat(req, res, { kind: 'admin', ownerKey, isAdmin: true })
   })
+
+  registerCustomerRoutes(app, { storeDb, config, now, requireAdmin, requireCsrf })
 
   app.use('/api', (req, res) => res.status(404).json({ error: 'NOT_FOUND' }))
   app.use((error, req, res, next) => {
