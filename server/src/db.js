@@ -1,5 +1,5 @@
-import { mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
 
@@ -30,6 +30,7 @@ export class StoreDb {
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON')
     this.#migrate()
+    this.#seedCatalogSnapshot(path)
     if (seedDemoData) this.seedDemoOrders()
   }
 
@@ -156,6 +157,16 @@ export class StoreDb {
         product_id TEXT PRIMARY KEY,
         view_count INTEGER NOT NULL DEFAULT 0 CHECK(view_count >= 0)
       );
+      CREATE TABLE IF NOT EXISTS admin_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        module TEXT NOT NULL,
+        title TEXT NOT NULL,
+        data_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'Đang dùng',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_admin_records_module ON admin_records(module, updated_at);
     `)
 
     const columns = this.db.prepare('PRAGMA table_info(conversations)').all().map((column) => column.name)
@@ -201,6 +212,19 @@ export class StoreDb {
       for (const row of rows) insert.run(...row)
     })
     transaction(DEMO_ORDERS)
+  }
+
+  #seedCatalogSnapshot(databasePath) {
+    const snapshotPath = resolve(dirname(databasePath), 'catalog-products.json')
+    if (!existsSync(snapshotPath)) return
+    try {
+      const products = JSON.parse(readFileSync(snapshotPath, 'utf8'))
+      if (!Array.isArray(products) || products.length === 0) return
+      const current = this.db.prepare('SELECT COUNT(*) AS count FROM catalog_products').get().count
+      if (current < products.length) this.upsertCatalogProducts(products)
+    } catch {
+      // A corrupt optional snapshot must not prevent the backend from starting.
+    }
   }
 
   upsertCatalogProducts(products) {
@@ -257,15 +281,72 @@ export class StoreDb {
     }))
   }
 
-  storefrontCatalog() {
+  storefrontCatalog({ details = false } = {}) {
+    if (details) return this.listCatalogProducts()
     const rows = this.db.prepare('SELECT p.id, p.discount_percent, p.stock_count, COALESCE(v.view_count, 0) AS view_count FROM catalog_products p LEFT JOIN product_views v ON v.product_id = p.id').all()
     const featured = this.db.prepare("SELECT product_id AS id, view_count FROM product_views WHERE product_id IN ('1', '2', '3', '4')").all()
-    return [...rows.map((row) => ({ id: row.id, discountPercent: row.discount_percent, stockCount: row.stock_count, viewCount: row.view_count })), ...featured.map((row) => ({ id: row.id, discountPercent: 0, stockCount: null, viewCount: row.view_count }))]
+    const result = new Map(rows.map((row) => [String(row.id), { id: row.id, discountPercent: row.discount_percent, stockCount: row.stock_count, viewCount: row.view_count }]))
+    for (const row of featured) if (!result.has(String(row.id))) result.set(String(row.id), { id: row.id, discountPercent: 0, stockCount: null, viewCount: row.view_count })
+    return [...result.values()]
   }
 
   updateCatalogOffer(id, { discountPercent, stockCount }) {
     const result = this.db.prepare('UPDATE catalog_products SET discount_percent = ?, stock_count = ? WHERE id = ?').run(discountPercent, stockCount, id)
     return result.changes > 0
+  }
+
+  getCatalogProduct(id) {
+    return this.listCatalogProducts().find((product) => String(product.id) === String(id)) || null
+  }
+
+  updateCatalogProduct(id, patch) {
+    const allowed = ['name', 'category', 'price', 'description', 'image', 'label', 'source_url']
+    const entries = allowed.filter((key) => patch[key] !== undefined)
+    if (!entries.length) return this.getCatalogProduct(id)
+    const assignments = entries.map((key) => `${key} = ?`).join(', ')
+    const values = entries.map((key) => patch[key])
+    const result = this.db.prepare(`UPDATE catalog_products SET ${assignments} WHERE id = ?`).run(...values, id)
+    return result.changes ? this.getCatalogProduct(id) : null
+  }
+
+  deleteCatalogProduct(id) {
+    return this.db.prepare('DELETE FROM catalog_products WHERE id = ?').run(id).changes > 0
+  }
+
+  listAdminRecords(module) {
+    return this.db.prepare('SELECT id, module, title, data_json, status, created_at, updated_at FROM admin_records WHERE module = ? ORDER BY updated_at DESC, id DESC').all(module).map((row) => ({
+      id: row.id, module: row.module, title: row.title, data: parseJson(row.data_json, {}), status: row.status,
+      createdAt: row.created_at, updatedAt: row.updated_at,
+    }))
+  }
+
+  createAdminRecord({ module, title, data = {}, status = 'Đang dùng' }) {
+    const timestamp = nowIso()
+    const result = this.db.prepare('INSERT INTO admin_records (module, title, data_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(module, title, JSON.stringify(data), status, timestamp, timestamp)
+    return { id: result.lastInsertRowid, module, title, data, status, createdAt: timestamp, updatedAt: timestamp }
+  }
+
+  updateAdminRecord(id, { module, title, data = {}, status = 'Đang dùng' }) {
+    const timestamp = nowIso()
+    const result = this.db.prepare('UPDATE admin_records SET module = ?, title = ?, data_json = ?, status = ?, updated_at = ? WHERE id = ?')
+      .run(module, title, JSON.stringify(data), status, timestamp, id)
+    return result.changes ? { id: Number(id), module, title, data, status, updatedAt: timestamp } : null
+  }
+
+  deleteAdminRecord(id) {
+    return this.db.prepare('DELETE FROM admin_records WHERE id = ?').run(id).changes > 0
+  }
+
+  adminOverview() {
+    const count = (table) => {
+      try { return this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count } catch { return 0 }
+    }
+    return {
+      products: count('catalog_products'), customers: count('customers'), orders: count('customer_orders'),
+      reviews: count('product_reviews'), favorites: count('customer_favorites'), records: count('admin_records'),
+      openSupport: count('conversations'), totalViews: this.totalProductViews(),
+    }
   }
 
   recordProductView(id) {

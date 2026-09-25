@@ -4,51 +4,45 @@ import { normalizeSearch } from '../storefront/state'
 import { AdminCustomers, AdminFavorites, AdminOrders, AdminReviews, AdminVouchers } from './AdminCommerce'
 import './AdminModules.css'
 
-const datasets={
-  customers:{title:'Quản lý khách hàng',description:'Theo dõi tài khoản, phân nhóm và trạng thái chăm sóc.',columns:['Khách hàng','Nhóm','Đơn gần nhất','Trạng thái'],rows:[['Nguyễn An','Thân thiết','ST-1048','Đang hoạt động'],['Trần Minh','Mới','ST-1046','Cần chăm sóc'],['Lê Hương','Vàng','ST-1032','Ưu tiên']]},
-  products:{title:'Quản lý hàng hóa',description:'Danh mục sản phẩm, giá niêm yết và trạng thái bán.',columns:['Sản phẩm','Danh mục','Giá','Trạng thái'],rows:[['Tai nghe Everyday','Công nghệ','890.000 ₫','Đang bán'],['Túi Everyday Tote','Phụ kiện','249.000 ₫','Đang bán'],['Đồng hồ Minimal','Phụ kiện','1.290.000 ₫','Đang bán']]},
-  logistics:{title:'Quản lý lưu thông',description:'Theo dõi luân chuyển hàng giữa kho, cửa hàng và giao vận.',columns:['Mã','Tuyến','Tiến độ','Cập nhật'],rows:[['MV-221','Kho A → Store Central','72%','10 phút trước'],['MV-220','Store East → Kho A','Đã nhận','35 phút trước'],['MV-219','Kho A → Đơn online','Đang giao','1 giờ trước']]},
-  inventory:{title:'Xuất nhập kho',description:'Giao diện kiểm soát phiếu nhập, phiếu xuất và tồn dự kiến.',columns:['Phiếu','Loại','Kho','Số lượng'],rows:[['IN-082','Nhập','Kho A','+128'],['OUT-117','Xuất','Kho A','-32'],['OUT-116','Xuất','Kho B','-18']]},
-  appearance:{title:'Trang trí & chỉnh sửa',description:'Quản lý banner, nội dung trang chủ và bộ nhận diện hiển thị.',columns:['Khu vực','Phiên bản','Người sửa','Trạng thái'],rows:[['Hero trang chủ','v3','Admin','Nháp'],['Banner mùa mới','v2','Marketing','Đang dùng'],['Footer','v1','Admin','Đang dùng']]},
-  statistics:{title:'Thống kê',description:'Tổng hợp chỉ số thương mại; số liệu production cần lấy từ backend.',columns:['Chỉ số','Hôm nay','7 ngày','Xu hướng'],rows:[['Đơn hàng','42','268','+8%'],['Khách quay lại','31%','29%','+2%'],['Tỷ lệ hoàn tất giỏ','64%','61%','+3%']]},
-  'order-types':{title:'Quản lý loại đơn hàng',description:'Cấu hình nhóm đơn và cách xử lý vận hành.',columns:['Loại đơn','Ưu tiên','SLA','Trạng thái'],rows:[['Giao tiêu chuẩn','Bình thường','48h','Bật'],['Nhận tại cửa hàng','Cao','4h','Bật'],['Đơn quà tặng','Bình thường','72h','Nháp']]},
-  support:{title:'Quản lý chăm sóc khách hàng',description:'Hàng đợi yêu cầu hỗ trợ và tình trạng xử lý.',columns:['Ticket','Khách','Chủ đề','Trạng thái'],rows:[['CS-301','Nguyễn An','Đơn hàng','Đang xử lý'],['CS-300','Lê Hương','Sản phẩm','Mới'],['CS-298','Trần Minh','Địa chỉ','Đã xong']]},
-  'rewards-wheel':{title:'Chế độ quay thưởng',description:'Thiết kế chương trình mini-game và giới hạn phần thưởng.',columns:['Chiến dịch','Phần thưởng','Ngân sách','Trạng thái'],rows:[['Cuối tuần vui vẻ','Voucher 10%','2.000.000 ₫','Nháp'],['Khách thân thiết','Quà ngẫu nhiên','5.000.000 ₫','Tạm dừng']]},
-  staff:{title:'Quản lý nhân viên',description:'Danh sách nhân viên, vai trò và ca làm việc.',columns:['Nhân viên','Vai trò','Ca hôm nay','Trạng thái'],rows:[['Mai Anh','CSKH','08:00–17:00','Đang làm'],['Quốc Bảo','Kho','13:00–22:00','Sắp vào ca'],['Thùy Linh','Cửa hàng','09:00–18:00','Đang làm']]},
-  overtime:{title:'Tăng ca & khen thưởng',description:'Theo dõi đề xuất OT và ghi nhận thành tích nhân viên.',columns:['Nhân viên','Hạng mục','Thời lượng/Điểm','Trạng thái'],rows:[['Quốc Bảo','Tăng ca','2 giờ','Chờ duyệt'],['Mai Anh','Khen thưởng','120 điểm','Đã duyệt'],['Thùy Linh','Tăng ca','1.5 giờ','Đã duyệt']]},
+const statusOptions = ['Đang dùng', 'Nháp', 'Đang xử lý', 'Chờ duyệt', 'Đã xong', 'Đã duyệt', 'Tạm dừng']
+
+const crudSchemas = {
+  inventory: { title: 'Xuất nhập kho', description: 'Tạo, sửa, xóa và tìm phiếu nhập, phiếu xuất theo kho.', fields: [{ key: 'kind', label: 'Loại phiếu', options: ['Nhập', 'Xuất', 'Điều chỉnh'] }, { key: 'warehouse', label: 'Kho' }, { key: 'quantity', label: 'Số lượng', type: 'number' }], columns: ['Loại phiếu', 'Kho', 'Số lượng'] },
+  logistics: { title: 'Quản lý lưu thông', description: 'Theo dõi tuyến vận chuyển và cập nhật tiến độ giao nhận.', fields: [{ key: 'route', label: 'Tuyến vận chuyển' }, { key: 'progress', label: 'Tiến độ' }, { key: 'updated', label: 'Cập nhật' }], columns: ['Tuyến', 'Tiến độ', 'Cập nhật'] },
+  'order-types': { title: 'Quản lý loại đơn hàng', description: 'Cấu hình tên loại đơn, ưu tiên và SLA xử lý.', fields: [{ key: 'priority', label: 'Ưu tiên', options: ['Thấp', 'Bình thường', 'Cao'] }, { key: 'sla', label: 'SLA' }, { key: 'note', label: 'Ghi chú' }], columns: ['Ưu tiên', 'SLA', 'Ghi chú'] },
+  staff: { title: 'Quản lý nhân viên', description: 'Quản lý vai trò, ca làm, trạng thái và thông tin đăng nhập nội bộ.', fields: [{ key: 'role', label: 'Vai trò' }, { key: 'shift', label: 'Ca làm' }, { key: 'login', label: 'Tài khoản đăng nhập' }], columns: ['Vai trò', 'Ca làm', 'Tài khoản'] },
+  overtime: { title: 'Tăng ca & khen thưởng', description: 'Tạo và duyệt đề xuất tăng ca hoặc ghi nhận thành tích.', fields: [{ key: 'kind', label: 'Hạng mục', options: ['Tăng ca', 'Khen thưởng'] }, { key: 'value', label: 'Thời lượng / điểm' }, { key: 'note', label: 'Ghi chú' }], columns: ['Hạng mục', 'Thời lượng / điểm', 'Ghi chú'] },
+  support: { title: 'Quản lý chăm sóc khách hàng', description: 'Theo dõi ticket CSKH theo người phụ trách và trạng thái.', fields: [{ key: 'customer', label: 'Khách hàng' }, { key: 'topic', label: 'Chủ đề' }, { key: 'assignee', label: 'Phụ trách' }], columns: ['Khách hàng', 'Chủ đề', 'Phụ trách'] },
 }
 
-function ProductOfferRow({ product, csrfToken, onSaved }) {
+function emptyData(schema) { return Object.fromEntries(schema.fields.map((field) => [field.key, ''])) }
+
+function ProductOfferRow({ product, csrfToken, onSaved, onEdit, onDelete }) {
   const [discountPercent, setDiscountPercent] = useState(product.discountPercent || 0)
   const [stockCount, setStockCount] = useState(product.stockCount === null ? '' : String(product.stockCount))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
   async function submit(event) {
-    event.preventDefault()
-    setError('')
-    setSaved(false)
-    setSaving(true)
-    try {
-      const offer = { discountPercent: Number(discountPercent), stockCount: stockCount === '' ? null : Number(stockCount) }
-      await apiJson('/api/admin/products/' + encodeURIComponent(product.id) + '/offer', {
-        method: 'PATCH', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(offer),
-      })
-      onSaved(product.id, offer)
-      setSaved(true)
-    } catch (failure) { setError(failure.message || 'Không lưu được ưu đãi.') }
+    event.preventDefault(); setError(''); setSaved(false); setSaving(true)
+    try { const offer = { discountPercent: Number(discountPercent), stockCount: stockCount === '' ? null : Number(stockCount) }; await apiJson('/api/admin/products/' + encodeURIComponent(product.id) + '/offer', { method: 'PATCH', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(offer) }); onSaved(product.id, offer); setSaved(true) }
+    catch (failure) { setError(failure.message || 'Không lưu được ưu đãi.') }
     finally { setSaving(false) }
   }
-  return <tr>
-    <td><div className="admin-product-cell"><img src={product.image} alt="" width="44" height="44" loading="lazy" /><span>{product.name}</span></div></td>
-    <td>{product.category}</td><td>{new Intl.NumberFormat('vi-VN').format(product.price)} ₫</td>
-    <td><form id={'offer-' + product.id} className="admin-offer-form" onSubmit={submit}>
-      <label>Giảm %<input aria-label={'Giảm giá ' + product.name} type="number" min="0" max="90" step="1" value={discountPercent} onChange={(event) => setDiscountPercent(event.target.value)} required /></label>
-      <label>Tồn kho<input aria-label={'Tồn kho ' + product.name} type="number" min="0" max="999999" step="1" value={stockCount} onChange={(event) => setStockCount(event.target.value)} placeholder="Chưa rõ" /></label>
-      <button type="submit" disabled={saving}>{saving ? 'Đang lưu…' : 'Lưu'}</button>
-      {saved && <small role="status">Đã lưu</small>}{error && <small role="alert">{error}</small>}
-    </form></td><td>{product.viewCount || 0}</td>
-  </tr>
+  return <tr><td><div className="admin-product-cell"><img src={product.image} alt="" width="44" height="44" loading="lazy" /><span>{product.name}</span></div></td><td>{product.category}</td><td>{new Intl.NumberFormat('vi-VN').format(product.price)} ₫</td><td><form className="admin-offer-form" onSubmit={submit}><label>Giảm %<input aria-label={'Giảm giá ' + product.name} type="number" min="0" max="90" step="1" value={discountPercent} onChange={(event) => setDiscountPercent(event.target.value)} required /></label><label>Tồn kho<input aria-label={'Tồn kho ' + product.name} type="number" min="0" max="999999" step="1" value={stockCount} onChange={(event) => setStockCount(event.target.value)} placeholder="Chưa rõ" /></label><button type="submit" disabled={saving}>{saving ? 'Đang lưu…' : 'Lưu'}</button>{saved && <small role="status">Đã lưu</small>}{error && <small role="alert">{error}</small>}</form></td><td>{product.viewCount || 0}</td><td className="admin-product-actions"><button className="table-action" type="button" onClick={() => onEdit(product)}>Sửa</button><button className="table-action table-action--danger" type="button" onClick={() => onDelete(product)}>Xóa</button></td></tr>
+}
+
+function ProductEditor({ product, csrfToken, onSaved, onCancel }) {
+  const [form, setForm] = useState({ name: product?.name || '', category: product?.category || 'Đồ gia dụng', price: product?.price || 0, image: product?.image || '/products/bag.svg', description: product?.description || '' })
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  async function submit(event) {
+    event.preventDefault(); setError(''); setBusy(true)
+    try { const payload = await apiJson(product ? '/api/admin/products/' + encodeURIComponent(product.id) : '/api/admin/products', { method: product ? 'PATCH' : 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ ...form, price: Number(form.price) }) }); onSaved(payload.product) }
+    catch (failure) { setError(failure.message || 'Không lưu được sản phẩm.') }
+    finally { setBusy(false) }
+  }
+  return <form className="admin-product-editor" onSubmit={submit}><div className="admin-editor-grid"><label>Tên sản phẩm<input required maxLength="160" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label><label>Danh mục<input required maxLength="80" value={form.category} onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))} /></label><label>Giá VND<input required type="number" min="0" value={form.price} onChange={(event) => setForm((current) => ({ ...current, price: event.target.value }))} /></label><label>Đường dẫn ảnh<input value={form.image} onChange={(event) => setForm((current) => ({ ...current, image: event.target.value }))} /></label><label className="admin-editor-wide">Mô tả<textarea rows="2" maxLength="2000" value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label></div>{error && <p role="alert">{error}</p>}<div className="admin-editor-actions"><button type="submit" disabled={busy}>{busy ? 'Đang lưu…' : product ? 'Lưu thay đổi' : 'Thêm sản phẩm'}</button><button type="button" className="button-secondary" onClick={onCancel}>Hủy</button></div></form>
 }
 
 function ProductsCatalog({ csrfToken }) {
@@ -56,148 +50,72 @@ function ProductsCatalog({ csrfToken }) {
   const [filter, setFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-
-  useEffect(() => {
-    const controller = new AbortController()
-    apiJson('/api/admin/products', { signal: controller.signal })
-      .then((payload) => setProducts(payload.products || []))
-      .catch((failure) => { if (!controller.signal.aborted) setError(failure.message) })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
-    return () => controller.abort()
-  }, [])
-
-  const visible = useMemo(() => {
-    const needle = normalizeSearch(filter).trim()
-    return needle ? products.filter((product) => normalizeSearch(product.name + ' ' + product.category).includes(needle)) : products
-  }, [filter, products])
-
-  return <section className="admin-module-card">
-    <div className="admin-module-head"><div><p className="admin-eyebrow">DANH MỤC DEMO</p><h2>Quản lý giá và giảm giá</h2><p>Giảm giá và tồn kho demo lưu trong SQLite, Store đọc qua API. Để trống tồn kho nếu chưa rõ; 0 là hết hàng.</p></div><span className="admin-preview-badge">{products.length} sản phẩm</span></div>
-    <div className="admin-module-toolbar"><label><span className="sr-only">Tìm sản phẩm</span><input type="search" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Tìm tên hoặc danh mục…" /></label><span>{visible.length}/{products.length} mục</span></div>
-    {loading && <p>Đang tải sản phẩm…</p>}
-    {error && <p role="alert">Không tải được danh mục: {error}</p>}
-    {!loading && !error && <div className="admin-table-wrap"><table><caption className="sr-only">Sản phẩm demo đã nhập</caption><thead><tr><th>Sản phẩm</th><th>Danh mục</th><th>Giá gốc demo</th><th>Giảm giá / tồn kho</th><th>Lượt xem</th></tr></thead><tbody>{visible.map((product) => <ProductOfferRow key={product.id} product={product} csrfToken={csrfToken} onSaved={(id, offer) => setProducts((current) => current.map((item) => item.id === id ? { ...item, ...offer } : item))} />)}</tbody></table>{visible.length === 0 && <p className="admin-empty">Không có sản phẩm phù hợp.</p>}</div>}
-    <p className="admin-demo-note">Ảnh từ <a href="https://amazon-berkeley-objects.s3.amazonaws.com/index.html" target="_blank" rel="noopener noreferrer">Amazon Berkeley Objects</a> (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>). Dữ liệu này chưa phải hàng đang kinh doanh.</p>
-  </section>
+  const [editor, setEditor] = useState(null)
+  useEffect(() => { const controller = new AbortController(); apiJson('/api/admin/products', { signal: controller.signal }).then((payload) => setProducts(payload.products || [])).catch((failure) => { if (!controller.signal.aborted) setError(failure.message) }).finally(() => { if (!controller.signal.aborted) setLoading(false) }); return () => controller.abort() }, [])
+  const visible = useMemo(() => { const needle = normalizeSearch(filter).trim(); return needle ? products.filter((product) => normalizeSearch(product.name + ' ' + product.category).includes(needle)) : products }, [filter, products])
+  async function remove(product) { if (!window.confirm('Xóa sản phẩm ' + product.name + '?')) return; try { await apiJson('/api/admin/products/' + encodeURIComponent(product.id), { method: 'DELETE', headers: { 'x-csrf-token': csrfToken } }); setProducts((current) => current.filter((item) => item.id !== product.id)) } catch (failure) { setError(failure.message) } }
+  function savedProduct(product) { setProducts((current) => current.some((item) => item.id === product.id) ? current.map((item) => item.id === product.id ? { ...item, ...product } : item) : [product, ...current]); setEditor(null) }
+  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">DANH MỤC ĐỒNG BỘ</p><h2>Quản lý hàng hóa</h2><p>Thêm, sửa, xóa, tìm kiếm, tồn kho và giảm giá. Store đọc cùng catalog SQLite.</p></div><div className="admin-head-actions"><span className="admin-preview-badge">{products.length} sản phẩm</span><button type="button" onClick={() => setEditor({})}>+ Thêm sản phẩm</button></div></div>{editor && <ProductEditor product={editor.id ? editor : null} csrfToken={csrfToken} onSaved={savedProduct} onCancel={() => setEditor(null)} />}<div className="admin-module-toolbar"><label><span className="sr-only">Tìm sản phẩm</span><input className="admin-wide-search" type="search" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Tìm tên, danh mục hoặc mã sản phẩm…" /></label><span>{visible.length}/{products.length} mục</span></div>{loading && <p>Đang tải sản phẩm…</p>}{error && <p role="alert">Không tải được danh mục: {error}</p>}{!loading && !error && <div className="admin-table-wrap"><table><caption className="sr-only">Sản phẩm đã nhập</caption><thead><tr><th>Sản phẩm</th><th>Danh mục</th><th>Giá gốc</th><th>Giảm giá / tồn kho</th><th>Lượt xem</th><th>Thao tác</th></tr></thead><tbody>{visible.map((product) => <ProductOfferRow key={product.id} product={product} csrfToken={csrfToken} onSaved={(id, offer) => setProducts((current) => current.map((item) => item.id === id ? { ...item, ...offer } : item))} onEdit={setEditor} onDelete={remove} />)}</tbody></table>{visible.length === 0 && <p className="admin-empty">Không có sản phẩm phù hợp.</p>}</div>}<p className="admin-demo-note">Ảnh và metadata là dữ liệu mẫu; không đại diện tồn kho kinh doanh thực tế.</p></section>
 }
 
 function ProductViews() {
   const [report, setReport] = useState(null)
   const [error, setError] = useState('')
-  useEffect(() => {
-    const controller = new AbortController()
-    apiJson('/api/admin/product-views', { signal: controller.signal })
-      .then(setReport)
-      .catch((failure) => { if (!controller.signal.aborted) setError(failure.message) })
-    return () => controller.abort()
-  }, [])
+  useEffect(() => { const controller = new AbortController(); apiJson('/api/admin/product-views', { signal: controller.signal }).then(setReport).catch((failure) => { if (!controller.signal.aborted) setError(failure.message) }); return () => controller.abort() }, [])
   const highest = report?.products[0]?.viewCount || 1
-  return <section className="admin-module-card">
-    <div className="admin-module-head"><div><p className="admin-eyebrow">THỐNG KÊ TRUY CẬP</p><h2>20 sản phẩm được xem nhiều nhất</h2><p>Mỗi lượt mở trang chi tiết được ghi nhận. Khi chưa có lượt xem, danh sách hiển thị thứ tự mặc định.</p></div><span className="admin-preview-badge">{report?.totalViews || 0} lượt xem</span></div>
-    {error && <p role="alert">Không tải được thống kê: {error}</p>}
-    {!report && !error && <p>Đang tải lượt xem…</p>}
-    {report && <div className="admin-view-list">{report.products.map((product) => <article key={product.id}>
-      <b className="admin-view-rank">{String(product.rank).padStart(2, '0')}</b>
-      {product.image ? <img src={product.image} alt="" width="48" height="48" loading="lazy" /> : <span className="admin-view-symbol" aria-hidden="true">{product.symbol}</span>}
-      <div><strong>{product.name}</strong><small>{product.category}</small><span className="admin-view-bar" style={{ '--view-width': `${product.viewCount / highest * 100}%` }} /></div>
-      <b>{product.viewCount} lượt</b>
-    </article>)}</div>}
-  </section>
+  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">THỐNG KÊ TRUY CẬP</p><h2>20 sản phẩm được xem nhiều nhất</h2><p>Mỗi sản phẩm một hàng, ảnh và tên rút gọn; thanh dữ liệu tăng dần theo lượt xem.</p></div><span className="admin-preview-badge">{report?.totalViews || 0} lượt xem</span></div>{error && <p role="alert">Không tải được thống kê: {error}</p>}{!report && !error && <p>Đang tải lượt xem…</p>}{report && <div className="admin-view-list">{report.products.map((product) => <article key={product.id}><b className="admin-view-rank">{String(product.rank).padStart(2, '0')}</b>{product.image ? <img src={product.image} alt="" width="48" height="48" loading="lazy" /> : <span className="admin-view-symbol" aria-hidden="true">{product.symbol}</span>}<div><strong>{product.name}</strong><small>{product.category}</small><span className="admin-view-bar" style={{ '--view-width': `${product.viewCount / highest * 100}%` }} /></div><b>{product.viewCount} lượt</b></article>)}</div>}</section>
 }
 
-function Dashboard({ onNavigate }){
- const stats=[['Doanh thu demo','128,4 triệu','+12.8%'],['Đơn hôm nay','42','+8.1%'],['Khách quay lại','31%','+2.0%'],['Ticket mở','7','-3']]
- return <><div className="admin-kpi-grid">{stats.map(([label,value,delta])=><article key={label}><span>{label}</span><strong>{value}</strong><small>{delta} so với kỳ trước</small></article>)}</div><div className="admin-dashboard-grid"><section className="admin-module-card"><p className="admin-eyebrow">Vận hành hôm nay</p><h2>Ưu tiên cần chú ý</h2><div className="admin-task-list"><div><b>07</b><span>Ticket CSKH đang mở</span></div><div><b>03</b><span>Phiếu kho chờ duyệt</span></div><div><b>02</b><span>Nhân viên đề nghị tăng ca</span></div></div></section><section className="admin-module-card"><p className="admin-eyebrow">Lối tắt</p><h2>Mở nhanh các mục</h2><div className="admin-quick-actions"><button type="button" onClick={()=>onNavigate('products')}>Quản lý hàng hóa</button><button type="button" onClick={()=>onNavigate('product-views')}>Sản phẩm xem nhiều</button><button type="button" onClick={()=>onNavigate('inventory')}>Xem xuất nhập kho</button><button type="button" onClick={()=>onNavigate('support')}>Xem CSKH</button></div></section></div></>
+function Dashboard({ onNavigate }) {
+  const [overview, setOverview] = useState(null)
+  useEffect(() => { let active = true; apiJson('/api/admin/overview').then((payload) => { if (active) setOverview(payload.overview) }).catch(() => {}); return () => { active = false } }, [])
+  const cards = [['Sản phẩm', overview?.products ?? '—', 'catalog SQLite'], ['Khách hàng', overview?.customers ?? '—', 'tài khoản đã đăng ký'], ['Đơn thanh toán', overview?.orders ?? '—', 'đơn trong hệ thống'], ['Đánh giá', overview?.reviews ?? '—', 'bình luận cần xử lý']]
+  return <><div className="admin-kpi-grid">{cards.map(([label, value, note]) => <article key={label}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>)}</div><div className="admin-dashboard-grid"><section className="admin-module-card"><p className="admin-eyebrow">TỔNG QUAN LIVE</p><h2>Vận hành tập trung</h2><div className="admin-task-list"><div><b>{overview?.totalViews ?? '—'}</b><span>Lượt xem sản phẩm</span></div><div><b>{overview?.favorites ?? '—'}</b><span>Lượt yêu thích</span></div><div><b>{overview?.records ?? '—'}</b><span>Bản ghi vận hành</span></div></div></section><section className="admin-module-card"><p className="admin-eyebrow">LỐI TẮT</p><h2>Mở nhanh các mục</h2><div className="admin-quick-actions"><button type="button" onClick={() => onNavigate('products')}>Quản lý hàng hóa</button><button type="button" onClick={() => onNavigate('product-views')}>Sản phẩm xem nhiều</button><button type="button" onClick={() => onNavigate('inventory')}>Xuất nhập kho</button><button type="button" onClick={() => onNavigate('support')}>CSKH</button></div></section></div></>
 }
 
-
-function AppearancePreview(){
- const [headline,setHeadline]=useState('Mua sắm gọn hơn. Sống nhẹ hơn.')
- const [tone,setTone]=useState('sage')
- return <section className="admin-module-card">
-   <div className="admin-module-head"><div><p className="admin-eyebrow">STOREFRONT EDITOR</p><h2>Trang trí & chỉnh sửa</h2><p>Thử nội dung hero và tone giao diện ngay trong phiên admin.</p></div><span className="admin-preview-badge">Chưa xuất bản</span></div>
-   <div className="appearance-layout"><div className={'appearance-preview appearance-preview--'+tone}><small>STORE EVERYDAY</small><h3>{headline || 'Tiêu đề trang chủ'}</h3><button type="button" disabled>Xem hàng hóa</button></div><div className="appearance-controls"><label>Tiêu đề<input value={headline} onChange={(event)=>setHeadline(event.target.value)} maxLength="80" /></label><label>Tone<select value={tone} onChange={(event)=>setTone(event.target.value)}><option value="sage">Sage</option><option value="sand">Sand</option><option value="ink">Ink</option></select></label><button type="button" disabled title="Chưa nối CMS">Lưu bản nháp (chưa nối)</button></div></div>
- </section>
+function AppearanceEditor({ csrfToken }) {
+  const defaults = { brandTagline: 'EVERYDAY', heroTitle: 'Chọn món bạn yêu. Sống theo cách riêng.', heroDescription: 'Khám phá sản phẩm nổi bật, ưu đãi và các nhóm hàng dễ tìm.', heroButton: 'Khám phá cửa hàng', footerText: 'Những điều nhỏ, cho một ngày tốt hơn.', accentColor: '#4f8b67', bannerLabel: 'STORE EVERYDAY' }
+  const [form, setForm] = useState(defaults)
+  const [status, setStatus] = useState('')
+  useEffect(() => { apiJson('/api/admin/appearance').then((payload) => setForm((current) => ({ ...current, ...(payload.appearance || {}) }))).catch(() => {}) }, [])
+  async function save(event) { event.preventDefault(); setStatus(''); try { const payload = await apiJson('/api/admin/appearance', { method: 'PUT', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(form) }); setForm((current) => ({ ...current, ...payload.appearance })); setStatus('Đã lưu trực tiếp cho storefront.') } catch (error) { setStatus(error.message) } }
+  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">STOREFRONT EDITOR</p><h2>Trang trí & chỉnh sửa</h2><p>Chỉnh nội dung hero, banner, brand và footer; dữ liệu lưu trong backend để Store đọc khi tải lại.</p></div><span className="admin-preview-badge">Đang nối API</span></div><div className="appearance-layout"><div className="appearance-preview appearance-preview--ink" style={{ '--editor-accent': form.accentColor }}><small>{form.bannerLabel}</small><h3>{form.heroTitle || 'Tiêu đề trang chủ'}</h3><p>{form.heroDescription}</p><button type="button">{form.heroButton}</button><footer>{form.footerText}</footer></div><form className="appearance-controls" onSubmit={save}>{[['brandTagline','Dòng chữ cạnh Store'],['bannerLabel','Nhãn banner'],['heroTitle','Tiêu đề hero'],['heroDescription','Mô tả hero'],['heroButton','Tên nút hero'],['footerText','Nội dung footer'],['accentColor','Màu nhấn']].map(([key,label]) => <label key={key}>{label}{key.includes('Description') || key.includes('footer') ? <textarea rows="2" maxLength="240" value={form[key]} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} /> : <input maxLength="240" value={form[key]} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} />}</label>)}<button type="submit">Lưu thay đổi</button>{status && <small role="status">{status}</small>}</form></div></section>
 }
 
-
-function StaffAccessPreview(){
- const roles=[
-   ['Quản trị viên',['Dashboard','Hàng hóa','Kho','Thống kê','AI local']],
-   ['Nhân viên kho',['Hàng hóa','Lưu thông','Xuất nhập kho']],
-   ['CSKH',['Khách hàng','Đơn hàng','CSKH']],
- ]
- return <section className="admin-module-card">
-   <div className="admin-module-head"><div><p className="admin-eyebrow">STAFF & ACCESS</p><h2>Quản lý nhân viên</h2><p>Preview vai trò và phạm vi truy cập. Backend hiện chưa thực thi RBAC cho các module giao diện này.</p></div><span className="admin-preview-badge">Quyền demo</span></div>
-   <div className="role-grid">{roles.map(([name,permissions])=><article key={name}><div><b>{name}</b><small>{permissions.length} quyền mẫu</small></div><div className="role-tags">{permissions.map((item)=><span key={item}>{item}</span>)}</div><button type="button" disabled>Chỉnh quyền</button></article>)}</div>
-   <div className="admin-table-wrap staff-table"><table><caption className="sr-only">Danh sách nhân viên demo</caption><thead><tr><th>Nhân viên</th><th>Vai trò</th><th>Ca hôm nay</th><th>Trạng thái</th></tr></thead><tbody>{datasets.staff.rows.map((row)=><tr key={row[0]}>{row.map((cell,index)=><td className={index===row.length-1?'admin-status-cell':''} key={cell}>{cell}</td>)}</tr>)}</tbody></table></div>
- </section>
+function RecordEditor({ schema, record, onSave, onCancel }) {
+  const [title, setTitle] = useState(record?.title || '')
+  const [status, setStatus] = useState(record?.status || 'Đang dùng')
+  const [data, setData] = useState({ ...emptyData(schema), ...(record?.data || {}) })
+  const [error, setError] = useState('')
+  async function submit(event) { event.preventDefault(); setError(''); try { await onSave({ title, status, data }) } catch (failure) { setError(failure.message) } }
+  return <form className="admin-record-editor" onSubmit={submit}><div className="admin-editor-grid"><label>Tên / mã<input required maxLength="160" value={title} onChange={(event) => setTitle(event.target.value)} /></label><label>Trạng thái<select value={status} onChange={(event) => setStatus(event.target.value)}>{statusOptions.map((item) => <option key={item}>{item}</option>)}</select></label>{schema.fields.map((field) => <label key={field.key}>{field.label}{field.options ? <select value={data[field.key] || ''} onChange={(event) => setData((current) => ({ ...current, [field.key]: event.target.value }))}><option value="">Chọn</option>{field.options.map((item) => <option key={item}>{item}</option>)}</select> : <input type={field.type || 'text'} value={data[field.key] || ''} onChange={(event) => setData((current) => ({ ...current, [field.key]: event.target.value }))} />}</label>)}</div>{error && <p role="alert">{error}</p>}<div className="admin-editor-actions"><button type="submit">{record ? 'Lưu thay đổi' : 'Thêm bản ghi'}</button><button type="button" className="button-secondary" onClick={onCancel}>Hủy</button></div></form>
 }
 
-
-function OrderTypesPreview(){
- const types=[
-  {name:'Giao tiêu chuẩn',priority:'Bình thường',sla:'48h',status:'Bật',note:'Giao tận nơi theo vùng phục vụ'},
-  {name:'Nhận tại cửa hàng',priority:'Cao',sla:'4h',status:'Bật',note:'Chờ xác nhận khả dụng tại chi nhánh'},
-  {name:'Đơn quà tặng',priority:'Bình thường',sla:'72h',status:'Nháp',note:'Chưa bật cho khách hàng'},
- ]
- return <section className="admin-module-card">
-   <div className="admin-module-head"><div><p className="admin-eyebrow">ORDER WORKFLOWS</p><h2>Quản lý loại đơn hàng</h2><p>Thiết kế luồng xử lý, SLA và mức ưu tiên. Cấu hình bên dưới chưa được backend thực thi.</p></div><span className="admin-preview-badge">Cấu hình demo</span></div>
-   <div className="order-type-grid">{types.map((type)=><article key={type.name}><div className="order-type-head"><span>{type.status}</span><b>{type.name}</b></div><p>{type.note}</p><dl><div><dt>Ưu tiên</dt><dd>{type.priority}</dd></div><div><dt>SLA</dt><dd>{type.sla}</dd></div></dl><button type="button" disabled>Chỉnh cấu hình</button></article>)}</div>
- </section>
+function CrudModule({ module, csrfToken }) {
+  const schema = crudSchemas[module]
+  const [records, setRecords] = useState([])
+  const [query, setQuery] = useState('')
+  const [editor, setEditor] = useState(null)
+  const [selected, setSelected] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  useEffect(() => { const controller = new AbortController(); apiJson('/api/admin/records/' + module, { signal: controller.signal }).then((payload) => setRecords(payload.records || [])).catch((failure) => { if (!controller.signal.aborted) setError(failure.message) }).finally(() => { if (!controller.signal.aborted) setLoading(false) }); return () => controller.abort() }, [module])
+  const visible = useMemo(() => { const needle = normalizeSearch(query).trim(); return needle ? records.filter((record) => normalizeSearch([record.title, record.status, ...Object.values(record.data || {})].join(' ')).includes(needle)) : records }, [query, records])
+  async function save(payload) { const editing = editor?.id; const response = await apiJson('/api/admin/records/' + module + (editing ? '/' + editing : ''), { method: editing ? 'PATCH' : 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(payload) }); const record = response.record; setRecords((current) => editing ? current.map((item) => item.id === record.id ? record : item) : [record, ...current]); setEditor(null) }
+  async function remove(record) { if (!window.confirm('Xóa bản ghi ' + record.title + '?')) return; try { await apiJson('/api/admin/records/' + module + '/' + record.id, { method: 'DELETE', headers: { 'x-csrf-token': csrfToken } }); setRecords((current) => current.filter((item) => item.id !== record.id)) } catch (failure) { setError(failure.message) } }
+  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">STORE OPERATIONS</p><h2>{schema.title}</h2><p>{schema.description}</p></div><button type="button" onClick={() => setEditor({})}>+ Thêm</button></div>{editor && <RecordEditor schema={schema} record={editor.id ? editor : null} onSave={save} onCancel={() => setEditor(null)} />}<div className="admin-module-toolbar"><input className="admin-wide-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={'Tìm trong ' + schema.title.toLocaleLowerCase('vi') + '…'} /><span>{visible.length}/{records.length} mục</span></div>{error && <p role="alert">{error}</p>}{loading ? <p>Đang tải…</p> : <div className="admin-table-wrap"><table><thead><tr><th>Tên / mã</th>{schema.columns.map((column) => <th key={column}>{column}</th>)}<th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>{visible.map((record) => <tr key={record.id}><td><button className="admin-link-button" type="button" onClick={() => setSelected(record)}>{record.title}</button><small>#{record.id}</small></td>{schema.fields.map((field) => <td key={field.key}>{record.data?.[field.key] || '—'}</td>)}<td className="admin-status-cell">{record.status}</td><td className="admin-product-actions"><button className="table-action" type="button" onClick={() => setEditor(record)}>Sửa</button><button className="table-action table-action--danger" type="button" onClick={() => remove(record)}>Xóa</button></td></tr>)}</tbody></table>{visible.length === 0 && <p className="admin-empty">Chưa có bản ghi phù hợp.</p>}</div>}{selected && <section className="admin-detail-panel"><p className="admin-eyebrow">CHI TIẾT BẢN GHI</p><h3>{selected.title}</h3><button type="button" onClick={() => setSelected(null)}>Đóng</button><dl>{Object.entries({ ...selected.data, status: selected.status, createdAt: selected.createdAt, updatedAt: selected.updatedAt }).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value || '—')}</dd></div>)}</dl></section>}</section>
 }
 
-function SupportQueuePreview(){
- const columns=[
-  {title:'Mới',tone:'new',items:[['CS-300','Lê Hương','Sản phẩm']]},
-  {title:'Đang xử lý',tone:'active',items:[['CS-301','Nguyễn An','Đơn hàng'],['CS-297','Hoàng Nam','Thanh toán']]},
-  {title:'Đã xong',tone:'done',items:[['CS-298','Trần Minh','Địa chỉ']]},
- ]
- return <section className="admin-module-card">
-   <div className="admin-module-head"><div><p className="admin-eyebrow">CUSTOMER CARE QUEUE</p><h2>Quản lý chăm sóc khách hàng</h2><p>Hàng đợi trực quan theo trạng thái xử lý. Thao tác ticket vẫn là preview.</p></div><span className="admin-preview-badge">Queue demo</span></div>
-   <div className="support-board">{columns.map((column)=><section key={column.title} className={'support-column support-column--'+column.tone}><header><b>{column.title}</b><span>{column.items.length}</span></header><div>{column.items.map(([id,customer,topic])=><article key={id}><b>{id}</b><span>{customer}</span><small>{topic}</small><button type="button" disabled>Mở ticket</button></article>)}</div></section>)}</div>
- </section>
-}
-
-function OvertimeRewardsPreview(){
- const requests=[
-  {name:'Quốc Bảo',type:'Tăng ca',value:'2 giờ',status:'Chờ duyệt'},
-  {name:'Mai Anh',type:'Khen thưởng',value:'120 điểm',status:'Đã duyệt'},
-  {name:'Thùy Linh',type:'Tăng ca',value:'1.5 giờ',status:'Đã duyệt'},
- ]
- const pending=requests.filter((item)=>item.status==='Chờ duyệt').length
- return <section className="admin-module-card">
-   <div className="admin-module-head"><div><p className="admin-eyebrow">PEOPLE OPERATIONS</p><h2>Tăng ca & khen thưởng</h2><p>Theo dõi đề xuất OT và ghi nhận thành tích. Các nút duyệt chưa nối backend nhân sự.</p></div><span className="admin-preview-badge">{pending} chờ duyệt</span></div>
-   <div className="people-summary"><div><small>Đề xuất hôm nay</small><strong>{requests.length}</strong></div><div><small>Chờ duyệt</small><strong>{pending}</strong></div><div><small>Đã xử lý</small><strong>{requests.length-pending}</strong></div></div>
-   <div className="people-request-list">{requests.map((item)=><article key={item.name+item.type}><div><b>{item.name}</b><small>{item.type}</small></div><strong>{item.value}</strong><span>{item.status}</span><div><button type="button" disabled>Duyệt</button><button type="button" disabled>Từ chối</button></div></article>)}</div>
- </section>
-}
-
-export default function AdminModule({module,csrfToken,onNavigate}){
- const [filter,setFilter]=useState('')
- const data=datasets[module]||datasets.statistics
- const rows=useMemo(()=>{
-   const needle=normalizeSearch(filter).trim()
-   if(!needle)return data.rows
-   return data.rows.filter((row)=>normalizeSearch(row.join(' ')).includes(needle))
- },[data,filter])
- if(module==='dashboard')return <Dashboard onNavigate={onNavigate}/>
- if(module==='products')return <ProductsCatalog csrfToken={csrfToken}/>
- if(module==='product-views')return <ProductViews/>
- if(module==='customers')return <AdminCustomers/>
- if(module==='favorites')return <AdminFavorites/>
- if(module==='reviews')return <AdminReviews csrfToken={csrfToken}/>
- if(module==='customer-orders')return <AdminOrders csrfToken={csrfToken}/>
- if(module==='rewards-wheel')return <AdminVouchers csrfToken={csrfToken}/>
- if(module==='appearance')return <AppearancePreview/>
- if(module==='staff')return <StaffAccessPreview/>
- if(module==='order-types')return <OrderTypesPreview/>
- if(module==='support')return <SupportQueuePreview/>
- if(module==='overtime')return <OvertimeRewardsPreview/>
- return <section className="admin-module-card">
-   <div className="admin-module-head"><div><p className="admin-eyebrow">STORE OPERATIONS</p><h2>{data.title}</h2><p>{data.description}</p></div><button type="button" disabled title="Chưa nối backend">+ Tạo mới</button></div>
-   <div className="admin-module-toolbar"><label><span className="sr-only">Lọc {data.title}</span><input type="search" value={filter} onChange={(event)=>setFilter(event.target.value)} placeholder="Lọc nhanh trong bảng…" /></label><span>{rows.length}/{data.rows.length} mục</span></div>
-   <div className="admin-table-wrap"><table><caption className="sr-only">{data.title}</caption><thead><tr>{data.columns.map((column)=><th key={column}>{column}</th>)}<th>Thao tác</th></tr></thead><tbody>{rows.map((row,index)=><tr key={index}>{row.map((cell,cellIndex)=><td className={cellIndex===row.length-1?'admin-status-cell':''} key={cell}>{cell}</td>)}<td><button className="table-action" type="button" disabled title="Chưa nối backend">Mở</button></td></tr>)}</tbody></table>{rows.length===0&&<p className="admin-empty">Không có mục nào khớp bộ lọc.</p>}</div>
-   <p className="admin-demo-note">Dữ liệu trong module này hiện là dữ liệu giao diện mẫu; chưa ghi vào database nghiệp vụ.</p>
- </section>
+export default function AdminModule({ module, csrfToken, onNavigate }) {
+  if (module === 'dashboard') return <Dashboard onNavigate={onNavigate} />
+  if (module === 'products') return <ProductsCatalog csrfToken={csrfToken} />
+  if (module === 'product-views') return <ProductViews />
+  if (module === 'appearance') return <AppearanceEditor csrfToken={csrfToken} />
+  if (module === 'customers') return <AdminCustomers />
+  if (module === 'favorites') return <AdminFavorites />
+  if (module === 'reviews') return <AdminReviews csrfToken={csrfToken} />
+  if (module === 'customer-orders') return <AdminOrders csrfToken={csrfToken} />
+  if (module === 'rewards-wheel') return <AdminVouchers csrfToken={csrfToken} />
+  if (crudSchemas[module]) return <CrudModule module={module} csrfToken={csrfToken} />
+  return <section className="admin-module-card"><h2>Module chưa có dữ liệu</h2><p>Module này đang chờ cấu hình backend.</p></section>
 }

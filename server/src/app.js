@@ -1,4 +1,5 @@
 import express from 'express'
+import { randomUUID } from 'node:crypto'
 import { products as originalProducts } from '../../shared/products.js'
 import { config, ALLOWED_CONTEXT_SIZES } from './config.js'
 import { StoreDb } from './db.js'
@@ -32,6 +33,7 @@ const ADMIN_SESSION_SECONDS = 60 * 60 * 12
 const SUPPORT_COOKIE_SECONDS = 60 * 60 * 24 * 30
 const MAX_MESSAGE_LENGTH = 2000
 const REQUEST_ID_RE = /^[A-Za-z0-9_-]{8,100}$/
+const ADMIN_RECORD_MODULES = new Set(['inventory', 'logistics', 'order-types', 'staff', 'overtime', 'support'])
 
 const SUPPORT_PROMPT =
   'Bạn là trợ lý hỗ trợ khách hàng của Store. Trả lời tiếng Việt, ngắn gọn. ' +
@@ -528,9 +530,102 @@ export function createApp(overrides = {}) {
     res.json({ report: storeDb.calculateRevenue(range), source: 'backend-sqlite' })
   })
 
+  app.get('/api/admin/overview', requireAdmin, (req, res) => {
+    res.json({ overview: storeDb.adminOverview() })
+  })
+
+  app.get('/api/admin/records/:module', requireAdmin, (req, res) => {
+    if (!ADMIN_RECORD_MODULES.has(req.params.module)) return res.status(404).json({ error: 'MODULE_NOT_FOUND' })
+    res.json({ module: req.params.module, records: storeDb.listAdminRecords(req.params.module) })
+  })
+
+  app.post('/api/admin/records/:module', requireAdmin, requireCsrf, (req, res) => {
+    if (!ADMIN_RECORD_MODULES.has(req.params.module)) return res.status(404).json({ error: 'MODULE_NOT_FOUND' })
+    const body = req.body || {}
+    const title = String(body.title || '').trim()
+    const status = String(body.status || 'Đang dùng').trim()
+    const data = body.data
+    if (!title || title.length > 160 || !data || typeof data !== 'object' || Array.isArray(data) || status.length > 60) return res.status(400).json({ error: 'INVALID_RECORD' })
+    res.status(201).json({ record: storeDb.createAdminRecord({ module: req.params.module, title, data, status }) })
+  })
+
+  app.patch('/api/admin/records/:module/:id', requireAdmin, requireCsrf, (req, res) => {
+    if (!ADMIN_RECORD_MODULES.has(req.params.module)) return res.status(404).json({ error: 'MODULE_NOT_FOUND' })
+    const body = req.body || {}
+    const title = String(body.title || '').trim()
+    const status = String(body.status || 'Đang dùng').trim()
+    const data = body.data
+    if (!title || title.length > 160 || !data || typeof data !== 'object' || Array.isArray(data) || status.length > 60) return res.status(400).json({ error: 'INVALID_RECORD' })
+    const record = storeDb.updateAdminRecord(Number(req.params.id), { module: req.params.module, title, data, status })
+    if (!record) return res.status(404).json({ error: 'RECORD_NOT_FOUND' })
+    res.json({ record })
+  })
+
+  app.delete('/api/admin/records/:module/:id', requireAdmin, requireCsrf, (req, res) => {
+    if (!ADMIN_RECORD_MODULES.has(req.params.module)) return res.status(404).json({ error: 'MODULE_NOT_FOUND' })
+    if (!storeDb.deleteAdminRecord(Number(req.params.id))) return res.status(404).json({ error: 'RECORD_NOT_FOUND' })
+    res.json({ ok: true })
+  })
+
+  app.get('/api/admin/appearance', requireAdmin, (req, res) => {
+    const raw = storeDb.getSetting('storefront_appearance')
+    res.json({ appearance: parseJson(raw, {}) })
+  })
+
+  app.put('/api/admin/appearance', requireAdmin, requireCsrf, (req, res) => {
+    const body = req.body || {}
+    const allowed = ['brandTagline', 'heroTitle', 'heroDescription', 'heroButton', 'footerText', 'accentColor', 'bannerLabel']
+    if (Object.keys(body).some((key) => !allowed.includes(key)) || allowed.some((key) => body[key] !== undefined && typeof body[key] !== 'string' || String(body[key] || '').length > 240)) {
+      return res.status(400).json({ error: 'INVALID_APPEARANCE' })
+    }
+    const appearance = Object.fromEntries(allowed.map((key) => [key, String(body[key] || '').trim()]))
+    storeDb.setSetting('storefront_appearance', JSON.stringify(appearance))
+    res.json({ appearance })
+  })
+
   app.get('/api/admin/products', requireAdmin, (req, res) => {
     const products = storeDb.listCatalogProducts()
     res.json({ total: products.length, products })
+  })
+
+  app.post('/api/admin/products', requireAdmin, requireCsrf, (req, res) => {
+    const body = req.body || {}
+    const name = String(body.name || '').trim()
+    const category = String(body.category || 'Đồ gia dụng').trim()
+    const description = String(body.description || 'Sản phẩm do quản trị viên tạo để thử giao diện.').trim()
+    const image = String(body.image || '/products/bag.svg').trim()
+    const price = Number(body.price)
+    if (name.length < 2 || name.length > 160 || category.length < 2 || category.length > 80 || description.length > 2000 ||
+      !Number.isInteger(price) || price < 0 || price > 1000000000 || image.length > 500) return res.status(400).json({ error: 'INVALID_PRODUCT' })
+    const id = 'manual-' + randomUUID()
+    const product = {
+      id, source: 'admin-manual', sourceId: id, name, category, price, description, image,
+      features: Array.isArray(body.features) ? body.features.filter((item) => typeof item === 'string').slice(0, 6) : [],
+      tone: 'green', symbol: '✦', label: 'Mới', sourceUrl: 'local://admin-manual', sourcePriceCents: price, sourceCurrency: 'VND', importedAt: new Date().toISOString(), discountPercent: 0,
+    }
+    storeDb.upsertCatalogProducts([product])
+    res.status(201).json({ product: storeDb.getCatalogProduct(id) })
+  })
+
+  app.patch('/api/admin/products/:id', requireAdmin, requireCsrf, (req, res) => {
+    const body = req.body || {}
+    const patch = {}
+    if (body.name !== undefined) patch.name = String(body.name).trim()
+    if (body.category !== undefined) patch.category = String(body.category).trim()
+    if (body.description !== undefined) patch.description = String(body.description).trim()
+    if (body.image !== undefined) patch.image = String(body.image).trim()
+    if (body.label !== undefined) patch.label = String(body.label).trim()
+    if (body.price !== undefined) patch.price = Number(body.price)
+    if (patch.name !== undefined && (patch.name.length < 2 || patch.name.length > 160) || patch.category !== undefined && (patch.category.length < 2 || patch.category.length > 80) || patch.description !== undefined && patch.description.length > 2000 || patch.image !== undefined && patch.image.length > 500 || patch.label !== undefined && patch.label.length > 60 || patch.price !== undefined && (!Number.isInteger(patch.price) || patch.price < 0 || patch.price > 1000000000)) return res.status(400).json({ error: 'INVALID_PRODUCT' })
+    const product = storeDb.updateCatalogProduct(req.params.id, patch)
+    if (!product) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    res.json({ product })
+  })
+
+  app.delete('/api/admin/products/:id', requireAdmin, requireCsrf, (req, res) => {
+    if (/^[1-4]$/.test(req.params.id)) return res.status(400).json({ error: 'FEATURED_PRODUCT_PROTECTED' })
+    if (!storeDb.deleteCatalogProduct(req.params.id)) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    res.json({ ok: true, id: req.params.id })
   })
 
   app.get('/api/admin/product-views', requireAdmin, (req, res) => {
@@ -539,8 +634,9 @@ export function createApp(overrides = {}) {
       image: null, symbol: product.symbol,
       viewCount: storeDb.getProductViewCount(String(product.id)),
     }))
-    const imported = storeDb.listCatalogProducts().map(({ id, name, category, image, viewCount }) => ({ id, name, category, image, viewCount }))
-    const products = [...original, ...imported]
+    const imported = storeDb.listCatalogProducts().map(({ id, name, category, image, symbol, viewCount }) => ({ id, name, category, image, symbol, viewCount }))
+    const unique = new Map([...original, ...imported].map((product) => [String(product.id), product]))
+    const products = [...unique.values()]
       .map((product, index) => ({ ...product, index }))
       .sort((a, b) => b.viewCount - a.viewCount || a.index - b.index)
       .slice(0, 20).map((entry, rank) => ({
@@ -564,12 +660,17 @@ export function createApp(overrides = {}) {
 
   app.get('/api/storefront/catalog', (req, res) => {
     res.set('Cache-Control', 'no-store')
-    res.json({ products: storeDb.storefrontCatalog() })
+    res.json({ products: storeDb.storefrontCatalog({ details: req.query.details === '1' }) })
+  })
+
+  app.get('/api/storefront/appearance', (req, res) => {
+    res.set('Cache-Control', 'no-store')
+    res.json({ appearance: parseJson(storeDb.getSetting('storefront_appearance'), {}) })
   })
 
   app.post('/api/storefront/products/:id/view', (req, res) => {
     const id = String(req.params.id)
-    if (!/^(?:[1-4]|demo-[a-f0-9-]{36})$/.test(id)) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    if (!/^[A-Za-z0-9_-]{1,120}$/.test(id)) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
     const rate = viewLimiter.consume(req.ip)
     if (!rate.allowed) return res.status(429).json({ error: 'RATE_LIMITED' })
     const viewCount = storeDb.recordProductView(id)

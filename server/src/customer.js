@@ -32,12 +32,11 @@ export function pointsForPaidGoods(amount, tier) {
   return Math.floor(basePoints * (tier === 'diamond' ? 1.5 : tier === 'gold' ? 1.2 : 1))
 }
 
-export function shippingFee({ region, distanceKm = 0, fulfillment = 'delivery' }, tier) {
+export function shippingFee({ region, distanceKm = 0, fulfillment = 'delivery' }) {
   if (fulfillment === 'pickup') return 0
   if (!['hcm', 'binh-duong', 'ba-ria-vung-tau', 'hanoi', 'nearby', 'far'].includes(region) ||
     (region === 'far' && (!Number.isInteger(distanceKm) || distanceKm < 0 || distanceKm > 3000))) throw new Error('INVALID_DELIVERY_REGION')
-  if (tier === 'diamond') return 0
-  if (region === 'hcm' || region === 'binh-duong' || region === 'ba-ria-vung-tau' || region === 'hanoi') return tier === 'gold' ? 0 : 30000
+  if (region === 'hcm' || region === 'binh-duong' || region === 'ba-ria-vung-tau' || region === 'hanoi') return 30000
   if (region === 'nearby') return 60000
   if (region === 'far' && Number.isInteger(distanceKm) && distanceKm >= 0 && distanceKm <= 3000) return 60000 + distanceKm * 1000
   throw new Error('INVALID_DELIVERY_REGION')
@@ -284,7 +283,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     const rating = req.body?.rating
     const comment = String(req.body?.comment || '').trim()
     if (!productById(id)) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
-    if (!Number.isInteger(rating) || rating < 1 || rating > 5 || comment.length < 3 || comment.length > 2000) return res.status(400).json({ error: 'INVALID_REVIEW' })
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5 || comment.length > 2000) return res.status(400).json({ error: 'INVALID_REVIEW' })
     sql.prepare(`INSERT INTO product_reviews (customer_id, product_id, rating, comment, created_at)
       VALUES (?, ?, ?, ?, ?) ON CONFLICT(customer_id, product_id) DO UPDATE SET rating=excluded.rating,
       comment=excluded.comment, admin_reply='', replied_at=NULL, created_at=excluded.created_at`).run(req.customer.id, id, rating, comment, now().toISOString())

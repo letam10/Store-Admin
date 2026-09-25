@@ -32,10 +32,10 @@ test('membership thresholds, shipping bands and wheel weights are exact', () => 
   assert.deepEqual([0, 99, 100, 999, 1000, 9999, 10000].map(tierForPoints),
     ['bronze', 'bronze', 'silver', 'silver', 'gold', 'gold', 'diamond'])
   assert.equal(shippingFee({ region: 'binh-duong' }, 'bronze'), 30000)
-  assert.equal(shippingFee({ region: 'ba-ria-vung-tau' }, 'gold'), 0)
+  assert.equal(shippingFee({ region: 'ba-ria-vung-tau' }, 'gold'), 30000)
   assert.equal(shippingFee({ region: 'nearby' }, 'silver'), 60000)
   assert.equal(shippingFee({ region: 'far', distanceKm: 20 }, 'silver'), 80000)
-  assert.equal(shippingFee({ region: 'far', distanceKm: 20 }, 'diamond'), 0)
+  assert.equal(shippingFee({ region: 'far', distanceKm: 20 }, 'diamond'), 80000)
   assert.deepEqual(rewardPrizes().reduce((counts, prize) => ({ ...counts, [prize.kind]: (counts[prize.kind] || 0) + 1 }), {}),
     { none: 6, amount: 3, percent: 1 })
   assert.equal(pointsForPaidGoods(999, 'bronze'), 0)

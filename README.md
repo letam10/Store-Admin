@@ -14,11 +14,10 @@ Node 24.19.0, npm 11.17.0 như Store; không tự nâng runtime.
 - src/pages/Admin*: toàn bộ giao diện admin, không còn trong bundle Store.
 - server/: backend, script, test, database local và dependency đã chuyển nguyên trạng.
 - ai/: mã/config training; giữ nguyên quy tắc ignore model/dataset/checkpoint.
-- shared/: hợp đồng dữ liệu mẫu độc lập để chạy backend. Store có bản dữ liệu mẫu riêng; đây chưa phải đồng bộ catalog live. Khi có CRUD production, backend/database phải là nguồn chuẩn.
+- shared/: hợp đồng dữ liệu nền; `server/data/catalog-products.json` là snapshot catalog 1.000 sản phẩm dùng để tự đồng bộ SQLite khi khởi động.
 - BACKEND.md: tài liệu backend trước khi tách, giữ nguyên cả ghi chú của người dùng.
-- Các bảng nghiệp vụ hiện là demo; không giả vờ đã kết nối CRUD. Đăng nhập admin, chat và báo cáo giữ nguyên backend hiện có.
-- Không commit server/data, .env, credential, model hoặc dữ liệu training nhạy cảm.
-- Chưa khởi tạo remote/push dự án admin. Store sẽ ghi nhận file đã chuyển là deleted; commit cả hai repo chỉ khi chủ dự án kiểm tra và quyết định.
+- Các module vận hành hỗ trợ CRUD demo có lưu SQLite: hàng hóa, xuất nhập kho, lưu thông, khách hàng, đánh giá, voucher, đơn thanh toán, CSKH, loại đơn hàng, nhân viên và tăng ca/khen thưởng.
+- Không commit `server/data/*.sqlite`, `.env`, credential, model hoặc dữ liệu training nhạy cảm; snapshot catalog JSON là dữ liệu demo có thể commit.
 
 ## Khách trên cloud, backend local
 Store là frontend static. Ưu tiên reverse proxy HTTPS cùng origin: /api/support/* từ cloud tới backend local qua tunnel có kiểm soát. Chặn /api/admin/* ở cổng public; admin dùng mạng riêng. Không public cổng Ollama hoặc SQLite. Localhost trên trình duyệt khách là máy khách, không phải máy chủ của bạn.
