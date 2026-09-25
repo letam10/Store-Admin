@@ -154,7 +154,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
   function productById(id) {
     const basic = baseProducts.find((item) => String(item.id) === id)
     if (basic) return { ...basic, stockCount: null, discountPercent: 0 }
-    const item = sql.prepare('SELECT id, name, category, price, discount_percent AS discountPercent, stock_count AS stockCount FROM catalog_products WHERE id = ?').get(id)
+    const item = sql.prepare('SELECT id, name, category, price, image, symbol, discount_percent AS discountPercent, stock_count AS stockCount FROM catalog_products WHERE id = ?').get(id)
     return item || null
   }
   function issueVoucher(customerId, { label, type, value, expiresAt, source }) {
@@ -358,7 +358,10 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
   })
   app.get('/api/admin/favorites', requireAdmin, (req, res) => {
     const favorites = sql.prepare('SELECT product_id AS id, COUNT(*) AS count FROM customer_favorites GROUP BY product_id ORDER BY count DESC, product_id').all()
-      .map((item) => ({ ...item, name: productById(item.id)?.name || item.id }))
+      .map((item) => {
+        const product = productById(item.id)
+        return { ...item, name: product?.name || item.id, image: product?.image || null, symbol: product?.symbol || '✦' }
+      })
     res.json({ favorites })
   })
   app.get('/api/admin/reviews', requireAdmin, (req, res) => {

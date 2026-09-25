@@ -66,9 +66,10 @@ export function AdminVouchers({ csrfToken }) {
 
 export function AdminFavorites() {
   const { data, error } = useReport('/api/admin/favorites')
+  const highest = data?.favorites[0]?.count || 1
   return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">SỞ THÍCH KHÁCH HÀNG</p><h2>Sản phẩm được yêu thích nhất</h2></div></div>
     {error && <p role="alert">{error}</p>}{!data && !error && <p>Đang tải…</p>}
-    {data && <div className="admin-view-list">{data.favorites.length ? data.favorites.map((item, index) => <article key={item.id}><b className="admin-view-rank">{index + 1}</b><div><strong>{item.name}</strong><small>{item.id}</small></div><b>{item.count} lượt yêu thích</b></article>) : <p>Chưa có sản phẩm yêu thích.</p>}</div>}
+    {data && <div className="admin-view-list">{data.favorites.length ? data.favorites.map((item, index) => <article key={item.id}><b className="admin-view-rank">{index + 1}</b>{item.image ? <img src={item.image} alt="" width="48" height="48" loading="lazy" /> : <span className="admin-view-symbol" aria-hidden="true">{item.symbol}</span>}<div><strong title={item.name}>{item.name}</strong><small>{item.id}</small><span className="admin-view-bar" style={{ '--view-width': `${item.count / highest * 100}%` }} /></div><b>{item.count} lượt yêu thích</b></article>) : <p>Chưa có sản phẩm yêu thích.</p>}</div>}
   </section>
 }
 
