@@ -34,9 +34,9 @@ export function pointsForPaidGoods(amount, tier) {
 
 export function shippingFee({ region, distanceKm = 0, fulfillment = 'delivery' }) {
   if (fulfillment === 'pickup') return 0
-  if (!['hcm', 'binh-duong', 'ba-ria-vung-tau', 'hanoi', 'nearby', 'far'].includes(region) ||
+  if (!['hcm', 'binh-duong', 'ba-ria-vung-tau', 'nearby', 'far'].includes(region) ||
     (region === 'far' && (!Number.isInteger(distanceKm) || distanceKm < 0 || distanceKm > 3000))) throw new Error('INVALID_DELIVERY_REGION')
-  if (region === 'hcm' || region === 'binh-duong' || region === 'ba-ria-vung-tau' || region === 'hanoi') return 30000
+  if (region === 'hcm' || region === 'binh-duong' || region === 'ba-ria-vung-tau') return 30000
   if (region === 'nearby') return 60000
   if (region === 'far' && Number.isInteger(distanceKm) && distanceKm >= 0 && distanceKm <= 3000) return 60000 + distanceKm * 1000
   throw new Error('INVALID_DELIVERY_REGION')
