@@ -25,7 +25,7 @@ function ProductOfferRow({ product, csrfToken, onSaved, onEdit, onDelete }) {
   const [saved, setSaved] = useState(false)
   async function submit(event) {
     event.preventDefault(); setError(''); setSaved(false); setSaving(true)
-    try { const offer = { discountPercent: Number(discountPercent), stockCount: stockCount === '' ? null : Number(stockCount) }; await apiJson('/api/admin/products/' + encodeURIComponent(product.id) + '/offer', { method: 'PATCH', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(offer) }); onSaved(product.id, offer); setSaved(true) }
+    try { const offer = { discountPercent: Number(discountPercent), stockCount: stockCount === '' ? 20 : Number(stockCount) }; await apiJson('/api/admin/products/' + encodeURIComponent(product.id) + '/offer', { method: 'PATCH', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(offer) }); onSaved(product.id, offer); setSaved(true) }
     catch (failure) { setError(failure.message || 'Không lưu được ưu đãi.') }
     finally { setSaving(false) }
   }
@@ -39,10 +39,14 @@ function ProductEditor({ product, csrfToken, onSaved, onCancel }) {
   async function submit(event) {
     event.preventDefault(); setError(''); setBusy(true)
     try {
-      const payload = await apiJson(product ? '/api/admin/products/' + encodeURIComponent(product.id) : '/api/admin/products', { method: product ? 'PATCH' : 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ ...form, price: Number(form.price) }) })
+      const normalizedPrice = Number(form.price)
+      const normalizedStock = Number(form.stockCount)
+      if (!Number.isInteger(normalizedPrice) || normalizedPrice < 1) throw new Error('Gia phai la so nguyen duong.')
+      if (!Number.isInteger(normalizedStock) || normalizedStock < 0) throw new Error('Ton kho phai la so nguyen tu 0 tro len.')
+      const payload = await apiJson(product ? '/api/admin/products/' + encodeURIComponent(product.id) : '/api/admin/products', { method: product ? 'PATCH' : 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ ...form, price: normalizedPrice }) })
       const savedProduct = payload.product
-      await apiJson('/api/admin/products/' + encodeURIComponent(savedProduct.id) + '/offer', { method: 'PATCH', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ discountPercent: Number(savedProduct.discountPercent || 0), stockCount: Number(form.stockCount) }) })
-      onSaved({ ...savedProduct, stockCount: Number(form.stockCount) })
+      await apiJson('/api/admin/products/' + encodeURIComponent(savedProduct.id) + '/offer', { method: 'PATCH', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ discountPercent: Number(savedProduct.discountPercent || 0), stockCount: normalizedStock }) })
+      onSaved({ ...savedProduct, stockCount: normalizedStock })
     }
     catch (failure) { setError(failure.message || 'Không lưu được sản phẩm.') }
     finally { setBusy(false) }
