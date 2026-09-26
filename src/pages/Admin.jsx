@@ -34,6 +34,8 @@ function formatMoney(value) {
 
 export default function Admin() {
   const today = useMemo(() => businessToday(), [])
+  const [theme, setTheme] = useState(() => localStorage.getItem('store_admin_theme') || 'light')
+  const [language, setLanguage] = useState(() => localStorage.getItem('store_admin_language') || 'vi')
   const [session, setSession] = useState(null)
   const [credentials, setCredentials] = useState({ username: '', password: '' })
   const [loginError, setLoginError] = useState('')
@@ -59,6 +61,35 @@ export default function Admin() {
   const settingsEpochRef = useRef(0)
   const sessionProbeRef = useRef(0)
   const adminSearchRef = useRef(null)
+
+  useEffect(() => {
+    document.documentElement.dataset.adminTheme = theme === 'dark' ? 'dark' : 'light'
+    localStorage.setItem('store_admin_theme', theme === 'dark' ? 'dark' : 'light')
+  }, [theme])
+
+  useEffect(() => {
+    document.documentElement.lang = language === 'en' ? 'en' : 'vi'
+    localStorage.setItem('store_admin_language', language === 'en' ? 'en' : 'vi')
+  }, [language])
+
+  const copy = language === 'en' ? {
+    login: 'Sign in', account: 'Account', password: 'Password', signOut: 'Sign out',
+    backStore: '← Back to Store', adminOnly: 'Backend authentication is required before admin data is opened.',
+    wrongLogin: 'Invalid username or password.', searching: 'Search admin modules…', local: '● Local system',
+    themeLight: 'Light mode', themeDark: 'Dark mode', language: 'Language',
+  } : {
+    login: 'Đăng nhập', account: 'Tài khoản', password: 'Mật khẩu', signOut: 'Đăng xuất',
+    backStore: '← Quay lại Store', adminOnly: 'Backend phải xác thực trước khi mở dữ liệu admin.',
+    wrongLogin: 'Sai tài khoản hoặc mật khẩu.', searching: 'Tìm module quản trị…', local: '● Hệ thống local',
+    themeLight: 'Giao diện sáng', themeDark: 'Giao diện tối', language: 'Ngôn ngữ',
+  }
+
+  function ThemeLanguageControls({ compact = false }) {
+    return <div className={'admin-preferences' + (compact ? ' admin-preferences--compact' : '')}>
+      <label className="admin-language-control"><span className="sr-only">{copy.language}</span><select value={language} onChange={(event) => setLanguage(event.target.value)} aria-label={copy.language}><option value="vi">VI</option><option value="en">EN</option></select></label>
+      <button type="button" className="admin-theme-toggle" onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? copy.themeLight : copy.themeDark} title={theme === 'dark' ? copy.themeLight : copy.themeDark}>{theme === 'dark' ? '☀' : '☾'}<span>{theme === 'dark' ? 'Light' : 'Dark'}</span></button>
+    </div>
+  }
 
   function clearSensitiveUi({ removeStorageFor = '' } = {}) {
     gateRef.current.cancel()
@@ -280,17 +311,18 @@ export default function Admin() {
     setBusy(false); setActivity('Đã dừng')
   }
 
-  if (session === null) return <main className="admin-shell"><p>Đang kiểm tra phiên admin…</p></main>
+  if (session === null) return <main className="admin-shell"><div className="admin-loading-state"><p>Đang kiểm tra phiên admin…</p><ThemeLanguageControls compact /></div></main>
   if (!session?.authenticated) return (
-    <main className="admin-shell admin-shell--login"><form className="admin-login" onSubmit={login}>
-      <p className="admin-eyebrow">STORE ADMIN</p><h1>Đăng nhập</h1><p>Backend phải xác thực trước khi mở dữ liệu admin.</p>
-      <label>Tài khoản<input autoComplete="username" value={credentials.username} onChange={(event) => setCredentials((current) => ({ ...current, username: event.target.value }))} /></label>
-      <label>Mật khẩu<input type="password" autoComplete="current-password" value={credentials.password} onChange={(event) => setCredentials((current) => ({ ...current, password: event.target.value }))} /></label>
-      {loginError && <p className="admin-error" role="alert">{loginError}</p>}<button type="submit">Đăng nhập</button><a href={import.meta.env?.VITE_STOREFRONT_URL || 'http://localhost:5173'}>← Quay lại Store</a>
-    </form></main>
+    <main className="admin-shell admin-shell--login"><div className="admin-login-frame"><ThemeLanguageControls /><form className="admin-login" onSubmit={login}>
+      <p className="admin-eyebrow">STORE ADMIN</p><h1>{copy.login}</h1><p>{copy.adminOnly}</p>
+      <label>{copy.account}<input autoComplete="username" value={credentials.username} onChange={(event) => setCredentials((current) => ({ ...current, username: event.target.value }))} /></label>
+      <label>{copy.password}<input type="password" autoComplete="current-password" value={credentials.password} onChange={(event) => setCredentials((current) => ({ ...current, password: event.target.value }))} /></label>
+      {loginError && <p className="admin-error" role="alert">{language === 'en' && loginError === 'Sai tài khoản hoặc mật khẩu.' ? copy.wrongLogin : loginError}</p>}<button type="submit">{copy.login}</button><a href={import.meta.env?.VITE_STOREFRONT_URL || 'http://localhost:5173'}>{copy.backStore}</a>
+    </form></div></main>
   )
 
-  const currentLabel = adminModules.find(([id]) => id === activeModule)?.[1] || 'Tổng quan'
+  const moduleEnglish = { dashboard: 'Dashboard', customers: 'Customers', favorites: 'Favorites', reviews: 'Reviews', 'customer-orders': 'Orders', products: 'Products', 'product-views': 'Most viewed', logistics: 'Logistics', inventory: 'Inventory', appearance: 'Storefront', statistics: 'Statistics', 'ai-local': 'Local AI', 'order-types': 'Order types', support: 'Support', 'rewards-wheel': 'Voucher', staff: 'Staff', overtime: 'Overtime & rewards' }
+  const currentLabel = language === 'en' ? (moduleEnglish[activeModule] || 'Dashboard') : (adminModules.find(([id]) => id === activeModule)?.[1] || 'Tổng quan')
 
   return (
     <main className="admin-shell admin-shell--workspace">
@@ -300,24 +332,25 @@ export default function Admin() {
         <nav aria-label="Điều hướng quản trị">
           {moduleGroups.map((group) => <div className="admin-nav-group" key={group.title}><p>{group.title}</p>{group.ids.map((id) => {
             const [, label, icon] = moduleById.get(id)
-            return <button key={id} type="button" aria-current={activeModule === id ? 'page' : undefined} className={activeModule === id ? 'is-active' : ''} onClick={() => setActiveModule(id)}><span aria-hidden="true">{icon}</span>{label}</button>
+            const displayLabel = language === 'en' ? ({ dashboard: 'Dashboard', statistics: 'Statistics', 'ai-local': 'Local AI', products: 'Products', 'product-views': 'Most viewed', inventory: 'Inventory', logistics: 'Logistics', appearance: 'Storefront', customers: 'Customers', favorites: 'Favorites', reviews: 'Reviews', 'rewards-wheel': 'Voucher', 'customer-orders': 'Orders', support: 'Support', 'order-types': 'Order types', staff: 'Staff', overtime: 'Overtime & rewards' }[id] || label) : label
+            return <button key={id} type="button" aria-current={activeModule === id ? 'page' : undefined} className={activeModule === id ? 'is-active' : ''} onClick={() => setActiveModule(id)}><span aria-hidden="true">{icon}</span>{displayLabel}</button>
           })}</div>)}
         </nav>
-        <div className="admin-sidebar__footer"><a href={import.meta.env?.VITE_STOREFRONT_URL || 'http://localhost:5173'}>↗ Xem cửa hàng</a><button type="button" onClick={logout}>Đăng xuất</button></div>
+        <div className="admin-sidebar__footer"><a href={import.meta.env?.VITE_STOREFRONT_URL || 'http://localhost:5173'}>↗ {language === 'en' ? 'View store' : 'Xem cửa hàng'}</a><button type="button" onClick={logout}>{copy.signOut}</button></div>
       </aside>
       <section className="admin-main">
         <header className="admin-header">
           <div><p className="admin-eyebrow">STORE ADMIN / {activeModule.toUpperCase()}</p><h1>{currentLabel}</h1></div>
           <div className="admin-global-search">
             <span aria-hidden="true">⌕</span>
-            <input ref={adminSearchRef} type="search" value={adminSearch} onChange={(event) => setAdminSearch(event.target.value)} placeholder="Tìm module quản trị…" aria-label="Tìm module quản trị" />
+            <input ref={adminSearchRef} type="search" value={adminSearch} onChange={(event) => setAdminSearch(event.target.value)} placeholder={copy.searching} aria-label={copy.searching} />
             <kbd>Ctrl K</kbd>
             {adminSearch && <div className="admin-search-results">{adminModules.filter(([,label]) => normalizeSearch(label).includes(normalizeSearch(adminSearch))).slice(0,6).map(([id,label,icon]) => <button key={id} type="button" onClick={() => { setActiveModule(id); setAdminSearch('') }}><span aria-hidden="true">{icon}</span>{label}</button>)}{adminModules.filter(([,label]) => normalizeSearch(label).includes(normalizeSearch(adminSearch))).length === 0 && <p>Không tìm thấy module.</p>}</div>}
           </div>
-          <div className="admin-header__actions"><span className="admin-live-dot">● Hệ thống local</span><button type="button" onClick={logout}>Đăng xuất</button></div>
+          <div className="admin-header__actions"><span className="admin-live-dot">{copy.local}</span><ThemeLanguageControls /><button type="button" onClick={logout}>{copy.signOut}</button></div>
         </header>
         {pageError && <p className="admin-error" role="alert">{pageError}</p>}
-        {activeModule !== 'ai-local' && <AdminModule module={activeModule} csrfToken={session.csrfToken} onNavigate={setActiveModule} />}
+        {activeModule !== 'ai-local' && <AdminModule module={activeModule} csrfToken={session.csrfToken} onNavigate={setActiveModule} language={language} />}
         {activeModule === 'ai-local' && <>
           <section className="admin-meta" aria-label="Cấu hình AI">
             <div><small>Model</small><strong>{settings?.model || 'qwen3.5:4b'}</strong></div>

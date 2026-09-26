@@ -4,6 +4,12 @@ import './AdminCommerce.css'
 
 const money = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' })
 
+function adminErrorMessage(failure, fallback = 'Co loi xay ra, vui long thu lai.') {
+  const code = String(failure?.code || '').toUpperCase()
+  const known = { INVALID_PRODUCT: 'Du lieu san pham khong hop le.', INVALID_PRODUCT_OFFER: 'Gia tri giam gia hoac ton kho khong hop le.', INVALID_VOUCHER: 'Thong tin voucher khong hop le.', CUSTOMER_NOT_FOUND: 'Khong tim thay khach hang.', UNAUTHENTICATED: 'Phien dang nhap da het, vui long dang nhap lai.' }
+  return known[code] || (failure?.message && !/^[A-Z0-9_ -]+$/.test(String(failure.message)) ? failure.message : fallback)
+}
+
 function useReport(path) {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
@@ -34,7 +40,8 @@ export function AdminCustomers() {
 }
 
 export function AdminVouchers({ csrfToken }) {
-  const { data, error, reload } = useReport('/api/admin/customers')
+  const { data, error, reload: reloadCustomers } = useReport('/api/admin/customers')
+  const { data: voucherData, error: voucherError, reload: reloadVouchers } = useReport('/api/admin/vouchers')
   const [customerId, setCustomerId] = useState('')
   const [scope, setScope] = useState('goods')
   const [type, setType] = useState('amount')
@@ -46,23 +53,34 @@ export function AdminVouchers({ csrfToken }) {
   async function submit(event) {
     event.preventDefault(); setBusy(true); setSubmitError(''); setCreated(null)
     try {
+      const numericValue = Number(value)
+      const numericDays = Number(days)
+      const maxValue = type === 'amount' ? 10000000 : 100
+      if (!Number.isInteger(numericValue) || numericValue < 1 || numericValue > maxValue) throw Object.assign(new Error(''), { code: 'INVALID_VOUCHER' })
+      if (!Number.isInteger(numericDays) || numericDays < 1 || numericDays > 365) throw Object.assign(new Error(''), { code: 'INVALID_VOUCHER' })
       const expiresAt = new Date(Date.now() + Number(days) * 86400000).toISOString()
-      const payload = await apiJson('/api/admin/customers/' + customerId + '/vouchers', { method: 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ type, scope, value: Number(value), expiresAt }) })
-      setCreated(payload.voucher); reload()
-    } catch (failure) { setSubmitError(failure.message) }
+      const payload = await apiJson('/api/admin/vouchers', { method: 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ customerId: Number(customerId), type, scope, value: numericValue, expiresAt }) })
+      setCreated(payload.voucher); reloadCustomers(); reloadVouchers()
+    } catch (failure) { setSubmitError(adminErrorMessage(failure, 'Khong tao duoc voucher.')) }
     finally { setBusy(false) }
   }
-  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">ƯU ĐÃI CỦA KHÁCH</p><h2>Cấp voucher</h2><p>Mã gồm 10 ký tự được tạo duy nhất trên máy chủ. Chọn đúng nhóm hàng hóa hoặc phí vận chuyển để Store hiển thị đúng ô.</p></div></div>
+  async function remove(voucher) {
+    if (!window.confirm('Xoa voucher ' + voucher.code + '?')) return
+    try { await apiJson('/api/admin/vouchers/' + encodeURIComponent(voucher.code), { method: 'DELETE', headers: { 'x-csrf-token': csrfToken } }); reloadVouchers() }
+    catch (failure) { setSubmitError(adminErrorMessage(failure, 'Khong xoa duoc voucher.')) }
+  }
+  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">VOUCHER STORE</p><h2>Voucher</h2><p>Thêm voucher mới cho khách hàng. Mã 10 ký tự được tạo duy nhất trên máy chủ và không thể sửa.</p></div><span className="admin-preview-badge">{voucherData?.vouchers?.length || 0} voucher</span></div>
     {error && <p role="alert">{error}</p>}
     <form className="admin-commerce-form" onSubmit={submit}>
       <label>Khách hàng<select required value={customerId} onChange={(event) => setCustomerId(event.target.value)}><option value="">Chọn khách</option>{data?.customers.map((item) => <option key={item.id} value={item.id}>{item.username} · {item.points} điểm</option>)}</select></label>
       <label>Áp dụng cho<select value={scope} onChange={(event) => setScope(event.target.value)}><option value="goods">Hàng hóa</option><option value="shipping">Phí vận chuyển</option></select></label>
       <label>Loại<select value={type} onChange={(event) => { setType(event.target.value); setValue(event.target.value === 'amount' ? 100000 : 20) }}><option value="amount">Giảm số tiền</option><option value="percent">Giảm phần trăm</option></select></label>
-      <label>Giá trị<input type="number" min="1" max={type === 'amount' ? '10000000' : '100'} value={value} onChange={(event) => setValue(event.target.value)} required /></label>
-      <label>Hạn dùng sau (ngày)<input type="number" min="1" max="365" value={days} onChange={(event) => setDays(event.target.value)} required /></label>
+      <label>Giá trị<input type="number" min="1" max={type === 'amount' ? '10000000' : '100'} step="1" value={value} onChange={(event) => setValue(event.target.value)} onBlur={() => setValue((current) => Math.min(type === 'amount' ? 10000000 : 100, Math.max(1, Number(current) || 1)))} required /></label>
+      <label>Hạn dùng sau (ngày)<input type="number" min="1" max="365" step="1" value={days} onChange={(event) => setDays(event.target.value)} required /></label>
       <button type="submit" disabled={busy || !customerId}>{busy ? 'Đang cấp…' : 'Cấp voucher'}</button>
     </form>
     {submitError && <p role="alert">{submitError}</p>}{created && <p role="status">Đã cấp {created.label} · mã <code>{created.code}</code> · hết hạn {new Date(created.expiresAt).toLocaleDateString('vi-VN')}</p>}
+    <div className="admin-voucher-list"><h3>Voucher đã tạo</h3>{voucherError && <p role="alert">{adminErrorMessage({ message: voucherError }, 'Khong tai duoc voucher.')}</p>}{voucherData?.vouchers?.length ? voucherData.vouchers.map((voucher) => <article key={voucher.code}><div><b>{voucher.label}</b><small>{voucher.username || '—'} · {voucher.type === 'amount' ? new Intl.NumberFormat('vi-VN').format(voucher.value) + ' ₫' : voucher.value + '%'}</small></div><code>{voucher.code}</code><span>Hết hạn {new Date(voucher.expiresAt).toLocaleDateString('vi-VN')}</span><button type="button" className="table-action table-action--danger" onClick={() => remove(voucher)}>Xóa</button></article>) : <p className="admin-empty">Chưa có voucher.</p>}</div>
   </section>
 }
 

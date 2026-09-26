@@ -13,7 +13,7 @@ export const adminModules = [
   ['ai-local', 'AI local', '✺'],
   ['order-types', 'Loại đơn hàng', '≡'],
   ['support', 'CSKH', '☏'],
-  ['rewards-wheel', 'Cấp voucher', '◌'],
+  ['rewards-wheel', 'Voucher', '◌'],
   ['staff', 'Nhân viên', '♙'],
   ['overtime', 'Tăng ca & khen thưởng', '★'],
 ]
