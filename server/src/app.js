@@ -534,6 +534,13 @@ export function createApp(overrides = {}) {
     res.json({ overview: storeDb.adminOverview() })
   })
 
+  // Stable alias for dashboard clients. Keep /overview for existing builds,
+  // while allowing a dashboard module to use a semantically named endpoint.
+  app.get('/api/admin/dashboard', requireAdmin, (req, res) => {
+    const dashboard = storeDb.adminOverview()
+    res.json({ dashboard, overview: dashboard })
+  })
+
   app.get('/api/admin/records/:module', requireAdmin, (req, res) => {
     if (!ADMIN_RECORD_MODULES.has(req.params.module)) return res.status(404).json({ error: 'MODULE_NOT_FOUND' })
     res.json({ module: req.params.module, records: storeDb.listAdminRecords(req.params.module) })
@@ -595,13 +602,15 @@ export function createApp(overrides = {}) {
     const description = String(body.description || 'Sản phẩm do quản trị viên tạo để thử giao diện.').trim()
     const image = String(body.image || '/products/bag.svg').trim()
     const price = Number(body.price)
+    const stockCount = body.stockCount
     if (name.length < 2 || name.length > 160 || category.length < 2 || category.length > 80 || description.length > 2000 ||
-      !Number.isInteger(price) || price < 0 || price > 1000000000 || image.length > 500) return res.status(400).json({ error: 'INVALID_PRODUCT' })
+      !Number.isInteger(price) || price < 0 || price > 1000000000 || !Number.isInteger(stockCount) || stockCount < 0 || stockCount > 999999 || image.length > 500) return res.status(400).json({ error: 'INVALID_PRODUCT' })
     const id = 'manual-' + randomUUID()
     const product = {
       id, source: 'admin-manual', sourceId: id, name, category, price, description, image,
       features: Array.isArray(body.features) ? body.features.filter((item) => typeof item === 'string').slice(0, 6) : [],
       tone: 'green', symbol: '✦', label: 'Mới', sourceUrl: 'local://admin-manual', sourcePriceCents: price, sourceCurrency: 'VND', importedAt: new Date().toISOString(), discountPercent: 0,
+      stockCount,
     }
     storeDb.upsertCatalogProducts([product])
     res.status(201).json({ product: storeDb.getCatalogProduct(id) })
@@ -616,7 +625,8 @@ export function createApp(overrides = {}) {
     if (body.image !== undefined) patch.image = String(body.image).trim()
     if (body.label !== undefined) patch.label = String(body.label).trim()
     if (body.price !== undefined) patch.price = Number(body.price)
-    if (patch.name !== undefined && (patch.name.length < 2 || patch.name.length > 160) || patch.category !== undefined && (patch.category.length < 2 || patch.category.length > 80) || patch.description !== undefined && patch.description.length > 2000 || patch.image !== undefined && patch.image.length > 500 || patch.label !== undefined && patch.label.length > 60 || patch.price !== undefined && (!Number.isInteger(patch.price) || patch.price < 0 || patch.price > 1000000000)) return res.status(400).json({ error: 'INVALID_PRODUCT' })
+    if (body.stockCount !== undefined) patch.stockCount = Number(body.stockCount)
+    if (patch.name !== undefined && (patch.name.length < 2 || patch.name.length > 160) || patch.category !== undefined && (patch.category.length < 2 || patch.category.length > 80) || patch.description !== undefined && patch.description.length > 2000 || patch.image !== undefined && patch.image.length > 500 || patch.label !== undefined && patch.label.length > 60 || patch.price !== undefined && (!Number.isInteger(patch.price) || patch.price < 0 || patch.price > 1000000000) || patch.stockCount !== undefined && (!Number.isInteger(patch.stockCount) || patch.stockCount < 0 || patch.stockCount > 999999)) return res.status(400).json({ error: 'INVALID_PRODUCT' })
     const product = storeDb.updateCatalogProduct(req.params.id, patch)
     if (!product) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
     res.json({ product })
@@ -651,7 +661,7 @@ export function createApp(overrides = {}) {
     if (!body || typeof body !== 'object' || Array.isArray(body)
       || Object.keys(body).sort().join(',') !== 'discountPercent,stockCount'
       || !Number.isInteger(body.discountPercent) || body.discountPercent < 0 || body.discountPercent > 90
-      || (body.stockCount !== null && (!Number.isInteger(body.stockCount) || body.stockCount < 0 || body.stockCount > 999999))) {
+      || !Number.isInteger(body.stockCount) || body.stockCount < 0 || body.stockCount > 999999) {
       return res.status(400).json({ error: 'INVALID_PRODUCT_OFFER' })
     }
     if (!storeDb.updateCatalogOffer(req.params.id, body)) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })

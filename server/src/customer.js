@@ -184,9 +184,10 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
   }
   function productById(id) {
     const basic = baseProducts.find((item) => String(item.id) === id)
-    if (basic) return { ...basic, stockCount: null, discountPercent: 0 }
+    if (basic) return { ...basic, stockCount: 20, discountPercent: 0 }
     const item = sql.prepare('SELECT id, name, category, price, image, symbol, discount_percent AS discountPercent, stock_count AS stockCount FROM catalog_products WHERE id = ?').get(id)
-    return item || null
+    if (!item) return null
+    return { ...item, stockCount: Number.isInteger(item.stockCount) && item.stockCount >= 0 ? item.stockCount : 20 }
   }
   function issueVoucher(customerId, { label, type, value, scope = 'goods', expiresAt, source }) {
     for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -399,6 +400,48 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       ? `Ship ${type === 'amount' ? 'giảm ' + new Intl.NumberFormat('vi-VN').format(value) + ' ₫' : 'giảm ' + value + '%'}`
       : type === 'amount' ? `Giảm ${new Intl.NumberFormat('vi-VN').format(value)} ₫` : `Giảm ${value}%`
     res.status(201).json({ voucher: issueVoucher(customerId, { label, type, value, scope, expiresAt: date.toISOString(), source: 'admin' }) })
+  })
+  // Voucher management endpoint used by the dedicated admin Voucher module.
+  // Codes are generated and persisted only by the server; they are immutable.
+  app.get('/api/admin/vouchers', requireAdmin, (req, res) => {
+    cleanExpired(sql, now().toISOString())
+    const vouchers = sql.prepare(`SELECT v.code, v.label, v.type, v.value, v.scope, v.expires_at AS expiresAt,
+      v.source, v.created_at AS createdAt, c.id AS customerId, c.username, c.email
+      FROM customer_vouchers v JOIN customers c ON c.id = v.customer_id
+      ORDER BY v.created_at DESC`).all()
+    res.json({ vouchers })
+  })
+  app.post('/api/admin/vouchers', requireAdmin, requireCsrf, (req, res) => {
+    const customerId = Number(req.body?.customerId)
+    const type = req.body?.type
+    const scope = req.body?.scope === 'shipping' ? 'shipping' : 'goods'
+    const value = req.body?.value
+    const date = new Date(req.body?.expiresAt)
+    if (!Number.isInteger(customerId) || customerId < 1 ||
+      !sql.prepare('SELECT id FROM customers WHERE id = ?').get(customerId) ||
+      !['amount', 'percent'].includes(type) || !Number.isInteger(value) || value < 1 || value > (type === 'percent' ? 100 : 10000000) ||
+      !Number.isFinite(date.getTime()) || date <= now() || date.getTime() > now().getTime() + 365 * 86400000) {
+      return res.status(400).json({ error: 'INVALID_VOUCHER', message: 'Voucher khong hop le.' })
+    }
+    const label = String(req.body?.label || '').trim()
+    const generatedLabel = scope === 'shipping'
+      ? `Ship ${type === 'amount' ? 'giảm ' + new Intl.NumberFormat('vi-VN').format(value) + ' ₫' : 'giảm ' + value + '%'}`
+      : type === 'amount' ? `Giảm ${new Intl.NumberFormat('vi-VN').format(value)} ₫` : `Giảm ${value}%`
+    if (label.length > 120) return res.status(400).json({ error: 'INVALID_VOUCHER', message: 'Ten voucher qua dai.' })
+    res.status(201).json({ voucher: issueVoucher(customerId, { label: label || generatedLabel, type, value, scope, expiresAt: date.toISOString(), source: 'admin' }) })
+  })
+  app.delete('/api/admin/vouchers/:code', requireAdmin, requireCsrf, (req, res) => {
+    const code = String(req.params.code || '').toUpperCase()
+    if (!/^[A-Z2-9]{10}$/.test(code)) return res.status(400).json({ error: 'INVALID_VOUCHER', message: 'Ma voucher khong hop le.' })
+    const removed = sql.transaction(() => {
+      const exists = sql.prepare('SELECT code FROM voucher_codes WHERE code = ?').get(code)
+      if (!exists) return false
+      sql.prepare('DELETE FROM customer_vouchers WHERE code = ?').run(code)
+      sql.prepare('DELETE FROM voucher_codes WHERE code = ?').run(code)
+      return true
+    })()
+    if (!removed) return res.status(404).json({ error: 'VOUCHER_NOT_FOUND' })
+    res.json({ ok: true, code })
   })
   app.get('/api/admin/favorites', requireAdmin, (req, res) => {
     const favorites = sql.prepare('SELECT product_id AS id, COUNT(*) AS count FROM customer_favorites GROUP BY product_id ORDER BY count DESC, product_id').all()

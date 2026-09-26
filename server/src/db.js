@@ -183,7 +183,14 @@ export class StoreDb {
       this.db.exec('ALTER TABLE catalog_products ADD COLUMN discount_percent INTEGER NOT NULL DEFAULT 0 CHECK(discount_percent BETWEEN 0 AND 90)')
       this.db.prepare('UPDATE catalog_products SET discount_percent = 15 WHERE id IN (SELECT id FROM catalog_products ORDER BY rowid LIMIT 8)').run()
     }
-    if (!productColumns.includes('stock_count')) this.db.exec('ALTER TABLE catalog_products ADD COLUMN stock_count INTEGER CHECK(stock_count IS NULL OR stock_count >= 0)')
+    // Every sellable catalog row has a concrete stock value. Older databases
+    // used a nullable column to mean "unknown"; migrate those rows to the
+    // documented default instead of exposing an unlimited/unknown quantity.
+    if (!productColumns.includes('stock_count')) {
+      this.db.exec('ALTER TABLE catalog_products ADD COLUMN stock_count INTEGER NOT NULL DEFAULT 20 CHECK(stock_count >= 0)')
+    } else {
+      this.db.prepare('UPDATE catalog_products SET stock_count = 20 WHERE stock_count IS NULL').run()
+    }
   }
 
   claimBackend() {
@@ -257,11 +264,11 @@ export class StoreDb {
       INSERT INTO catalog_products (
         id, source, source_id, name, category, price, description, image,
         features_json, tone, symbol, label, source_url, source_price_cents,
-        source_currency, imported_at, discount_percent
+        source_currency, imported_at, discount_percent, stock_count
       ) VALUES (
         @id, @source, @sourceId, @name, @category, @price, @description, @image,
         @featuresJson, @tone, @symbol, @label, @sourceUrl, @sourcePriceCents,
-        @sourceCurrency, @importedAt, @discountPercent
+        @sourceCurrency, @importedAt, @discountPercent, @stockCount
       )
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name, category = excluded.category, price = excluded.price,
@@ -277,6 +284,7 @@ export class StoreDb {
           ...product,
           featuresJson: JSON.stringify(product.features),
           discountPercent: product.discountPercent ?? (index < 8 ? 15 : 0),
+          stockCount: Number.isInteger(product.stockCount) && product.stockCount >= 0 ? product.stockCount : 20,
         })
       }
     })(products)
@@ -311,7 +319,7 @@ export class StoreDb {
     const rows = this.db.prepare('SELECT p.id, p.discount_percent, p.stock_count, COALESCE(v.view_count, 0) AS view_count FROM catalog_products p LEFT JOIN product_views v ON v.product_id = p.id').all()
     const featured = this.db.prepare("SELECT product_id AS id, view_count FROM product_views WHERE product_id IN ('1', '2', '3', '4')").all()
     const result = new Map(rows.map((row) => [String(row.id), { id: row.id, discountPercent: row.discount_percent, stockCount: row.stock_count, viewCount: row.view_count }]))
-    for (const row of featured) if (!result.has(String(row.id))) result.set(String(row.id), { id: row.id, discountPercent: 0, stockCount: null, viewCount: row.view_count })
+    for (const row of featured) if (!result.has(String(row.id))) result.set(String(row.id), { id: row.id, discountPercent: 0, stockCount: 20, viewCount: row.view_count })
     return [...result.values()]
   }
 
@@ -325,10 +333,10 @@ export class StoreDb {
   }
 
   updateCatalogProduct(id, patch) {
-    const allowed = ['name', 'category', 'price', 'description', 'image', 'label', 'source_url']
-    const entries = allowed.filter((key) => patch[key] !== undefined)
+    const columns = { name: 'name', category: 'category', price: 'price', description: 'description', image: 'image', label: 'label', source_url: 'source_url', stockCount: 'stock_count' }
+    const entries = Object.keys(columns).filter((key) => patch[key] !== undefined)
     if (!entries.length) return this.getCatalogProduct(id)
-    const assignments = entries.map((key) => `${key} = ?`).join(', ')
+    const assignments = entries.map((key) => `${columns[key]} = ?`).join(', ')
     const values = entries.map((key) => patch[key])
     const result = this.db.prepare(`UPDATE catalog_products SET ${assignments} WHERE id = ?`).run(...values, id)
     return result.changes ? this.getCatalogProduct(id) : null
