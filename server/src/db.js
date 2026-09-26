@@ -381,15 +381,53 @@ export class StoreDb {
         SUM(CASE WHEN status IN ('paid','completed') THEN 1 ELSE 0 END) AS orders
       FROM orders GROUP BY business_date ORDER BY business_date ASC
     `).all().map((row) => ({ date: row.date, revenue: Number(row.revenue || 0), orders: Number(row.orders || 0) }))
-    const revenue = revenueByDay.reduce((sum, item) => sum + item.revenue, 0)
-    const includedOrders = revenueByDay.reduce((sum, item) => sum + item.orders, 0)
+    // Customer checkout orders live in a separate table from the legacy
+    // operations/demo order ledger. Include both sources so the dashboard
+    // reflects real payments after an admin marks a customer order paid.
+    let customerRevenueByDay = []
+    try {
+      customerRevenueByDay = this.db.prepare(`
+        SELECT substr(COALESCE(paid_at, created_at), 1, 10) AS date,
+          COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total ELSE 0 END), 0) AS revenue,
+          SUM(CASE WHEN status IN ('paid','completed') THEN 1 ELSE 0 END) AS orders
+        FROM customer_orders
+        GROUP BY substr(COALESCE(paid_at, created_at), 1, 10)
+        ORDER BY date ASC
+      `).all().map((row) => ({ date: row.date, revenue: Number(row.revenue || 0), orders: Number(row.orders || 0) }))
+    } catch {
+      // customer_orders is created by the customer route migration; an
+      // early direct StoreDb consumer may not have run that migration yet.
+    }
+    const byDate = new Map()
+    for (const item of [...revenueByDay, ...customerRevenueByDay]) {
+      const current = byDate.get(item.date) || { date: item.date, revenue: 0, orders: 0 }
+      current.revenue += item.revenue
+      current.orders += item.orders
+      byDate.set(item.date, current)
+    }
+    const combinedRevenueByDay = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
+    const revenue = combinedRevenueByDay.reduce((sum, item) => sum + item.revenue, 0)
+    const includedOrders = combinedRevenueByDay.reduce((sum, item) => sum + item.orders, 0)
+    const customerOrders = count('customer_orders')
+    const legacyOrders = count('orders')
+    let orderStatus = ['pending', 'paid', 'completed', 'cancelled'].map((status) => ({
+      status, count: this.db.prepare('SELECT COUNT(*) AS count FROM orders WHERE status = ?').get(status).count,
+    }))
+    try {
+      const customerStatus = this.db.prepare('SELECT status, COUNT(*) AS count FROM customer_orders GROUP BY status').all()
+      const counts = new Map(orderStatus.map((item) => [item.status, Number(item.count || 0)]))
+      for (const item of customerStatus) counts.set(item.status, (counts.get(item.status) || 0) + Number(item.count || 0))
+      orderStatus = [...counts.entries()].map(([status, value]) => ({ status, count: value }))
+    } catch {
+      // Keep the legacy status report when customer routes are not migrated.
+    }
     return {
-      products: count('catalog_products'), customers: count('customers'), orders: count('customer_orders'),
+      products: count('catalog_products'), customers: count('customers'), orders: legacyOrders + customerOrders,
+      customerOrders, legacyOrders,
       reviews: count('product_reviews'), favorites: count('customer_favorites'), records: count('admin_records'),
-      openSupport: count('conversations'), totalViews: this.totalProductViews(), revenue, includedOrders,
-      revenueByDay, orderStatus: ['pending', 'paid', 'completed', 'cancelled'].map((status) => ({
-        status, count: this.db.prepare('SELECT COUNT(*) AS count FROM orders WHERE status = ?').get(status).count,
-      })),
+      openSupport: this.db.prepare("SELECT COUNT(*) AS count FROM conversations WHERE kind = 'support'").get()?.count || 0,
+      totalViews: this.totalProductViews(), revenue, includedOrders,
+      revenueByDay: combinedRevenueByDay, orderStatus,
     }
   }
 

@@ -390,11 +390,11 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
   app.post('/api/admin/customers/:id/vouchers', requireAdmin, requireCsrf, (req, res) => {
     const customerId = Number(req.params.id)
     const type = req.body?.type
-    const scope = req.body?.scope === 'shipping' ? 'shipping' : 'goods'
+    const scope = req.body?.scope === undefined ? 'goods' : req.body.scope
     const value = req.body?.value
     const date = new Date(req.body?.expiresAt)
     if (!sql.prepare('SELECT id FROM customers WHERE id = ?').get(customerId)) return res.status(404).json({ error: 'CUSTOMER_NOT_FOUND' })
-    if (!['amount', 'percent'].includes(type) || !Number.isInteger(value) || value < 1 || value > (type === 'percent' ? 100 : 10000000) ||
+    if (!['amount', 'percent'].includes(type) || !['goods', 'shipping'].includes(scope) || !Number.isInteger(value) || value < 1 || value > (type === 'percent' ? 100 : 10000000) ||
       !Number.isFinite(date.getTime()) || date <= now() || date.getTime() > now().getTime() + 365 * 86400000) return res.status(400).json({ error: 'INVALID_VOUCHER' })
     const label = scope === 'shipping'
       ? `Ship ${type === 'amount' ? 'giảm ' + new Intl.NumberFormat('vi-VN').format(value) + ' ₫' : 'giảm ' + value + '%'}`
@@ -414,12 +414,12 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
   app.post('/api/admin/vouchers', requireAdmin, requireCsrf, (req, res) => {
     const customerId = Number(req.body?.customerId)
     const type = req.body?.type
-    const scope = req.body?.scope === 'shipping' ? 'shipping' : 'goods'
+    const scope = req.body?.scope === undefined ? 'goods' : req.body.scope
     const value = req.body?.value
     const date = new Date(req.body?.expiresAt)
     if (!Number.isInteger(customerId) || customerId < 1 ||
       !sql.prepare('SELECT id FROM customers WHERE id = ?').get(customerId) ||
-      !['amount', 'percent'].includes(type) || !Number.isInteger(value) || value < 1 || value > (type === 'percent' ? 100 : 10000000) ||
+      !['amount', 'percent'].includes(type) || !['goods', 'shipping'].includes(scope) || !Number.isInteger(value) || value < 1 || value > (type === 'percent' ? 100 : 10000000) ||
       !Number.isFinite(date.getTime()) || date <= now() || date.getTime() > now().getTime() + 365 * 86400000) {
       return res.status(400).json({ error: 'INVALID_VOUCHER', message: 'Voucher khong hop le.' })
     }

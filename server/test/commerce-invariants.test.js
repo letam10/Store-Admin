@@ -38,10 +38,17 @@ test('catalog stock defaults to 20, zero stock is unavailable, and voucher manag
   await withServer(async ({ root, storeDb }) => {
     const admin = await adminSession(root, storeDb)
     const headers = { cookie: admin.cookie, 'content-type': 'application/json', 'x-csrf-token': admin.body.csrfToken }
+    const publicCatalog = await fetch(root + '/api/storefront/catalog')
+    const publicProducts = (await publicCatalog.json()).products
+    assert.equal(publicProducts.find((item) => item.id === '1').stockCount, 20)
     const missingStock = await fetch(root + '/api/admin/products', {
       method: 'POST', headers, body: JSON.stringify({ name: 'Thiếu tồn kho', price: 1000 }),
     })
     assert.equal(missingStock.status, 400)
+    const zeroPrice = await fetch(root + '/api/admin/products', {
+      method: 'POST', headers, body: JSON.stringify({ name: 'Giá bằng không', price: 0, stockCount: 20 }),
+    })
+    assert.equal(zeroPrice.status, 400)
 
     const created = await fetch(root + '/api/admin/products', {
       method: 'POST', headers, body: JSON.stringify({ name: 'Sản phẩm hết hàng', price: 1000, stockCount: 0 }),
@@ -71,6 +78,23 @@ test('catalog stock defaults to 20, zero stock is unavailable, and voucher manag
     assert.equal(quote.status, 400)
     assert.equal((await quote.json()).error, 'PRODUCT_UNAVAILABLE')
 
+    storeDb.db.prepare(`INSERT INTO customer_orders
+      (id, customer_id, items_json, recipient, phone, address, fulfillment, region, distance_km, weight_kg,
+       subtotal, discount, goods_total, shipping_fee, total, voucher_codes_json, tier, status, points_earned, created_at, paid_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', ?, ?, ?)`)
+      .run('ORDER-DASHBOARD-1', customer.id, '[]', 'Buyer', '0901234567', '', 'pickup', 'pickup', 0, 1,
+        250000, 0, 250000, 0, 250000, '[]', 'bronze', 250, '2026-09-26T10:00:00.000Z', '2026-09-26T11:00:00.000Z')
+    const dashboard = await fetch(root + '/api/admin/dashboard', { headers: { cookie: admin.cookie } })
+    assert.equal(dashboard.status, 200)
+    const dashboardBody = await dashboard.json()
+    assert.equal(dashboardBody.dashboard.customerOrders, 1)
+    assert.ok(dashboardBody.dashboard.revenueByDay.some((item) => item.date === '2026-09-26' && item.revenue === 250000))
+    assert.ok(dashboardBody.dashboard.orderStatus.some((item) => item.status === 'paid' && item.count >= 1))
+
+    const invalidScope = await fetch(root + '/api/admin/vouchers', {
+      method: 'POST', headers, body: JSON.stringify({ customerId: customer.id, type: 'percent', scope: 'unknown', value: 20, expiresAt: '2026-10-01T00:00:00.000Z' }),
+    })
+    assert.equal(invalidScope.status, 400)
     const voucherResponse = await fetch(root + '/api/admin/vouchers', {
       method: 'POST', headers, body: JSON.stringify({ customerId: customer.id, type: 'percent', value: 20, expiresAt: '2026-10-01T00:00:00.000Z' }),
     })

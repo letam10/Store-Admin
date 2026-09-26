@@ -604,7 +604,7 @@ export function createApp(overrides = {}) {
     const price = Number(body.price)
     const stockCount = body.stockCount
     if (name.length < 2 || name.length > 160 || category.length < 2 || category.length > 80 || description.length > 2000 ||
-      !Number.isInteger(price) || price < 0 || price > 1000000000 || !Number.isInteger(stockCount) || stockCount < 0 || stockCount > 999999 || image.length > 500) return res.status(400).json({ error: 'INVALID_PRODUCT' })
+      !Number.isInteger(price) || price < 1 || price > 1000000000 || !Number.isInteger(stockCount) || stockCount < 0 || stockCount > 999999 || image.length > 500) return res.status(400).json({ error: 'INVALID_PRODUCT' })
     const id = 'manual-' + randomUUID()
     const product = {
       id, source: 'admin-manual', sourceId: id, name, category, price, description, image,
@@ -626,7 +626,7 @@ export function createApp(overrides = {}) {
     if (body.label !== undefined) patch.label = String(body.label).trim()
     if (body.price !== undefined) patch.price = body.price === null ? NaN : Number(body.price)
     if (body.stockCount !== undefined) patch.stockCount = body.stockCount === null ? NaN : Number(body.stockCount)
-    if (patch.name !== undefined && (patch.name.length < 2 || patch.name.length > 160) || patch.category !== undefined && (patch.category.length < 2 || patch.category.length > 80) || patch.description !== undefined && patch.description.length > 2000 || patch.image !== undefined && patch.image.length > 500 || patch.label !== undefined && patch.label.length > 60 || patch.price !== undefined && (!Number.isInteger(patch.price) || patch.price < 0 || patch.price > 1000000000) || patch.stockCount !== undefined && (!Number.isInteger(patch.stockCount) || patch.stockCount < 0 || patch.stockCount > 999999)) return res.status(400).json({ error: 'INVALID_PRODUCT' })
+    if (patch.name !== undefined && (patch.name.length < 2 || patch.name.length > 160) || patch.category !== undefined && (patch.category.length < 2 || patch.category.length > 80) || patch.description !== undefined && patch.description.length > 2000 || patch.image !== undefined && patch.image.length > 500 || patch.label !== undefined && patch.label.length > 60 || patch.price !== undefined && (!Number.isInteger(patch.price) || patch.price < 1 || patch.price > 1000000000) || patch.stockCount !== undefined && (!Number.isInteger(patch.stockCount) || patch.stockCount < 0 || patch.stockCount > 999999)) return res.status(400).json({ error: 'INVALID_PRODUCT' })
     const product = storeDb.updateCatalogProduct(req.params.id, patch)
     if (!product) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
     res.json({ product })
@@ -670,7 +670,19 @@ export function createApp(overrides = {}) {
 
   app.get('/api/storefront/catalog', (req, res) => {
     res.set('Cache-Control', 'no-store')
-    res.json({ products: storeDb.storefrontCatalog({ details: req.query.details === '1' }) })
+    const details = req.query.details === '1'
+    const catalog = storeDb.storefrontCatalog({ details })
+    const base = originalProducts.map((product) => ({
+      id: String(product.id), source: 'shared-demo', sourceId: String(product.id),
+      name: product.name, category: product.category, price: product.price,
+      description: product.description, image: null, features: product.features || [],
+      tone: product.tone, symbol: product.symbol, label: product.label,
+      sourceUrl: 'local://shared-demo', sourcePriceCents: product.price,
+      sourceCurrency: 'VND', importedAt: null, discountPercent: 0, stockCount: 20,
+      viewCount: storeDb.getProductViewCount(String(product.id)),
+    }))
+    const products = [...new Map([...base, ...catalog].map((product) => [String(product.id), product])).values()]
+    res.json({ products })
   })
 
   app.get('/api/storefront/appearance', (req, res) => {
