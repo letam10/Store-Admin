@@ -13,7 +13,7 @@ Swagger: `http://127.0.0.1:5000/swagger`.
 
 Cài extension `C# Dev Kit`, đặt breakpoint trong `Controllers` hoặc `Data/StoreDb.cs`, rồi bấm `F5` trong VS Code.
 
-Backend C# dùng PostgreSQL giống backend Node mới. Cấu hình bằng `DATABASE_URL` hoặc nhóm biến `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`. Không ghi mật khẩu vào source hoặc commit.
+Backend C# dùng PostgreSQL giống backend Node mới. Cấu hình bằng `DATABASE_URL` hoặc nhóm biến `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`. Không ghi mật khẩu vào source hoặc commit; xem `.env.example`.
 
 Các route C# đầu tiên giữ nguyên contract `/api/health`, `/api/storefront/catalog`, `/api/storefront/appearance`, `/api/storefront/products/{id}/view`, `/api/customer/*` cơ bản và `/api/admin/login`. Backend Node cũ vẫn là đường chạy chính cho đến khi các route còn lại được port và kiểm thử.
 
