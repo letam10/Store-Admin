@@ -1,5 +1,4 @@
 import express from 'express'
-import { randomUUID } from 'node:crypto'
 import { products as originalProducts } from '../../shared/products.js'
 import { config, ALLOWED_CONTEXT_SIZES } from './config.js'
 import { StoreDb } from './db.js'
@@ -147,7 +146,10 @@ function createCoordinator() {
 }
 
 export function createApp(overrides = {}) {
-  const storeDb = overrides.storeDb || new StoreDb(config.dbPath, { seedDemoData: config.enableDemoData })
+  const defaultTarget = config.databaseUrl ||
+    (config.pgHost && config.pgUser && config.pgDatabase ? { host: config.pgHost, port: config.pgPort, user: config.pgUser, password: config.pgPassword, database: config.pgDatabase } : config.pgDataPath)
+
+  const storeDb = overrides.storeDb || new StoreDb(defaultTarget, { seedDemoData: config.enableDemoData })
   const ollama = overrides.ollama || new OllamaClient({
     baseUrl: config.ollamaUrl,
     model: config.ollamaModel,
@@ -185,21 +187,21 @@ export function createApp(overrides = {}) {
     return 'support:' + req.customer.id + ':' + hashToken(token)
   }
 
-  function adminSession(req, res) {
+  async function adminSession(req, res) {
     const token = parseCookies(req.headers.cookie)[ADMIN_COOKIE]
     if (!token) return null
     const tokenHash = hashToken(token)
-    const session = storeDb.getAdminSession(tokenHash)
+    const session = await storeDb.getAdminSession(tokenHash)
     if (!session || session.expires_at <= now().toISOString()) {
-      if (session) storeDb.deleteAdminSession(tokenHash)
+      if (session) await storeDb.deleteAdminSession(tokenHash)
       clearCookie(res, ADMIN_COOKIE, { secure: config.cookieSecure })
       return null
     }
     return { ...session, rawToken: token, csrfToken: hashToken('csrf:' + token) }
   }
 
-  function requireAdmin(req, res, next) {
-    const session = adminSession(req, res)
+  async function requireAdmin(req, res, next) {
+    const session = await adminSession(req, res)
     if (!session) return res.status(401).json({ error: 'UNAUTHENTICATED' })
     req.storeAdmin = session
     next()
@@ -212,14 +214,14 @@ export function createApp(overrides = {}) {
 
   const { requireCustomer, customerCsrf } = registerCustomerRoutes(app, { storeDb, config, now, requireAdmin, requireCsrf })
 
-  function ownedConversation(id, kind, ownerKey) {
+  async function ownedConversation(id, kind, ownerKey) {
     if (!id) return null
-    const conversation = storeDb.getConversation(id)
+    const conversation = await storeDb.getConversation(id)
     if (!conversation || conversation.kind !== kind || conversation.owner_key !== ownerKey) return null
     return conversation
   }
 
-  function publicMessages(conversationId) {
+  async function publicMessages(conversationId) {
     return storeDb.getPublicHistory(conversationId)
   }
 
@@ -248,7 +250,7 @@ export function createApp(overrides = {}) {
       return res.status(429).json({ error: 'RATE_LIMITED' })
     }
 
-    const existingTurn = storeDb.getTurn(ownerKey, requestId)
+    const existingTurn = await storeDb.getTurn(ownerKey, requestId)
     if (existingTurn) {
       if (existingTurn.user_content !== message || existingTurn.kind !== kind || (req.body.conversationId && existingTurn.conversation_id !== req.body.conversationId)) {
         return res.status(409).json({ error: 'IDEMPOTENCY_CONFLICT' })
@@ -258,13 +260,14 @@ export function createApp(overrides = {}) {
         return emitCompletedTurn(res, existingTurn)
       }
       if (existingTurn.status === 'running') return res.status(409).json({ error: 'TURN_IN_PROGRESS' })
-      if (storeDb.getMessages(existingTurn.conversation_id).some((item) => item.role === 'user' && item.id > existingTurn.user_message_id)) {
+      const convMsgs = await storeDb.getMessages(existingTurn.conversation_id)
+      if (convMsgs.some((item) => item.role === 'user' && item.id > existingTurn.user_message_id)) {
         return res.status(409).json({ error: 'RETRY_SUPERSEDED', message: 'Đã có lượt mới hơn. Hãy gửi lại yêu cầu dưới dạng tin nhắn mới.' })
       }
     }
 
     const effectiveConversationId = req.body.conversationId || existingTurn?.conversation_id || ''
-    if (effectiveConversationId && !ownedConversation(effectiveConversationId, kind, ownerKey)) {
+    if (effectiveConversationId && !(await ownedConversation(effectiveConversationId, kind, ownerKey))) {
       return res.status(404).json({ error: 'CONVERSATION_NOT_FOUND' })
     }
 
@@ -288,19 +291,19 @@ export function createApp(overrides = {}) {
 
     try {
       await generationQueue.run(async (signal) => {
-        const assertActive = () => {
+        const assertActive = async () => {
           if (signal?.aborted) {
             const error = new Error('Đã hủy'); error.name = 'AbortError'; throw error
           }
           if (isAdmin) {
-            const currentSession = storeDb.getAdminSession(hashToken(req.storeAdmin.rawToken))
+            const currentSession = await storeDb.getAdminSession(hashToken(req.storeAdmin.rawToken))
             if (!currentSession || currentSession.expires_at <= now().toISOString()) {
               const error = new Error('Phiên admin đã hết hạn.'); error.code = 'UNAUTHENTICATED'; throw error
             }
           }
         }
-        assertActive()
-        const started = storeDb.startTurn({
+        await assertActive()
+        const started = await storeDb.startTurn({
           ownerKey, kind, conversationId: effectiveConversationId || null,
           requestId, message,
         })
@@ -321,7 +324,7 @@ export function createApp(overrides = {}) {
           throw error
         }
         turn = started.turn
-        const conversation = storeDb.getConversation(turn.conversation_id)
+        const conversation = await storeDb.getConversation(turn.conversation_id)
         if (!lease.bind('conversation:' + conversation.id)) {
           const error = new Error('Hội thoại đang có lượt khác chạy.')
           error.code = 'CONVERSATION_BUSY'
@@ -334,7 +337,7 @@ export function createApp(overrides = {}) {
           compactStatus: conversation.compact_status,
         })
 
-        const history = storeDb.getMessages(conversation.id)
+        const history = await storeDb.getMessages(conversation.id)
         const memory = storeDb.getConversationMemory(conversation)
         const productHints = collectProductHints(history, memory)
         let report = null
@@ -351,11 +354,11 @@ export function createApp(overrides = {}) {
                 ? 'Khoảng ngày không hợp lệ. Hãy dùng ngày có thật theo dạng YYYY-MM-DD và bảo đảm ngày bắt đầu không sau ngày kết thúc.'
                 : 'Bạn muốn báo cáo cho khoảng nào? Có thể dùng “hôm nay”, “hôm qua”, “tháng này”, “tháng trước” hoặc ghi rõ ngày YYYY-MM-DD.'
             } else {
-              report = storeDb.calculateRevenue(range)
+              report = await storeDb.calculateRevenue(range)
             }
           }
           knowledge = buildAdminKnowledge(message, report, { productHints })
-          const saved = Number.parseInt(storeDb.getSetting('admin_num_ctx') || '', 10)
+          const saved = Number.parseInt((await storeDb.getSetting('admin_num_ctx')) || '', 10)
           contextSize = ALLOWED_CONTEXT_SIZES.includes(saved) ? saved : config.adminDefaultContextSize
           outputBudget = config.adminNumPredict
         } else {
@@ -369,9 +372,9 @@ export function createApp(overrides = {}) {
         if (knowledge.verified) sendEvent(res, 'verified', { verified: knowledge.verified })
         if (knowledge.sources.length) sendEvent(res, 'sources', { sources: knowledge.sources })
 
-        const persistCompletion = (content) => {
-          assertActive()
-          const saved = storeDb.completeTurn({
+        const persistCompletion = async (content) => {
+          await assertActive()
+          const saved = await storeDb.completeTurn({
             turnId: turn.id, content, sources: knowledge.sources,
             report, verified: knowledge.verified,
           })
@@ -379,7 +382,7 @@ export function createApp(overrides = {}) {
         }
 
         if (deterministic) {
-          persistCompletion(deterministic)
+          await persistCompletion(deterministic)
           sendEvent(res, 'delta', { content: deterministic })
           sendEvent(res, 'done', { conversationId: conversation.id, requestId, deterministic: true })
           return
@@ -387,8 +390,8 @@ export function createApp(overrides = {}) {
 
         const sensitiveScope = report ? 'report' : (knowledge.matchedProducts.length ? 'product' : 'general')
         const contract = responseContract(sensitiveScope)
-        const freshConversation = storeDb.getConversation(conversation.id)
-        const prepared = prepareConversationContext({
+        const freshConversation = await storeDb.getConversation(conversation.id)
+        const prepared = await prepareConversationContext({
           storeDb,
           conversation: freshConversation,
           systemPrompt: (isAdmin ? ADMIN_PROMPT : SUPPORT_PROMPT) + '\n' + contract.instruction,
@@ -439,7 +442,7 @@ export function createApp(overrides = {}) {
 
         const screened = screenSensitiveModelText(modelContent, { scope: sensitiveScope, report })
         const published = screened.text
-        persistCompletion(published)
+        await persistCompletion(published)
         sendEvent(res, 'delta', { content: published })
         partialContent = published
         sendEvent(res, 'done', {
@@ -452,7 +455,7 @@ export function createApp(overrides = {}) {
       }, requestAbort.signal, { waitTimeoutMs: config.generationQueueWaitMs })
     } catch (error) {
       if (turn?.id) {
-        storeDb.failTurn(turn.id, {
+        await storeDb.failTurn(turn.id, {
           status: error?.name === 'AbortError' || requestAbort.signal.aborted ? 'stopped' : 'failed',
           errorCode: error?.code || 'AI_ERROR',
           partialContent,
@@ -478,16 +481,16 @@ export function createApp(overrides = {}) {
     })
   })
 
-  app.get('/api/support/conversations/:id', requireCustomer, (req, res) => {
+  app.get('/api/support/conversations/:id', requireCustomer, async (req, res) => {
     const ownerKey = supportOwner(req, res)
-    const conversation = ownedConversation(req.params.id, 'support', ownerKey)
+    const conversation = await ownedConversation(req.params.id, 'support', ownerKey)
     if (!conversation) return res.status(404).json({ error: 'CONVERSATION_NOT_FOUND' })
-    res.json({ conversationId: conversation.id, compactStatus: conversation.compact_status, messages: publicMessages(conversation.id) })
+    res.json({ conversationId: conversation.id, compactStatus: conversation.compact_status, messages: await publicMessages(conversation.id) })
   })
 
   app.post('/api/support/chat', requireCustomer, customerCsrf, (req, res) => handleChat(req, res, { kind: 'support', ownerKey: supportOwner(req, res), isAdmin: false }))
 
-  app.post('/api/admin/login', (req, res) => {
+  app.post('/api/admin/login', async (req, res) => {
     const usernameRaw = typeof req.body?.username === 'string' ? req.body.username : ''
     const username = usernameRaw.trim()
     const normalizedAccount = normalizeUsername(usernameRaw)
@@ -502,31 +505,31 @@ export function createApp(overrides = {}) {
       return res.status(429).json({ error: 'RATE_LIMITED' })
     }
 
-    storeDb.cleanupExpiredSessions()
-    const admin = storeDb.getAdminByUsername(username)
+    await storeDb.cleanupExpiredSessions()
+    const admin = await storeDb.getAdminByUsername(username)
     if (!admin || !verifyPassword(password, admin.password_salt, admin.password_hash)) return res.status(401).json({ error: 'INVALID_CREDENTIALS' })
 
     const token = randomToken()
     const expiresAt = new Date(now().getTime() + ADMIN_SESSION_SECONDS * 1000).toISOString()
-    storeDb.createAdminSession({ tokenHash: hashToken(token), adminId: admin.id, expiresAt })
+    await storeDb.createAdminSession({ tokenHash: hashToken(token), adminId: admin.id, expiresAt })
     setCookie(res, ADMIN_COOKIE, token, { maxAge: ADMIN_SESSION_SECONDS, secure: config.cookieSecure })
     res.json({ authenticated: true, username: admin.username, csrfToken: hashToken('csrf:' + token), expiresAt })
   })
 
-  app.get('/api/admin/session', (req, res) => {
-    const session = adminSession(req, res)
+  app.get('/api/admin/session', async (req, res) => {
+    const session = await adminSession(req, res)
     if (!session) return res.status(401).json({ authenticated: false })
     res.json({ authenticated: true, username: session.username, csrfToken: session.csrfToken, expiresAt: session.expires_at })
   })
 
-  app.post('/api/admin/logout', requireAdmin, requireCsrf, (req, res) => {
-    storeDb.deleteAdminSession(hashToken(req.storeAdmin.rawToken))
+  app.post('/api/admin/logout', requireAdmin, requireCsrf, async (req, res) => {
+    await storeDb.deleteAdminSession(hashToken(req.storeAdmin.rawToken))
     clearCookie(res, ADMIN_COOKIE, { secure: config.cookieSecure })
     res.json({ ok: true })
   })
 
-  app.get('/api/admin/settings', requireAdmin, (req, res) => {
-    const saved = Number.parseInt(storeDb.getSetting('admin_num_ctx') || '', 10)
+  app.get('/api/admin/settings', requireAdmin, async (req, res) => {
+    const saved = Number.parseInt((await storeDb.getSetting('admin_num_ctx')) || '', 10)
     const contextSize = ALLOWED_CONTEXT_SIZES.includes(saved) ? saved : config.adminDefaultContextSize
     res.json({
       model: config.ollamaModel, thinking: true, contextSize,
@@ -535,88 +538,88 @@ export function createApp(overrides = {}) {
     })
   })
 
-  app.put('/api/admin/settings', requireAdmin, requireCsrf, (req, res) => {
+  app.put('/api/admin/settings', requireAdmin, requireCsrf, async (req, res) => {
     const keys = Object.keys(req.body || {})
     if (keys.length !== 1 || keys[0] !== 'contextSize' || !ALLOWED_CONTEXT_SIZES.includes(req.body.contextSize)) {
       return res.status(400).json({ error: 'INVALID_CONTEXT_SIZE' })
     }
-    storeDb.setSetting('admin_num_ctx', req.body.contextSize)
+    await storeDb.setSetting('admin_num_ctx', req.body.contextSize)
     res.json({ ok: true, contextSize: req.body.contextSize, experimental: req.body.contextSize === 65536 })
   })
 
-  app.get('/api/admin/stats', requireAdmin, (req, res) => {
+  app.get('/api/admin/stats', requireAdmin, async (req, res) => {
     const range = { from: String(req.query.from || ''), to: String(req.query.to || '') }
     const validation = validateDateRange(range.from, range.to)
     if (!validation.ok) return res.status(400).json({ error: validation.code })
-    res.json({ report: storeDb.calculateRevenue(range), source: 'backend-sqlite' })
+    res.json({ report: await storeDb.calculateRevenue(range), source: 'backend-postgres' })
   })
 
-  app.get('/api/admin/overview', requireAdmin, (req, res) => {
-    res.json({ overview: storeDb.adminOverview() })
+  app.get('/api/admin/overview', requireAdmin, async (req, res) => {
+    res.json({ overview: await storeDb.adminOverview() })
   })
 
   // Stable alias for dashboard clients. Keep /overview for existing builds,
   // while allowing a dashboard module to use a semantically named endpoint.
-  app.get('/api/admin/dashboard', requireAdmin, (req, res) => {
-    const dashboard = storeDb.adminOverview()
+  app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
+    const dashboard = await storeDb.adminOverview()
     res.json({ dashboard, overview: dashboard })
   })
 
-  app.get('/api/admin/records/:module', requireAdmin, (req, res) => {
+  app.get('/api/admin/records/:module', requireAdmin, async (req, res) => {
     if (!ADMIN_RECORD_MODULES.has(req.params.module)) return res.status(404).json({ error: 'MODULE_NOT_FOUND' })
-    res.json({ module: req.params.module, schema: ADMIN_RECORD_SCHEMAS[req.params.module], records: storeDb.listAdminRecords(req.params.module) })
+    res.json({ module: req.params.module, schema: ADMIN_RECORD_SCHEMAS[req.params.module], records: await storeDb.listAdminRecords(req.params.module) })
   })
 
-  app.post('/api/admin/records/:module', requireAdmin, requireCsrf, (req, res) => {
+  app.post('/api/admin/records/:module', requireAdmin, requireCsrf, async (req, res) => {
     if (!ADMIN_RECORD_MODULES.has(req.params.module)) return res.status(404).json({ error: 'MODULE_NOT_FOUND' })
     const body = req.body || {}
     const title = String(body.title || '').trim()
     const status = String(body.status || 'Đang dùng').trim()
     const data = body.data
     if (!title || title.length > 160 || !validateRecordData(req.params.module, data) || status.length > 60) return res.status(400).json({ error: 'INVALID_RECORD' })
-    res.status(201).json({ record: storeDb.createAdminRecord({ module: req.params.module, title, data, status }) })
+    res.status(201).json({ record: await storeDb.createAdminRecord({ module: req.params.module, title, data, status }) })
   })
 
-  app.patch('/api/admin/records/:module/:id', requireAdmin, requireCsrf, (req, res) => {
+  app.patch('/api/admin/records/:module/:id', requireAdmin, requireCsrf, async (req, res) => {
     if (!ADMIN_RECORD_MODULES.has(req.params.module)) return res.status(404).json({ error: 'MODULE_NOT_FOUND' })
     const body = req.body || {}
     const title = String(body.title || '').trim()
     const status = String(body.status || 'Đang dùng').trim()
     const data = body.data
     if (!title || title.length > 160 || !validateRecordData(req.params.module, data) || status.length > 60) return res.status(400).json({ error: 'INVALID_RECORD' })
-    const record = storeDb.updateAdminRecord(Number(req.params.id), { module: req.params.module, title, data, status })
+    const record = await storeDb.updateAdminRecord(Number(req.params.id), { module: req.params.module, title, data, status })
     if (!record) return res.status(404).json({ error: 'RECORD_NOT_FOUND' })
     res.json({ record })
   })
 
-  app.delete('/api/admin/records/:module/:id', requireAdmin, requireCsrf, (req, res) => {
+  app.delete('/api/admin/records/:module/:id', requireAdmin, requireCsrf, async (req, res) => {
     if (!ADMIN_RECORD_MODULES.has(req.params.module)) return res.status(404).json({ error: 'MODULE_NOT_FOUND' })
-    if (!storeDb.deleteAdminRecord(Number(req.params.id))) return res.status(404).json({ error: 'RECORD_NOT_FOUND' })
+    if (!(await storeDb.deleteAdminRecord(Number(req.params.id)))) return res.status(404).json({ error: 'RECORD_NOT_FOUND' })
     res.json({ ok: true })
   })
 
-  app.get('/api/admin/appearance', requireAdmin, (req, res) => {
-    const raw = storeDb.getSetting('storefront_appearance')
+  app.get('/api/admin/appearance', requireAdmin, async (req, res) => {
+    const raw = await storeDb.getSetting('storefront_appearance')
     res.json({ appearance: parseJson(raw, {}) })
   })
 
-  app.put('/api/admin/appearance', requireAdmin, requireCsrf, (req, res) => {
+  app.put('/api/admin/appearance', requireAdmin, requireCsrf, async (req, res) => {
     const body = req.body || {}
     const allowed = ['brandName', 'brandTagline', 'headerSearchPlaceholder', 'navHome', 'navProducts', 'navFavorites', 'navRewards', 'navMembership', 'navContact', 'heroTitle', 'heroDescription', 'heroButton', 'footerText', 'footerSupport', 'footerInfo', 'footerShopTitle', 'footerProducts', 'footerCart', 'footerMembership', 'footerRewards', 'footerSupportTitle', 'footerContact', 'footerAccount', 'footerInfoTitle', 'footerCopyright', 'accentColor', 'bannerLabel']
     if (Object.keys(body).some((key) => !allowed.includes(key)) || allowed.some((key) => body[key] !== undefined && typeof body[key] !== 'string' || String(body[key] || '').length > 240)) {
       return res.status(400).json({ error: 'INVALID_APPEARANCE' })
     }
     const appearance = Object.fromEntries(allowed.map((key) => [key, String(body[key] || '').trim()]))
-    storeDb.setSetting('storefront_appearance', JSON.stringify(appearance))
+    await storeDb.setSetting('storefront_appearance', JSON.stringify(appearance))
     res.json({ appearance })
   })
 
-  app.get('/api/admin/products', requireAdmin, (req, res) => {
-    const products = storeDb.listCatalogProducts()
+  app.get('/api/admin/products', requireAdmin, async (req, res) => {
+    const products = await storeDb.listCatalogProducts()
     res.json({ total: products.length, products })
   })
 
-  app.post('/api/admin/products', requireAdmin, requireCsrf, (req, res) => {
+  app.post('/api/admin/products', requireAdmin, requireCsrf, async (req, res) => {
     const body = req.body || {}
     const name = String(body.name || '').trim()
     const category = String(body.category || 'Đồ gia dụng').trim()
@@ -633,11 +636,11 @@ export function createApp(overrides = {}) {
       tone: 'green', symbol: '✦', label: 'Mới', sourceUrl: 'local://admin-manual', sourcePriceCents: price, sourceCurrency: 'VND', importedAt: new Date().toISOString(), discountPercent: 0,
       stockCount,
     }
-    storeDb.upsertCatalogProducts([product])
-    res.status(201).json({ product: storeDb.getCatalogProduct(id) })
+    await storeDb.upsertCatalogProducts([product])
+    res.status(201).json({ product: await storeDb.getCatalogProduct(id) })
   })
 
-  app.patch('/api/admin/products/:id', requireAdmin, requireCsrf, (req, res) => {
+  app.patch('/api/admin/products/:id', requireAdmin, requireCsrf, async (req, res) => {
     const body = req.body || {}
     const patch = {}
     if (body.name !== undefined) patch.name = String(body.name).trim()
@@ -648,24 +651,27 @@ export function createApp(overrides = {}) {
     if (body.price !== undefined) patch.price = body.price === null ? NaN : Number(body.price)
     if (body.stockCount !== undefined) patch.stockCount = body.stockCount === null ? NaN : Number(body.stockCount)
     if (patch.name !== undefined && (patch.name.length < 2 || patch.name.length > 160) || patch.category !== undefined && (patch.category.length < 2 || patch.category.length > 80) || patch.description !== undefined && patch.description.length > 2000 || patch.image !== undefined && patch.image.length > 500 || patch.label !== undefined && patch.label.length > 60 || patch.price !== undefined && (!Number.isInteger(patch.price) || patch.price < 1 || patch.price > 1000000000) || patch.stockCount !== undefined && (!Number.isInteger(patch.stockCount) || patch.stockCount < 0 || patch.stockCount > 999999)) return res.status(400).json({ error: 'INVALID_PRODUCT' })
-    const product = storeDb.updateCatalogProduct(req.params.id, patch)
+    const product = await storeDb.updateCatalogProduct(req.params.id, patch)
     if (!product) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
     res.json({ product })
   })
 
-  app.delete('/api/admin/products/:id', requireAdmin, requireCsrf, (req, res) => {
+  app.delete('/api/admin/products/:id', requireAdmin, requireCsrf, async (req, res) => {
     if (/^[1-4]$/.test(req.params.id)) return res.status(400).json({ error: 'FEATURED_PRODUCT_PROTECTED' })
-    if (!storeDb.deleteCatalogProduct(req.params.id)) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    if (!(await storeDb.deleteCatalogProduct(req.params.id))) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
     res.json({ ok: true, id: req.params.id })
   })
 
-  app.get('/api/admin/product-views', requireAdmin, (req, res) => {
-    const original = originalProducts.map((product) => ({
-      id: String(product.id), name: product.name, category: product.category,
-      image: null, symbol: product.symbol,
-      viewCount: storeDb.getProductViewCount(String(product.id)),
-    }))
-    const imported = storeDb.listCatalogProducts().map(({ id, name, category, image, symbol, viewCount }) => ({ id, name, category, image, symbol, viewCount }))
+  app.get('/api/admin/product-views', requireAdmin, async (req, res) => {
+    const original = []
+    for (const product of originalProducts) {
+      original.push({
+        id: String(product.id), name: product.name, category: product.category,
+        image: null, symbol: product.symbol,
+        viewCount: await storeDb.getProductViewCount(String(product.id)),
+      })
+    }
+    const imported = (await storeDb.listCatalogProducts()).map(({ id, name, category, image, symbol, viewCount }) => ({ id, name, category, image, symbol, viewCount }))
     const unique = new Map([...original, ...imported].map((product) => [String(product.id), product]))
     const products = [...unique.values()]
       .map((product, index) => ({ ...product, index }))
@@ -674,10 +680,10 @@ export function createApp(overrides = {}) {
         id: entry.id, name: entry.name, category: entry.category, image: entry.image,
         symbol: entry.symbol, viewCount: entry.viewCount, rank: rank + 1,
       }))
-    res.json({ products, totalViews: storeDb.totalProductViews() })
+    res.json({ products, totalViews: await storeDb.totalProductViews() })
   })
 
-  app.patch('/api/admin/products/:id/offer', requireAdmin, requireCsrf, (req, res) => {
+  app.patch('/api/admin/products/:id/offer', requireAdmin, requireCsrf, async (req, res) => {
     const body = req.body
     if (!body || typeof body !== 'object' || Array.isArray(body)
       || Object.keys(body).sort().join(',') !== 'discountPercent,stockCount'
@@ -685,47 +691,50 @@ export function createApp(overrides = {}) {
       || !Number.isInteger(body.stockCount) || body.stockCount < 0 || body.stockCount > 999999) {
       return res.status(400).json({ error: 'INVALID_PRODUCT_OFFER' })
     }
-    if (!storeDb.updateCatalogOffer(req.params.id, body)) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    if (!(await storeDb.updateCatalogOffer(req.params.id, body))) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
     res.json({ ok: true, id: req.params.id, ...body })
   })
 
-  app.get('/api/storefront/catalog', (req, res) => {
+  app.get('/api/storefront/catalog', async (req, res) => {
     res.set('Cache-Control', 'no-store')
     const details = req.query.details === '1'
-    const catalog = storeDb.storefrontCatalog({ details })
-    const base = originalProducts.map((product) => ({
-      id: String(product.id), source: 'shared-demo', sourceId: String(product.id),
-      name: product.name, category: product.category, price: product.price,
-      description: product.description, image: null, features: product.features || [],
-      tone: product.tone, symbol: product.symbol, label: product.label,
-      sourceUrl: 'local://shared-demo', sourcePriceCents: product.price,
-      sourceCurrency: 'VND', importedAt: null, discountPercent: 0, stockCount: 20,
-      viewCount: storeDb.getProductViewCount(String(product.id)),
-    }))
+    const catalog = await storeDb.storefrontCatalog({ details })
+    const base = []
+    for (const product of originalProducts) {
+      base.push({
+        id: String(product.id), source: 'shared-demo', sourceId: String(product.id),
+        name: product.name, category: product.category, price: product.price,
+        description: product.description, image: null, features: product.features || [],
+        tone: product.tone, symbol: product.symbol, label: product.label,
+        sourceUrl: 'local://shared-demo', sourcePriceCents: product.price,
+        sourceCurrency: 'VND', importedAt: null, discountPercent: 0, stockCount: 20,
+        viewCount: await storeDb.getProductViewCount(String(product.id)),
+      })
+    }
     const products = [...new Map([...base, ...catalog].map((product) => [String(product.id), product])).values()]
     res.json({ products })
   })
 
-  app.get('/api/storefront/appearance', (req, res) => {
+  app.get('/api/storefront/appearance', async (req, res) => {
     res.set('Cache-Control', 'no-store')
-    res.json({ appearance: parseJson(storeDb.getSetting('storefront_appearance'), {}) })
+    res.json({ appearance: parseJson(await storeDb.getSetting('storefront_appearance'), {}) })
   })
 
-  app.post('/api/storefront/products/:id/view', (req, res) => {
+  app.post('/api/storefront/products/:id/view', async (req, res) => {
     const id = String(req.params.id)
     if (!/^[A-Za-z0-9_-]{1,120}$/.test(id)) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
     const rate = viewLimiter.consume(req.ip)
     if (!rate.allowed) return res.status(429).json({ error: 'RATE_LIMITED' })
-    const viewCount = storeDb.recordProductView(id)
+    const viewCount = await storeDb.recordProductView(id)
     if (viewCount === null) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
     res.json({ id, viewCount })
   })
 
-  app.get('/api/admin/conversations/:id', requireAdmin, (req, res) => {
+  app.get('/api/admin/conversations/:id', requireAdmin, async (req, res) => {
     const ownerKey = 'admin:' + req.storeAdmin.admin_id
-    const conversation = ownedConversation(req.params.id, 'admin', ownerKey)
+    const conversation = await ownedConversation(req.params.id, 'admin', ownerKey)
     if (!conversation) return res.status(404).json({ error: 'CONVERSATION_NOT_FOUND' })
-    res.json({ conversationId: conversation.id, compactStatus: conversation.compact_status, messages: publicMessages(conversation.id) })
+    res.json({ conversationId: conversation.id, compactStatus: conversation.compact_status, messages: await publicMessages(conversation.id) })
   })
 
   app.post('/api/admin/chat', requireAdmin, requireCsrf, (req, res) => {

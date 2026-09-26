@@ -69,16 +69,20 @@ if (password !== confirm) {
   process.exit(1)
 }
 
-const storeDb = new StoreDb(config.dbPath)
+const defaultTarget = config.databaseUrl ||
+  (config.pgHost && config.pgUser && config.pgDatabase ? { host: config.pgHost, port: config.pgPort, user: config.pgUser, password: config.pgPassword, database: config.pgDatabase } : config.pgDataPath)
+
+const storeDb = new StoreDb(defaultTarget)
 try {
-  if (storeDb.getAdminByUsername(username)) {
+  await storeDb.ready
+  if (await storeDb.getAdminByUsername(username)) {
     console.error('Admin đã tồn tại: ' + username)
     process.exitCode = 1
   } else {
     const { salt, hash } = hashPassword(password)
-    storeDb.createAdmin({ username, passwordSalt: salt, passwordHash: hash })
+    await storeDb.createAdmin({ username, passwordSalt: salt, passwordHash: hash })
     console.log('Đã tạo admin: ' + username)
   }
 } finally {
-  storeDb.close()
+  await storeDb.close()
 }

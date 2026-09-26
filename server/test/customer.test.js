@@ -10,7 +10,8 @@ import { hashPassword } from '../src/security.js'
 
 async function harness(run) {
   const dir = mkdtempSync(join(tmpdir(), 'store-customer-test-'))
-  const storeDb = new StoreDb(join(dir, 'store.sqlite'))
+  const storeDb = new StoreDb(join(dir, 'test.pgdata'))
+  await storeDb.ready
   const { app } = createApp({ storeDb, now: () => new Date('2026-09-24T10:00:00.000Z') })
   const server = app.listen(0, '127.0.0.1')
   await new Promise((resolve) => server.once('listening', resolve))
@@ -18,7 +19,7 @@ async function harness(run) {
   try { await run({ root, storeDb }) }
   finally {
     await new Promise((resolve) => server.close(resolve))
-    storeDb.close()
+    await storeDb.close()
     rmSync(dir, { recursive: true, force: true })
   }
 }
@@ -65,9 +66,10 @@ test('customer rewards require recorded payment, accumulate exact points and con
     const review = await write(root, '/api/storefront/products/1/reviews', cookie, account.csrfToken, { rating: 5, comment: 'Sản phẩm rất tốt' })
     assert.equal(review.status, 200)
     const adminPassword = hashPassword('correct-horse-battery-staple')
-    storeDb.createAdmin({ username: 'owner', passwordSalt: adminPassword.salt, passwordHash: adminPassword.hash })
+    await storeDb.createAdmin({ username: 'owner', passwordSalt: adminPassword.salt, passwordHash: adminPassword.hash })
     const login = await fetch(root + '/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username: 'owner', password: 'correct-horse-battery-staple' }) })
+      body: JSON.stringify({ username: 'owner', password: 'correct-horse-battery-staple' }),
+    })
     const adminCookie = cookies(login)
     const admin = await login.json()
     const issue = await write(root, '/api/admin/customers/' + account.id + '/vouchers', adminCookie, admin.csrfToken,

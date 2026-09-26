@@ -47,8 +47,8 @@ function parseEvents(text) {
 }
 
 async function withServer(run, { ollama = new MockOllama(), queue, seedDemoData = true } = {}) {
-  const directory = mkdtempSync(join(tmpdir(), 'store-api-test-'))
-  const storeDb = new StoreDb(join(directory, 'test.sqlite'), { seedDemoData })
+  const storeDb = new StoreDb(':memory:', { seedDemoData })
+  await storeDb.ready
   const { app } = createApp({
     storeDb,
     ollama,
@@ -65,14 +65,13 @@ async function withServer(run, { ollama = new MockOllama(), queue, seedDemoData 
   finally {
     currentSupportAuth = null
     await new Promise((resolve) => server.close(resolve))
-    storeDb.close()
-    rmSync(directory, { recursive: true, force: true })
+    await storeDb.close()
   }
 }
 
 async function createAdminSession(baseUrl, storeDb, username = 'owner') {
   const credentials = hashPassword('correct-horse-battery-staple')
-  storeDb.createAdmin({ username, passwordSalt: credentials.salt, passwordHash: credentials.hash })
+  await storeDb.createAdmin({ username, passwordSalt: credentials.salt, passwordHash: credentials.hash })
   const login = await fetch(baseUrl + '/api/admin/login', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ username, password: 'correct-horse-battery-staple' }),
@@ -178,7 +177,7 @@ test('same requestId replays completed turn without duplicate generation or user
     const replay = parseEvents(await second.text())
     assert.equal(replay.find((event) => event.type === 'done').replayed, true)
     assert.equal(ollama.calls.length, 1)
-    assert.equal(storeDb.getMessages(conversationId).filter((message) => message.role === 'user').length, 1)
+    assert.equal((await storeDb.getMessages(conversationId)).filter((message) => message.role === 'user').length, 1)
   }, { ollama })
 })
 
@@ -242,13 +241,13 @@ test('queue full and abort while queued do not create turns, next request can pr
     })
     const fullEvents = parseEvents(await full.text())
     assert.equal(fullEvents.at(-1).code, 'QUEUE_FULL')
-    assert.equal(storeDb.getTurn(ownerFromSupportCookie('store_support_id=owner-c'), 'request_queue_full'), null)
+    assert.equal(await storeDb.getTurn(ownerFromSupportCookie('store_support_id=owner-c'), 'request_queue_full'), null)
 
     // Sau đó hủy request đang chờ và xác nhận admission chưa ghi turn.
     abortController.abort()
     try { await queued.text() } catch { /* expected client abort */ }
     await new Promise((resolve) => setTimeout(resolve, 10))
-    assert.equal(storeDb.getTurn(ownerFromSupportCookie('store_support_id=owner-b'), 'request_queue_abort'), null)
+    assert.equal(await storeDb.getTurn(ownerFromSupportCookie('store_support_id=owner-b'), 'request_queue_abort'), null)
 
     releaseModel()
     await (await first).text()
@@ -272,7 +271,7 @@ test('admin CSRF, expiration, no-store and whitespace-normalized login limits', 
     assert.equal(badCsrf.status, 403)
 
     const rawToken = decodeURIComponent(cookie.split('=')[1])
-    storeDb.expireAdminSessionForTest(hashToken(rawToken))
+    await storeDb.expireAdminSessionForTest(hashToken(rawToken))
     const expired = await fetch(baseUrl + '/api/admin/settings', { headers: { cookie } })
     assert.equal(expired.status, 401)
 
@@ -331,7 +330,7 @@ test('verified product metadata survives history reload without duplicate assist
 
 test('failed database completion never publishes done or business content', async () => {
   await withServer(async ({ baseUrl, storeDb }) => {
-    storeDb.completeTurn = () => false
+    storeDb.completeTurn = async () => false
     const response = await fetchSupport(baseUrl + '/api/support/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: 'Chính sách đổi trả?', requestId: 'db_failed_completion' }),
@@ -391,7 +390,7 @@ test('failed turns restore retry metadata and cannot retry behind a newer questi
 test('admin offers feed public catalog and product views without exposing admin writes', async () => {
   await withServer(async ({ baseUrl, storeDb }) => {
     const id = 'demo-11111111-1111-1111-1111-111111111111'
-    storeDb.upsertCatalogProducts([{
+    await storeDb.upsertCatalogProducts([{
       id, source: 'mock-store-api', sourceId: '11111111-1111-1111-1111-111111111111',
       name: 'Test product', category: 'Điện tử', price: 100000, description: 'Demo',
       image: '/products/imported/test.jpg', features: [], tone: 'blue', symbol: '◈', label: 'Demo',

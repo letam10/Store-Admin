@@ -1,7 +1,10 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import Database from 'better-sqlite3'
+import pg from 'pg'
+import { PGlite } from '@electric-sql/pglite'
+
+const { Pool } = pg
 
 const DEMO_ORDERS = Object.freeze([
   ['DEMO-1001', '2026-09-01', 'completed', 890000, 0, 1],
@@ -15,6 +18,8 @@ function nowIso() {
 }
 
 function parseJson(value, fallback) {
+  if (value === null || value === undefined) return fallback
+  if (typeof value === 'object') return value
   try {
     const parsed = JSON.parse(value)
     return parsed ?? fallback
@@ -24,47 +29,134 @@ function parseJson(value, fallback) {
 }
 
 export class StoreDb {
-  constructor(path, { seedDemoData = false } = {}) {
-    mkdirSync(dirname(path), { recursive: true })
-    this.db = new Database(path)
-    this.db.pragma('journal_mode = WAL')
-    this.db.pragma('foreign_keys = ON')
-    this.#migrate()
-    this.#seedCatalogSnapshot(path)
-    if (seedDemoData) {
-      this.seedDemoOrders()
-      this.seedDemoOperations()
+  constructor(target, { seedDemoData = false } = {}) {
+    this.seedDemoData = seedDemoData
+    this.backendOwner = null
+    this.isPglite = false
+    this.target = target
+    this._isInitializing = true
+
+    if (typeof target === 'string' && (target.startsWith('postgres://') || target.startsWith('postgresql://'))) {
+      this.pool = new Pool({ connectionString: target })
+    } else if (target && typeof target === 'object' && (target.host || target.user || target.database || target.connectionString)) {
+      this.pool = new Pool(target)
+    } else {
+      // Local/Embedded PostgreSQL via PGlite
+      this.isPglite = true
+      const dataDir = typeof target === 'string' && target !== ':memory:' ? target : undefined
+      if (dataDir && dataDir !== ':memory:') {
+        mkdirSync(dirname(dataDir), { recursive: true })
+      }
+      this.pglite = new PGlite(dataDir)
+    }
+
+    this.ready = this.#init(target).finally(() => {
+      this._isInitializing = false
+    })
+  }
+
+  async #init(target) {
+    await this.#migrate()
+    await this.#seedCatalogSnapshot(target)
+    if (this.seedDemoData) {
+      await this.seedDemoOrders()
+      await this.seedDemoOperations()
     }
   }
 
-  close() {
+  async #rawQuery(sqlText, params = []) {
+    if (this.isPglite) {
+      const res = await this.pglite.query(sqlText, params)
+      return { rows: res.rows || [], rowCount: res.affectedRows ?? res.rows?.length ?? 0 }
+    }
+    const res = await this.pool.query(sqlText, params)
+    return { rows: res.rows || [], rowCount: res.rowCount || 0 }
+  }
+
+  async query(sqlText, params = []) {
+    if (!this._isInitializing) {
+      await this.ready
+    }
+    return this.#rawQuery(sqlText, params)
+  }
+
+  async transaction(fn) {
+    if (!this._isInitializing) {
+      await this.ready
+    }
+    if (this.isPglite) {
+      await this.pglite.query('BEGIN')
+      try {
+        const clientWrapper = {
+          query: async (text, params = []) => {
+            const res = await this.pglite.query(text, params)
+            return { rows: res.rows || [], rowCount: res.affectedRows ?? res.rows?.length ?? 0 }
+          },
+        }
+        const result = await fn(clientWrapper)
+        await this.pglite.query('COMMIT')
+        return result
+      } catch (err) {
+        await this.pglite.query('ROLLBACK')
+        throw err
+      }
+    }
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const clientWrapper = {
+        query: async (text, params = []) => client.query(text, params),
+      }
+      const result = await fn(clientWrapper)
+      await client.query('COMMIT')
+      return result
+    } catch (err) {
+      await client.query('ROLLBACK')
+      throw err
+    } finally {
+      client.release()
+    }
+  }
+
+  async close() {
+    if (!this._isInitializing) {
+      await this.ready
+    }
     if (this.backendOwner) {
-      this.db.prepare('DELETE FROM backend_owner WHERE token = ?').run(this.backendOwner)
+      try {
+        await this.#rawQuery('DELETE FROM backend_owner WHERE token = $1', [this.backendOwner])
+      } catch {
+        // Ignore errors during shutdown
+      }
     }
-    this.db.close()
+    if (this.isPglite) {
+      await this.pglite.close?.()
+    } else if (this.pool) {
+      await this.pool.end()
+    }
   }
 
-  #migrate() {
-    this.db.exec(`
+  async #migrate() {
+    const ddl = `
       CREATE TABLE IF NOT EXISTS backend_owner (
         singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
         pid INTEGER NOT NULL,
         token TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS admins (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
         password_salt TEXT NOT NULL,
         password_hash TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_admins_username_lower ON admins(LOWER(username));
 
       CREATE TABLE IF NOT EXISTS admin_sessions (
         token_hash TEXT PRIMARY KEY,
-        admin_id INTEGER NOT NULL,
+        admin_id INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
         expires_at TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE CASCADE
+        created_at TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS settings (
@@ -89,26 +181,25 @@ export class StoreDb {
         ON conversations(kind, owner_key, updated_at);
 
       CREATE TABLE IF NOT EXISTS messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        conversation_id TEXT NOT NULL,
+        id SERIAL PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
         role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
         content TEXT NOT NULL,
         completed INTEGER NOT NULL DEFAULT 1,
         sources_json TEXT NOT NULL DEFAULT '[]',
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+        created_at TEXT NOT NULL
       );
 
       CREATE INDEX IF NOT EXISTS idx_messages_conversation
         ON messages(conversation_id, id);
 
       CREATE TABLE IF NOT EXISTS chat_turns (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         request_id TEXT NOT NULL,
         owner_key TEXT NOT NULL,
         kind TEXT NOT NULL CHECK(kind IN ('support', 'admin')),
-        conversation_id TEXT NOT NULL,
-        user_message_id INTEGER NOT NULL,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        user_message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
         assistant_message_id INTEGER,
         user_content TEXT NOT NULL,
         status TEXT NOT NULL CHECK(status IN ('running', 'completed', 'failed', 'stopped')),
@@ -119,9 +210,7 @@ export class StoreDb {
         error_code TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        UNIQUE(owner_key, request_id),
-        FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
-        FOREIGN KEY (user_message_id) REFERENCES messages(id) ON DELETE CASCADE
+        UNIQUE(owner_key, request_id)
       );
 
       CREATE INDEX IF NOT EXISTS idx_chat_turns_conversation
@@ -153,15 +242,19 @@ export class StoreDb {
         source_price_cents INTEGER NOT NULL CHECK(source_price_cents >= 0),
         source_currency TEXT NOT NULL,
         imported_at TEXT NOT NULL,
+        discount_percent INTEGER NOT NULL DEFAULT 0 CHECK(discount_percent BETWEEN 0 AND 90),
+        stock_count INTEGER NOT NULL DEFAULT 20 CHECK(stock_count >= 0),
         UNIQUE(source, source_id)
       );
       CREATE INDEX IF NOT EXISTS idx_catalog_products_category ON catalog_products(category, name);
+
       CREATE TABLE IF NOT EXISTS product_views (
         product_id TEXT PRIMARY KEY,
         view_count INTEGER NOT NULL DEFAULT 0 CHECK(view_count >= 0)
       );
+
       CREATE TABLE IF NOT EXISTS admin_records (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         module TEXT NOT NULL,
         title TEXT NOT NULL,
         data_json TEXT NOT NULL DEFAULT '{}',
@@ -170,61 +263,135 @@ export class StoreDb {
         updated_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_admin_records_module ON admin_records(module, updated_at);
-    `)
 
-    const columns = this.db.prepare('PRAGMA table_info(conversations)').all().map((column) => column.name)
-    if (!columns.includes('memory_json')) {
-      this.db.exec("ALTER TABLE conversations ADD COLUMN memory_json TEXT NOT NULL DEFAULT '{}'")
-    }
-    const turnColumns = this.db.prepare('PRAGMA table_info(chat_turns)').all().map((column) => column.name)
-    if (!turnColumns.includes('assistant_message_id')) this.db.exec('ALTER TABLE chat_turns ADD COLUMN assistant_message_id INTEGER')
-    const productColumns = this.db.prepare('PRAGMA table_info(catalog_products)').all().map((column) => column.name)
-    if (!productColumns.includes('discount_percent')) {
-      this.db.exec('ALTER TABLE catalog_products ADD COLUMN discount_percent INTEGER NOT NULL DEFAULT 0 CHECK(discount_percent BETWEEN 0 AND 90)')
-      this.db.prepare('UPDATE catalog_products SET discount_percent = 15 WHERE id IN (SELECT id FROM catalog_products ORDER BY rowid LIMIT 8)').run()
-    }
-    // Every sellable catalog row has a concrete stock value. Older databases
-    // used a nullable column to mean "unknown"; migrate those rows to the
-    // documented default instead of exposing an unlimited/unknown quantity.
-    if (!productColumns.includes('stock_count')) {
-      this.db.exec('ALTER TABLE catalog_products ADD COLUMN stock_count INTEGER NOT NULL DEFAULT 20 CHECK(stock_count >= 0)')
+      CREATE TABLE IF NOT EXISTS customers (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        email TEXT NOT NULL UNIQUE,
+        password_salt TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        points INTEGER NOT NULL DEFAULT 0,
+        paid_goods_total INTEGER NOT NULL DEFAULT 0,
+        spin_credits INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_username_lower ON customers(LOWER(username));
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email_lower ON customers(LOWER(email));
+
+      CREATE TABLE IF NOT EXISTS customer_sessions (
+        token_hash TEXT PRIMARY KEY,
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        expires_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS voucher_codes (
+        code TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS customer_vouchers (
+        code TEXT PRIMARY KEY REFERENCES voucher_codes(code),
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        label TEXT NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('amount','percent')),
+        value INTEGER NOT NULL CHECK(value > 0),
+        scope TEXT NOT NULL DEFAULT 'goods' CHECK(scope IN ('goods','shipping')),
+        expires_at TEXT NOT NULL,
+        source TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_customer_vouchers_owner ON customer_vouchers(customer_id, expires_at);
+      CREATE INDEX IF NOT EXISTS idx_customer_vouchers_expiry ON customer_vouchers(expires_at);
+
+      CREATE TABLE IF NOT EXISTS customer_favorites (
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        product_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(customer_id, product_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS product_reviews (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        product_id TEXT NOT NULL,
+        rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+        comment TEXT NOT NULL,
+        admin_reply TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        replied_at TEXT,
+        UNIQUE(customer_id, product_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_product_reviews_product ON product_reviews(product_id, created_at);
+
+      CREATE TABLE IF NOT EXISTS customer_orders (
+        id TEXT PRIMARY KEY,
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        items_json TEXT NOT NULL,
+        recipient TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
+        address TEXT NOT NULL DEFAULT '',
+        fulfillment TEXT NOT NULL,
+        region TEXT NOT NULL,
+        distance_km INTEGER NOT NULL DEFAULT 0,
+        weight_kg DOUBLE PRECISION NOT NULL DEFAULT 1,
+        subtotal INTEGER NOT NULL,
+        discount INTEGER NOT NULL,
+        goods_total INTEGER NOT NULL,
+        shipping_fee INTEGER NOT NULL,
+        total INTEGER NOT NULL,
+        voucher_codes_json TEXT NOT NULL,
+        tier TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending','paid')),
+        points_earned INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        paid_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_customer_orders_owner ON customer_orders(customer_id, created_at);
+    `
+    if (this.isPglite) {
+      await this.pglite.exec(ddl)
     } else {
-      this.db.prepare('UPDATE catalog_products SET stock_count = 20 WHERE stock_count IS NULL').run()
+      await this.pool.query(ddl)
     }
   }
 
-  claimBackend() {
+  async claimBackend() {
+    await this.ready
     const token = randomUUID()
-    this.db.transaction(() => {
-      const owner = this.db.prepare('SELECT * FROM backend_owner WHERE singleton = 1').get()
+    await this.transaction(async (tx) => {
+      const res = await tx.query('SELECT * FROM backend_owner WHERE singleton = 1')
+      const owner = res.rows[0]
       if (owner) {
         let alive = true
-        try { process.kill(owner.pid, 0) } catch (error) {
+        try {
+          process.kill(owner.pid, 0)
+        } catch (error) {
           if (error.code === 'ESRCH') alive = false
         }
         if (alive) throw new Error('Database đang thuộc một backend còn hoạt động; không phục hồi lượt chat.')
       }
-      this.db.prepare('INSERT OR REPLACE INTO backend_owner (singleton, pid, token) VALUES (1, ?, ?)').run(process.pid, token)
-      this.db.prepare(`
-      UPDATE chat_turns
-      SET status = 'failed', error_code = 'SERVER_RESTART', updated_at = ?
-      WHERE status = 'running'
-      `).run(nowIso())
-    }).immediate()
+      await tx.query(
+        'INSERT INTO backend_owner (singleton, pid, token) VALUES (1, $1, $2) ON CONFLICT (singleton) DO UPDATE SET pid = EXCLUDED.pid, token = EXCLUDED.token',
+        [process.pid, token],
+      )
+      await tx.query(
+        "UPDATE chat_turns SET status = 'failed', error_code = 'SERVER_RESTART', updated_at = $1 WHERE status = 'running'",
+        [nowIso()],
+      )
+    })
     this.backendOwner = token
   }
 
-  seedDemoOrders() {
-    const insert = this.db.prepare(
-      'INSERT OR IGNORE INTO orders (id, business_date, status, total_amount, refund_amount, is_demo) VALUES (?, ?, ?, ?, ?, ?)',
-    )
-    const transaction = this.db.transaction((rows) => {
-      for (const row of rows) insert.run(...row)
-    })
-    transaction(DEMO_ORDERS)
+  async seedDemoOrders() {
+    for (const [id, businessDate, status, totalAmount, refundAmount, isDemo] of DEMO_ORDERS) {
+      await this.query(
+        'INSERT INTO orders (id, business_date, status, total_amount, refund_amount, is_demo) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING',
+        [id, businessDate, status, totalAmount, refundAmount, isDemo],
+      )
+    }
   }
 
-  seedDemoOperations() {
+  async seedDemoOperations() {
     const rows = [
       ['inventory', 'Nhập kho tuần 39', { kind: 'Nhập', warehouse: 'Kho trung tâm', quantity: '240' }, 'Đã duyệt'],
       ['inventory', 'Xuất kho đơn demo', { kind: 'Xuất', warehouse: 'Kho trung tâm', quantity: '36' }, 'Đang xử lý'],
@@ -236,68 +403,107 @@ export class StoreDb {
       ['overtime', 'Trực cuối tuần', { kind: 'Tăng ca', value: '4 giờ', note: 'Hỗ trợ chốt đơn' }, 'Chờ duyệt'],
       ['support', 'CSKH · Đổi sản phẩm', { customer: 'tam.demo', topic: 'Đổi sản phẩm lỗi', assignee: 'Trần Gia Hân' }, 'Đang xử lý'],
     ]
-    const exists = this.db.prepare('SELECT 1 FROM admin_records WHERE module = ? AND title = ?')
-    const insert = this.db.prepare('INSERT INTO admin_records (module, title, data_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
     const now = nowIso()
-    this.db.transaction(() => {
-      for (const [module, title, data, status] of rows) {
-        if (!exists.get(module, title)) insert.run(module, title, JSON.stringify(data), status, now, now)
+    for (const [module, title, data, status] of rows) {
+      const exists = await this.query('SELECT 1 FROM admin_records WHERE module = $1 AND title = $2', [module, title])
+      if (!exists.rows.length) {
+        await this.query(
+          'INSERT INTO admin_records (module, title, data_json, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)',
+          [module, title, JSON.stringify(data), status, now, now],
+        )
       }
-    })()
+    }
   }
 
-  #seedCatalogSnapshot(databasePath) {
+  async #seedCatalogSnapshot(databasePath) {
+    if (typeof databasePath !== 'string' || databasePath === ':memory:') return
     const snapshotPath = resolve(dirname(databasePath), 'catalog-products.json')
     if (!existsSync(snapshotPath)) return
     try {
       const products = JSON.parse(readFileSync(snapshotPath, 'utf8'))
       if (!Array.isArray(products) || products.length === 0) return
-      const current = this.db.prepare('SELECT COUNT(*) AS count FROM catalog_products').get().count
-      if (current < products.length) this.upsertCatalogProducts(products)
+      const countRes = await this.query('SELECT COUNT(*) AS count FROM catalog_products')
+      const current = Number(countRes.rows[0]?.count || 0)
+      if (current < products.length) await this.upsertCatalogProducts(products)
     } catch {
       // A corrupt optional snapshot must not prevent the backend from starting.
     }
   }
 
-  upsertCatalogProducts(products) {
-    const upsert = this.db.prepare(`
-      INSERT INTO catalog_products (
-        id, source, source_id, name, category, price, description, image,
-        features_json, tone, symbol, label, source_url, source_price_cents,
-        source_currency, imported_at, discount_percent, stock_count
-      ) VALUES (
-        @id, @source, @sourceId, @name, @category, @price, @description, @image,
-        @featuresJson, @tone, @symbol, @label, @sourceUrl, @sourcePriceCents,
-        @sourceCurrency, @importedAt, @discountPercent, @stockCount
-      )
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name, category = excluded.category, price = excluded.price,
-        description = excluded.description, image = excluded.image,
-        features_json = excluded.features_json, tone = excluded.tone,
-        symbol = excluded.symbol, label = excluded.label, source_url = excluded.source_url,
-        source_price_cents = excluded.source_price_cents,
-        source_currency = excluded.source_currency, imported_at = excluded.imported_at
-    `)
-    this.db.transaction((items) => {
-      for (const [index, product] of items.entries()) {
-        upsert.run({
-          ...product,
-          featuresJson: JSON.stringify(product.features),
-          discountPercent: product.discountPercent ?? (index < 8 ? 15 : 0),
-          stockCount: Number.isInteger(product.stockCount) && product.stockCount >= 0 ? product.stockCount : 20,
-        })
+  async upsertCatalogProducts(products) {
+    if (!products || !products.length) return
+    const chunkSize = 50
+    for (let i = 0; i < products.length; i += chunkSize) {
+      const chunk = products.slice(i, i + chunkSize)
+      const values = []
+      const valueTuples = []
+      let pIdx = 1
+
+      for (let j = 0; j < chunk.length; j++) {
+        const product = chunk[j]
+        const index = i + j
+        const featuresJson = typeof product.features === 'string' ? product.features : JSON.stringify(product.features || [])
+        const discountPercent = product.discountPercent ?? (index < 8 ? 15 : 0)
+        const stockCount = Number.isInteger(product.stockCount) && product.stockCount >= 0 ? product.stockCount : 20
+
+        const placeholders = []
+        for (let col = 0; col < 18; col++) {
+          placeholders.push(`$${pIdx++}`)
+        }
+        valueTuples.push(`(${placeholders.join(', ')})`)
+
+        values.push(
+          String(product.id),
+          product.source,
+          String(product.sourceId || product.source_id || product.id),
+          product.name,
+          product.category,
+          product.price,
+          product.description,
+          product.image,
+          featuresJson,
+          product.tone || 'green',
+          product.symbol || '✦',
+          product.label || 'Demo',
+          product.sourceUrl || product.source_url || '',
+          product.sourcePriceCents ?? product.source_price_cents ?? 0,
+          product.sourceCurrency || product.source_currency || 'VND',
+          product.importedAt || product.imported_at || nowIso(),
+          discountPercent,
+          stockCount,
+        )
       }
-    })(products)
+
+      const sql = `
+        INSERT INTO catalog_products (
+          id, source, source_id, name, category, price, description, image,
+          features_json, tone, symbol, label, source_url, source_price_cents,
+          source_currency, imported_at, discount_percent, stock_count
+        ) VALUES ${valueTuples.join(',\n')}
+        ON CONFLICT(id) DO UPDATE SET
+          name = EXCLUDED.name, category = EXCLUDED.category, price = EXCLUDED.price,
+          description = EXCLUDED.description, image = EXCLUDED.image,
+          features_json = EXCLUDED.features_json, tone = EXCLUDED.tone,
+          symbol = EXCLUDED.symbol, label = EXCLUDED.label, source_url = EXCLUDED.source_url,
+          source_price_cents = EXCLUDED.source_price_cents,
+          source_currency = EXCLUDED.source_currency, imported_at = EXCLUDED.imported_at,
+          discount_percent = EXCLUDED.discount_percent, stock_count = EXCLUDED.stock_count
+      `
+      await this.query(sql, values)
+    }
   }
 
-  listCatalogProducts() {
-    return this.db.prepare('SELECT p.*, COALESCE(v.view_count, 0) AS view_count FROM catalog_products p LEFT JOIN product_views v ON v.product_id = p.id ORDER BY p.category, p.name').all().map((row) => ({
+  async listCatalogProducts() {
+    const res = await this.query(
+      'SELECT p.*, COALESCE(v.view_count, 0) AS view_count FROM catalog_products p LEFT JOIN product_views v ON v.product_id = p.id ORDER BY p.category, p.name',
+    )
+    return res.rows.map((row) => ({
       id: row.id,
       source: row.source,
       sourceId: row.source_id,
       name: row.name,
       category: row.category,
-      price: row.price,
+      price: Number(row.price),
       description: row.description,
       image: row.image,
       features: parseJson(row.features_json, []),
@@ -305,99 +511,137 @@ export class StoreDb {
       symbol: row.symbol,
       label: row.label,
       sourceUrl: row.source_url,
-      sourcePriceCents: row.source_price_cents,
+      sourcePriceCents: Number(row.source_price_cents),
       sourceCurrency: row.source_currency,
       importedAt: row.imported_at,
-      discountPercent: row.discount_percent,
-      stockCount: row.stock_count,
-      viewCount: row.view_count,
+      discountPercent: Number(row.discount_percent),
+      stockCount: Number(row.stock_count),
+      viewCount: Number(row.view_count || 0),
     }))
   }
 
-  storefrontCatalog({ details = false } = {}) {
+  async storefrontCatalog({ details = false } = {}) {
     if (details) return this.listCatalogProducts()
-    const rows = this.db.prepare('SELECT p.id, p.discount_percent, p.stock_count, COALESCE(v.view_count, 0) AS view_count FROM catalog_products p LEFT JOIN product_views v ON v.product_id = p.id').all()
-    const featured = this.db.prepare("SELECT product_id AS id, view_count FROM product_views WHERE product_id IN ('1', '2', '3', '4')").all()
-    const result = new Map(rows.map((row) => [String(row.id), { id: row.id, discountPercent: row.discount_percent, stockCount: row.stock_count, viewCount: row.view_count }]))
-    for (const row of featured) if (!result.has(String(row.id))) result.set(String(row.id), { id: row.id, discountPercent: 0, stockCount: 20, viewCount: row.view_count })
+    const res = await this.query(
+      'SELECT p.id, p.discount_percent, p.stock_count, COALESCE(v.view_count, 0) AS view_count FROM catalog_products p LEFT JOIN product_views v ON v.product_id = p.id',
+    )
+    const featuredRes = await this.query(
+      "SELECT product_id AS id, view_count FROM product_views WHERE product_id IN ('1', '2', '3', '4')",
+    )
+    const result = new Map(
+      res.rows.map((row) => [
+        String(row.id),
+        { id: row.id, discountPercent: Number(row.discount_percent), stockCount: Number(row.stock_count), viewCount: Number(row.view_count || 0) },
+      ]),
+    )
+    for (const row of featuredRes.rows) {
+      if (!result.has(String(row.id))) {
+        result.set(String(row.id), { id: row.id, discountPercent: 0, stockCount: 20, viewCount: Number(row.view_count || 0) })
+      }
+    }
     return [...result.values()]
   }
 
-  updateCatalogOffer(id, { discountPercent, stockCount }) {
-    const result = this.db.prepare('UPDATE catalog_products SET discount_percent = ?, stock_count = ? WHERE id = ?').run(discountPercent, stockCount, id)
-    return result.changes > 0
+  async updateCatalogOffer(id, { discountPercent, stockCount }) {
+    const res = await this.query(
+      'UPDATE catalog_products SET discount_percent = $1, stock_count = $2 WHERE id = $3',
+      [discountPercent, stockCount, String(id)],
+    )
+    return res.rowCount > 0
   }
 
-  getCatalogProduct(id) {
-    return this.listCatalogProducts().find((product) => String(product.id) === String(id)) || null
+  async getCatalogProduct(id) {
+    const products = await this.listCatalogProducts()
+    return products.find((product) => String(product.id) === String(id)) || null
   }
 
-  updateCatalogProduct(id, patch) {
-    const columns = { name: 'name', category: 'category', price: 'price', description: 'description', image: 'image', label: 'label', source_url: 'source_url', stockCount: 'stock_count' }
+  async updateCatalogProduct(id, patch) {
+    const columns = { name: 'name', category: 'category', price: 'price', description: 'description', image: 'image', label: 'label', sourceUrl: 'source_url', stockCount: 'stock_count' }
     const entries = Object.keys(columns).filter((key) => patch[key] !== undefined)
     if (!entries.length) return this.getCatalogProduct(id)
-    const assignments = entries.map((key) => `${columns[key]} = ?`).join(', ')
+    const assignments = entries.map((key, idx) => `${columns[key]} = $${idx + 1}`).join(', ')
     const values = entries.map((key) => patch[key])
-    const result = this.db.prepare(`UPDATE catalog_products SET ${assignments} WHERE id = ?`).run(...values, id)
-    return result.changes ? this.getCatalogProduct(id) : null
+    const res = await this.query(`UPDATE catalog_products SET ${assignments} WHERE id = $${entries.length + 1}`, [...values, String(id)])
+    return res.rowCount ? this.getCatalogProduct(id) : null
   }
 
-  deleteCatalogProduct(id) {
-    return this.db.prepare('DELETE FROM catalog_products WHERE id = ?').run(id).changes > 0
+  async deleteCatalogProduct(id) {
+    const res = await this.query('DELETE FROM catalog_products WHERE id = $1', [String(id)])
+    return res.rowCount > 0
   }
 
-  listAdminRecords(module) {
-    return this.db.prepare('SELECT id, module, title, data_json, status, created_at, updated_at FROM admin_records WHERE module = ? ORDER BY updated_at DESC, id DESC').all(module).map((row) => ({
-      id: row.id, module: row.module, title: row.title, data: parseJson(row.data_json, {}), status: row.status,
-      createdAt: row.created_at, updatedAt: row.updated_at,
+  async listAdminRecords(module) {
+    const res = await this.query(
+      'SELECT id, module, title, data_json, status, created_at, updated_at FROM admin_records WHERE module = $1 ORDER BY updated_at DESC, id DESC',
+      [module],
+    )
+    return res.rows.map((row) => ({
+      id: row.id,
+      module: row.module,
+      title: row.title,
+      data: parseJson(row.data_json, {}),
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
     }))
   }
 
-  createAdminRecord({ module, title, data = {}, status = 'Đang dùng' }) {
+  async createAdminRecord({ module, title, data = {}, status = 'Đang dùng' }) {
     const timestamp = nowIso()
-    const result = this.db.prepare('INSERT INTO admin_records (module, title, data_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(module, title, JSON.stringify(data), status, timestamp, timestamp)
-    return { id: result.lastInsertRowid, module, title, data, status, createdAt: timestamp, updatedAt: timestamp }
+    const res = await this.query(
+      'INSERT INTO admin_records (module, title, data_json, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+      [module, title, JSON.stringify(data), status, timestamp, timestamp],
+    )
+    return { id: res.rows[0].id, module, title, data, status, createdAt: timestamp, updatedAt: timestamp }
   }
 
-  updateAdminRecord(id, { module, title, data = {}, status = 'Đang dùng' }) {
+  async updateAdminRecord(id, { module, title, data = {}, status = 'Đang dùng' }) {
     const timestamp = nowIso()
-    const result = this.db.prepare('UPDATE admin_records SET module = ?, title = ?, data_json = ?, status = ?, updated_at = ? WHERE id = ?')
-      .run(module, title, JSON.stringify(data), status, timestamp, id)
-    return result.changes ? { id: Number(id), module, title, data, status, updatedAt: timestamp } : null
+    const res = await this.query(
+      'UPDATE admin_records SET module = $1, title = $2, data_json = $3, status = $4, updated_at = $5 WHERE id = $6',
+      [module, title, JSON.stringify(data), status, timestamp, Number(id)],
+    )
+    return res.rowCount ? { id: Number(id), module, title, data, status, updatedAt: timestamp } : null
   }
 
-  deleteAdminRecord(id) {
-    return this.db.prepare('DELETE FROM admin_records WHERE id = ?').run(id).changes > 0
+  async deleteAdminRecord(id) {
+    const res = await this.query('DELETE FROM admin_records WHERE id = $1', [Number(id)])
+    return res.rowCount > 0
   }
 
-  adminOverview() {
-    const count = (table) => {
-      try { return this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count } catch { return 0 }
+  async adminOverview() {
+    const count = async (table) => {
+      try {
+        const res = await this.query(`SELECT COUNT(*) AS count FROM ${table}`)
+        return Number(res.rows[0]?.count || 0)
+      } catch {
+        return 0
+      }
     }
-    const revenueByDay = this.db.prepare(`
+
+    const revenueRes = await this.query(`
       SELECT business_date AS date,
         COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount - refund_amount ELSE 0 END), 0) AS revenue,
         SUM(CASE WHEN status IN ('paid','completed') THEN 1 ELSE 0 END) AS orders
       FROM orders GROUP BY business_date ORDER BY business_date ASC
-    `).all().map((row) => ({ date: row.date, revenue: Number(row.revenue || 0), orders: Number(row.orders || 0) }))
-    // Customer checkout orders live in a separate table from the legacy
-    // operations/demo order ledger. Include both sources so the dashboard
-    // reflects real payments after an admin marks a customer order paid.
+    `)
+    const revenueByDay = revenueRes.rows.map((row) => ({ date: row.date, revenue: Number(row.revenue || 0), orders: Number(row.orders || 0) }))
+
     let customerRevenueByDay = []
     try {
-      customerRevenueByDay = this.db.prepare(`
-        SELECT substr(COALESCE(paid_at, created_at), 1, 10) AS date,
+      const custRes = await this.query(`
+        SELECT SUBSTRING(COALESCE(paid_at, created_at) FROM 1 FOR 10) AS date,
           COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total ELSE 0 END), 0) AS revenue,
           SUM(CASE WHEN status IN ('paid','completed') THEN 1 ELSE 0 END) AS orders
         FROM customer_orders
-        GROUP BY substr(COALESCE(paid_at, created_at), 1, 10)
+        GROUP BY SUBSTRING(COALESCE(paid_at, created_at) FROM 1 FOR 10)
         ORDER BY date ASC
-      `).all().map((row) => ({ date: row.date, revenue: Number(row.revenue || 0), orders: Number(row.orders || 0) }))
+      `)
+      customerRevenueByDay = custRes.rows.map((row) => ({ date: row.date, revenue: Number(row.revenue || 0), orders: Number(row.orders || 0) }))
     } catch {
-      // customer_orders is created by the customer route migration; an
-      // early direct StoreDb consumer may not have run that migration yet.
+      // customer_orders table may not exist in early tests
     }
+
     const byDate = new Map()
     for (const item of [...revenueByDay, ...customerRevenueByDay]) {
       const current = byDate.get(item.date) || { date: item.date, revenue: 0, orders: 0 }
@@ -408,105 +652,136 @@ export class StoreDb {
     const combinedRevenueByDay = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
     const revenue = combinedRevenueByDay.reduce((sum, item) => sum + item.revenue, 0)
     const includedOrders = combinedRevenueByDay.reduce((sum, item) => sum + item.orders, 0)
-    const customerOrders = count('customer_orders')
-    const legacyOrders = count('orders')
-    let orderStatus = ['pending', 'paid', 'completed', 'cancelled'].map((status) => ({
-      status, count: this.db.prepare('SELECT COUNT(*) AS count FROM orders WHERE status = ?').get(status).count,
-    }))
+    const customerOrders = await count('customer_orders')
+    const legacyOrders = await count('orders')
+
+    let orderStatus = []
+    for (const status of ['pending', 'paid', 'completed', 'cancelled']) {
+      const res = await this.query('SELECT COUNT(*) AS count FROM orders WHERE status = $1', [status])
+      orderStatus.push({ status, count: Number(res.rows[0]?.count || 0) })
+    }
     try {
-      const customerStatus = this.db.prepare('SELECT status, COUNT(*) AS count FROM customer_orders GROUP BY status').all()
+      const custStatusRes = await this.query('SELECT status, COUNT(*) AS count FROM customer_orders GROUP BY status')
       const counts = new Map(orderStatus.map((item) => [item.status, Number(item.count || 0)]))
-      for (const item of customerStatus) counts.set(item.status, (counts.get(item.status) || 0) + Number(item.count || 0))
+      for (const item of custStatusRes.rows) {
+        counts.set(item.status, (counts.get(item.status) || 0) + Number(item.count || 0))
+      }
       orderStatus = [...counts.entries()].map(([status, value]) => ({ status, count: value }))
     } catch {
-      // Keep the legacy status report when customer routes are not migrated.
+      // Keep legacy status
     }
+
+    const openSupportRes = await this.query("SELECT COUNT(*) AS count FROM conversations WHERE kind = 'support'")
+    const totalViews = await this.totalProductViews()
+
     return {
-      products: count('catalog_products'), customers: count('customers'), orders: legacyOrders + customerOrders,
-      customerOrders, legacyOrders,
-      reviews: count('product_reviews'), favorites: count('customer_favorites'), records: count('admin_records'),
-      openSupport: this.db.prepare("SELECT COUNT(*) AS count FROM conversations WHERE kind = 'support'").get()?.count || 0,
-      totalViews: this.totalProductViews(), revenue, includedOrders,
-      revenueByDay: combinedRevenueByDay, orderStatus,
+      products: await count('catalog_products'),
+      customers: await count('customers'),
+      orders: legacyOrders + customerOrders,
+      customerOrders,
+      legacyOrders,
+      reviews: await count('product_reviews'),
+      favorites: await count('customer_favorites'),
+      records: await count('admin_records'),
+      openSupport: Number(openSupportRes.rows[0]?.count || 0),
+      totalViews,
+      revenue,
+      includedOrders,
+      revenueByDay: combinedRevenueByDay,
+      orderStatus,
     }
   }
 
-  recordProductView(id) {
-    const exists = /^[1-4]$/.test(id) || Boolean(this.db.prepare('SELECT 1 FROM catalog_products WHERE id = ?').get(id))
+  async recordProductView(id) {
+    const strId = String(id)
+    const exists = /^[1-4]$/.test(strId) || Boolean((await this.query('SELECT 1 FROM catalog_products WHERE id = $1', [strId])).rows.length)
     if (!exists) return null
-    this.db.prepare('INSERT INTO product_views (product_id, view_count) VALUES (?, 1) ON CONFLICT(product_id) DO UPDATE SET view_count = view_count + 1').run(id)
-    return this.db.prepare('SELECT view_count FROM product_views WHERE product_id = ?').get(id).view_count
+    await this.query(
+      'INSERT INTO product_views (product_id, view_count) VALUES ($1, 1) ON CONFLICT(product_id) DO UPDATE SET view_count = product_views.view_count + 1',
+      [strId],
+    )
+    const res = await this.query('SELECT view_count FROM product_views WHERE product_id = $1', [strId])
+    return Number(res.rows[0]?.view_count || 0)
   }
 
-  getProductViewCount(id) {
-    return this.db.prepare('SELECT view_count FROM product_views WHERE product_id = ?').get(id)?.view_count || 0
+  async getProductViewCount(id) {
+    const res = await this.query('SELECT view_count FROM product_views WHERE product_id = $1', [String(id)])
+    return Number(res.rows[0]?.view_count || 0)
   }
 
-  totalProductViews() {
-    return this.db.prepare('SELECT COALESCE(SUM(view_count), 0) AS total FROM product_views').get().total
+  async totalProductViews() {
+    const res = await this.query('SELECT COALESCE(SUM(view_count), 0) AS total FROM product_views')
+    return Number(res.rows[0]?.total || 0)
   }
 
-  clearOrders() {
-    this.db.prepare('DELETE FROM orders').run()
+  async clearOrders() {
+    await this.query('DELETE FROM orders')
   }
 
-  insertOrder({ id, businessDate, status, totalAmount, refundAmount = 0, isDemo = false }) {
-    this.db.prepare(`
-      INSERT INTO orders (id, business_date, status, total_amount, refund_amount, is_demo)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(id, businessDate, status, totalAmount, refundAmount, isDemo ? 1 : 0)
+  async insertOrder({ id, businessDate, status, totalAmount, refundAmount = 0, isDemo = false }) {
+    await this.query(
+      'INSERT INTO orders (id, business_date, status, total_amount, refund_amount, is_demo) VALUES ($1, $2, $3, $4, $5, $6)',
+      [id, businessDate, status, totalAmount, refundAmount, isDemo ? 1 : 0],
+    )
   }
 
-  getSetting(key) {
-    return this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? null
+  async getSetting(key) {
+    const res = await this.query('SELECT value FROM settings WHERE key = $1', [key])
+    return res.rows[0]?.value ?? null
   }
 
-  setSetting(key, value) {
+  async setSetting(key, value) {
     const now = nowIso()
-    this.db.prepare(`
-      INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-    `).run(key, String(value), now)
+    await this.query(
+      'INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, $3) ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at',
+      [key, String(value), now],
+    )
   }
 
-  createAdmin({ username, passwordSalt, passwordHash }) {
-    return this.db.prepare(
-      'INSERT INTO admins (username, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?)',
-    ).run(username, passwordSalt, passwordHash, nowIso())
+  async createAdmin({ username, passwordSalt, passwordHash }) {
+    const res = await this.query(
+      'INSERT INTO admins (username, password_salt, password_hash, created_at) VALUES ($1, $2, $3, $4) RETURNING id',
+      [username, passwordSalt, passwordHash, nowIso()],
+    )
+    return { lastInsertRowid: res.rows[0].id }
   }
 
-  getAdminByUsername(username) {
-    return this.db.prepare('SELECT * FROM admins WHERE username = ? COLLATE NOCASE').get(username) ?? null
+  async getAdminByUsername(username) {
+    const res = await this.query('SELECT * FROM admins WHERE LOWER(username) = LOWER($1)', [username])
+    return res.rows[0] ?? null
   }
 
-  createAdminSession({ tokenHash, adminId, expiresAt }) {
-    this.db.prepare(
-      'INSERT INTO admin_sessions (token_hash, admin_id, expires_at, created_at) VALUES (?, ?, ?, ?)',
-    ).run(tokenHash, adminId, expiresAt, nowIso())
+  async createAdminSession({ tokenHash, adminId, expiresAt }) {
+    await this.query(
+      'INSERT INTO admin_sessions (token_hash, admin_id, expires_at, created_at) VALUES ($1, $2, $3, $4)',
+      [tokenHash, adminId, expiresAt, nowIso()],
+    )
   }
 
-  getAdminSession(tokenHash) {
-    return this.db.prepare(`
-      SELECT s.token_hash, s.expires_at, a.id AS admin_id, a.username
-      FROM admin_sessions s
-      JOIN admins a ON a.id = s.admin_id
-      WHERE s.token_hash = ?
-    `).get(tokenHash) ?? null
+  async getAdminSession(tokenHash) {
+    const res = await this.query(
+      `SELECT s.token_hash, s.expires_at, a.id AS admin_id, a.username
+       FROM admin_sessions s
+       JOIN admins a ON a.id = s.admin_id
+       WHERE s.token_hash = $1`,
+      [tokenHash],
+    )
+    return res.rows[0] ?? null
   }
 
-  expireAdminSessionForTest(tokenHash) {
-    this.db.prepare('UPDATE admin_sessions SET expires_at = ? WHERE token_hash = ?').run('2000-01-01T00:00:00.000Z', tokenHash)
+  async expireAdminSessionForTest(tokenHash) {
+    await this.query('UPDATE admin_sessions SET expires_at = $1 WHERE token_hash = $2', ['2000-01-01T00:00:00.000Z', tokenHash])
   }
 
-  deleteAdminSession(tokenHash) {
-    this.db.prepare('DELETE FROM admin_sessions WHERE token_hash = ?').run(tokenHash)
+  async deleteAdminSession(tokenHash) {
+    await this.query('DELETE FROM admin_sessions WHERE token_hash = $1', [tokenHash])
   }
 
-  cleanupExpiredSessions() {
-    this.db.prepare('DELETE FROM admin_sessions WHERE expires_at <= ?').run(nowIso())
+  async cleanupExpiredSessions() {
+    await this.query('DELETE FROM admin_sessions WHERE expires_at <= $1', [nowIso()])
   }
 
-  createConversation({ kind, ownerKey }) {
+  async createConversation({ kind, ownerKey }) {
     const now = nowIso()
     const conversation = {
       id: randomUUID(),
@@ -519,83 +794,115 @@ export class StoreDb {
       created_at: now,
       updated_at: now,
     }
-    this.db.prepare(`
-      INSERT INTO conversations
-        (id, kind, owner_key, summary, memory_json, compact_status, last_compacted_message_id, created_at, updated_at)
-      VALUES
-        (@id, @kind, @owner_key, @summary, @memory_json, @compact_status, @last_compacted_message_id, @created_at, @updated_at)
-    `).run(conversation)
+    await this.query(
+      `INSERT INTO conversations
+         (id, kind, owner_key, summary, memory_json, compact_status, last_compacted_message_id, created_at, updated_at)
+       VALUES
+         ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        conversation.id,
+        conversation.kind,
+        conversation.owner_key,
+        conversation.summary,
+        conversation.memory_json,
+        conversation.compact_status,
+        conversation.last_compacted_message_id,
+        conversation.created_at,
+        conversation.updated_at,
+      ],
+    )
     return conversation
   }
 
-  getConversation(id) {
-    return this.db.prepare('SELECT * FROM conversations WHERE id = ?').get(id) ?? null
+  async getConversation(id) {
+    const res = await this.query('SELECT * FROM conversations WHERE id = $1', [id])
+    return res.rows[0] ?? null
   }
 
-  getMessages(conversationId) {
-    return this.db.prepare(
-      'SELECT * FROM messages WHERE conversation_id = ? ORDER BY id ASC',
-    ).all(conversationId)
+  async getMessages(conversationId) {
+    const res = await this.query('SELECT * FROM messages WHERE conversation_id = $1 ORDER BY id ASC', [conversationId])
+    return res.rows
   }
 
-  getPublicHistory(conversationId) {
-    const messages = this.getMessages(conversationId)
-    const turns = this.db.prepare('SELECT * FROM chat_turns WHERE conversation_id = ? ORDER BY id').all(conversationId)
-    const linked = new Set(turns.map((turn) => turn.user_message_id))
+  async getPublicHistory(conversationId) {
+    const messages = await this.getMessages(conversationId)
+    const turnRes = await this.query('SELECT * FROM chat_turns WHERE conversation_id = $1 ORDER BY id', [conversationId])
+    const turns = turnRes.rows
+    const linked = new Set(turns.map((turn) => Number(turn.user_message_id)))
     const assistantIds = new Set()
     for (const turn of turns) {
       if (turn.status !== 'completed') continue
-      if (turn.assistant_message_id) { assistantIds.add(turn.assistant_message_id); continue }
+      if (turn.assistant_message_id) {
+        assistantIds.add(Number(turn.assistant_message_id))
+        continue
+      }
       const nextUser = messages.find((message) => message.id > turn.user_message_id && message.role === 'user')
-      const reply = messages.find((message) => message.id > turn.user_message_id &&
-        (!nextUser || message.id < nextUser.id) && message.role === 'assistant' && message.content === turn.assistant_content)
-      if (reply) assistantIds.add(reply.id)
+      const reply = messages.find(
+        (message) =>
+          message.id > turn.user_message_id &&
+          (!nextUser || message.id < nextUser.id) &&
+          message.role === 'assistant' &&
+          message.content === turn.assistant_content,
+      )
+      if (reply) assistantIds.add(Number(reply.id))
     }
     const result = []
-    // Preserve historical messages created before turn metadata existed.
     for (const message of messages) {
-      if (message.role === 'user' && linked.has(message.id)) continue
-      if (assistantIds.has(message.id)) continue
-      result.push({ ...message, sources: parseJson(message.sources_json, []), status: 'complete', position: message.id })
+      if (message.role === 'user' && linked.has(Number(message.id))) continue
+      if (assistantIds.has(Number(message.id))) continue
+      result.push({ ...message, sources: parseJson(message.sources_json, []), status: 'complete', position: Number(message.id) })
     }
     for (const turn of turns) {
-      result.push({ id: turn.user_message_id, role: 'user', content: turn.user_content, sources: [], status: 'complete', position: turn.user_message_id })
       result.push({
-        id: 'turn-' + turn.id, role: 'assistant', content: turn.assistant_content,
-        sources: parseJson(turn.sources_json, []), verified: parseJson(turn.verified_json, null),
+        id: Number(turn.user_message_id),
+        role: 'user',
+        content: turn.user_content,
+        sources: [],
+        status: 'complete',
+        position: Number(turn.user_message_id),
+      })
+      result.push({
+        id: 'turn-' + turn.id,
+        role: 'assistant',
+        content: turn.assistant_content,
+        sources: parseJson(turn.sources_json, []),
+        verified: parseJson(turn.verified_json, null),
         report: parseJson(turn.report_json, null),
         status: turn.status === 'completed' ? 'complete' : turn.status === 'failed' ? 'error' : turn.status === 'running' ? 'pending' : 'stopped',
-        requestId: turn.request_id, retryContent: turn.user_content,
+        requestId: turn.request_id,
+        retryContent: turn.user_content,
         error: turn.error_code ? 'Lượt trước chưa hoàn tất. Bạn có thể thử lại.' : '',
-        position: turn.user_message_id + 0.5,
+        position: Number(turn.user_message_id) + 0.5,
       })
     }
-    return result.sort((a, b) => a.position - b.position).map((message) => {
-      const copy = { ...message }
-      delete copy.position
-      return copy
-    })
+    return result
+      .sort((a, b) => a.position - b.position)
+      .map((message) => {
+        const copy = { ...message }
+        delete copy.position
+        return copy
+      })
   }
 
-  addMessage({ conversationId, role, content, sources = [], completed = true }) {
+  async addMessage({ conversationId, role, content, sources = [], completed = true }) {
     const now = nowIso()
-    const result = this.db.prepare(`
-      INSERT INTO messages (conversation_id, role, content, completed, sources_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(conversationId, role, content, completed ? 1 : 0, JSON.stringify(sources), now)
-    this.db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?').run(now, conversationId)
-    return Number(result.lastInsertRowid)
+    const res = await this.query(
+      'INSERT INTO messages (conversation_id, role, content, completed, sources_json, created_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+      [conversationId, role, content, completed ? 1 : 0, JSON.stringify(sources), now],
+    )
+    await this.query('UPDATE conversations SET updated_at = $1 WHERE id = $2', [now, conversationId])
+    return Number(res.rows[0].id)
   }
 
-  getTurn(ownerKey, requestId) {
-    return this.db.prepare(
-      'SELECT * FROM chat_turns WHERE owner_key = ? AND request_id = ?',
-    ).get(ownerKey, requestId) ?? null
+  async getTurn(ownerKey, requestId) {
+    const res = await this.query('SELECT * FROM chat_turns WHERE owner_key = $1 AND request_id = $2', [ownerKey, requestId])
+    return res.rows[0] ?? null
   }
 
-  startTurn({ ownerKey, kind, conversationId, requestId, message }) {
-    const transaction = this.db.transaction(() => {
-      const existing = this.getTurn(ownerKey, requestId)
+  async startTurn({ ownerKey, kind, conversationId, requestId, message }) {
+    return this.transaction(async (tx) => {
+      const existingRes = await tx.query('SELECT * FROM chat_turns WHERE owner_key = $1 AND request_id = $2', [ownerKey, requestId])
+      const existing = existingRes.rows[0]
       if (existing) {
         if (existing.kind !== kind || existing.user_content !== message) {
           return { state: 'conflict', turn: existing }
@@ -605,121 +912,139 @@ export class StoreDb {
         }
         if (existing.status === 'completed') return { state: 'completed', turn: existing }
         if (existing.status === 'running') return { state: 'running', turn: existing }
-        this.db.prepare(`
-          UPDATE chat_turns
-          SET status = 'running', assistant_content = '', sources_json = '[]', report_json = 'null',
-              verified_json = 'null', error_code = NULL, updated_at = ?
-          WHERE id = ?
-        `).run(nowIso(), existing.id)
-        return { state: 'retry', turn: this.db.prepare('SELECT * FROM chat_turns WHERE id = ?').get(existing.id) }
+        await tx.query(
+          `UPDATE chat_turns
+           SET status = 'running', assistant_content = '', sources_json = '[]', report_json = 'null',
+               verified_json = 'null', error_code = NULL, updated_at = $1
+           WHERE id = $2`,
+          [nowIso(), existing.id],
+        )
+        const updatedRes = await tx.query('SELECT * FROM chat_turns WHERE id = $1', [existing.id])
+        return { state: 'retry', turn: updatedRes.rows[0] }
       }
 
-      let conversation
+      let activeConversationId = conversationId
       if (conversationId) {
-        conversation = this.getConversation(conversationId)
+        const convRes = await tx.query('SELECT * FROM conversations WHERE id = $1', [conversationId])
+        const conversation = convRes.rows[0]
         if (!conversation || conversation.kind !== kind || conversation.owner_key !== ownerKey) {
           return { state: 'conversation_not_found', turn: null }
         }
       } else {
-        conversation = this.createConversation({ kind, ownerKey })
+        const now = nowIso()
+        const newConvId = randomUUID()
+        await tx.query(
+          `INSERT INTO conversations
+             (id, kind, owner_key, summary, memory_json, compact_status, last_compacted_message_id, created_at, updated_at)
+           VALUES
+             ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [newConvId, kind, ownerKey, '', '{}', 'not_needed', 0, now, now],
+        )
+        activeConversationId = newConvId
       }
 
-      const userMessageId = this.addMessage({
-        conversationId: conversation.id,
-        role: 'user',
-        content: message,
-      })
       const now = nowIso()
-      const result = this.db.prepare(`
-        INSERT INTO chat_turns
-          (request_id, owner_key, kind, conversation_id, user_message_id, user_content, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?)
-      `).run(requestId, ownerKey, kind, conversation.id, userMessageId, message, now, now)
-      const turn = this.db.prepare('SELECT * FROM chat_turns WHERE id = ?').get(Number(result.lastInsertRowid))
-      return { state: 'created', turn }
+      const msgRes = await tx.query(
+        'INSERT INTO messages (conversation_id, role, content, completed, sources_json, created_at) VALUES ($1, $2, $3, 1, $4, $5) RETURNING id',
+        [activeConversationId, 'user', message, '[]', now],
+      )
+      const userMessageId = Number(msgRes.rows[0].id)
+      await tx.query('UPDATE conversations SET updated_at = $1 WHERE id = $2', [now, activeConversationId])
+
+      const turnRes = await tx.query(
+        `INSERT INTO chat_turns
+           (request_id, owner_key, kind, conversation_id, user_message_id, user_content, status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'running', $7, $8)
+         RETURNING *`,
+        [requestId, ownerKey, kind, activeConversationId, userMessageId, message, now, now],
+      )
+      return { state: 'created', turn: turnRes.rows[0] }
     })
-    return transaction()
   }
 
-  completeTurn({ turnId, content, sources = [], report = null, verified = null }) {
-    const transaction = this.db.transaction(() => {
-      const turn = this.db.prepare('SELECT * FROM chat_turns WHERE id = ?').get(turnId)
+  async completeTurn({ turnId, content, sources = [], report = null, verified = null }) {
+    return this.transaction(async (tx) => {
+      const turnRes = await tx.query('SELECT * FROM chat_turns WHERE id = $1', [turnId])
+      const turn = turnRes.rows[0]
       if (!turn || turn.status !== 'running') return false
-      const assistantMessageId = this.addMessage({
-        conversationId: turn.conversation_id,
-        role: 'assistant',
-        content,
-        sources,
-        completed: true,
-      })
-      this.db.prepare(`
-        UPDATE chat_turns
-        SET status = 'completed', assistant_content = ?, sources_json = ?, report_json = ?, verified_json = ?, assistant_message_id = ?,
-            error_code = NULL, updated_at = ?
-        WHERE id = ?
-      `).run(content, JSON.stringify(sources), JSON.stringify(report), JSON.stringify(verified), assistantMessageId, nowIso(), turnId)
+
+      const now = nowIso()
+      const msgRes = await tx.query(
+        'INSERT INTO messages (conversation_id, role, content, completed, sources_json, created_at) VALUES ($1, $2, $3, 1, $4, $5) RETURNING id',
+        [turn.conversation_id, 'assistant', content, JSON.stringify(sources), now],
+      )
+      const assistantMessageId = Number(msgRes.rows[0].id)
+      await tx.query('UPDATE conversations SET updated_at = $1 WHERE id = $2', [now, turn.conversation_id])
+
+      await tx.query(
+        `UPDATE chat_turns
+         SET status = 'completed', assistant_content = $1, sources_json = $2, report_json = $3, verified_json = $4,
+             assistant_message_id = $5, error_code = NULL, updated_at = $6
+         WHERE id = $7`,
+        [content, JSON.stringify(sources), JSON.stringify(report), JSON.stringify(verified), assistantMessageId, now, turnId],
+      )
       return true
     })
-    return transaction()
   }
 
-  failTurn(turnId, { status = 'failed', errorCode = 'AI_ERROR', partialContent = '' } = {}) {
-    this.db.prepare(`
-      UPDATE chat_turns
-      SET status = ?, assistant_content = ?, error_code = ?, updated_at = ?
-      WHERE id = ? AND status = 'running'
-    `).run(status, partialContent, errorCode, nowIso(), turnId)
+  async failTurn(turnId, { status = 'failed', errorCode = 'AI_ERROR', partialContent = '' } = {}) {
+    await this.query(
+      `UPDATE chat_turns
+       SET status = $1, assistant_content = $2, error_code = $3, updated_at = $4
+       WHERE id = $5 AND status = 'running'`,
+      [status, partialContent, errorCode, nowIso(), turnId],
+    )
   }
 
   getConversationMemory(conversation) {
     return parseJson(conversation?.memory_json || '{}', {})
   }
 
-  updateCompact({ conversationId, summary, memory, status, lastCompactedMessageId }) {
-    const transaction = this.db.transaction(() => {
-      this.db.prepare(`
-        UPDATE conversations
-        SET summary = ?, memory_json = ?, compact_status = ?, last_compacted_message_id = ?, updated_at = ?
-        WHERE id = ?
-      `).run(summary, JSON.stringify(memory), status, lastCompactedMessageId, nowIso(), conversationId)
-    })
-    transaction()
+  async updateCompact({ conversationId, summary, memory, status, lastCompactedMessageId }) {
+    await this.query(
+      `UPDATE conversations
+       SET summary = $1, memory_json = $2, compact_status = $3, last_compacted_message_id = $4, updated_at = $5
+       WHERE id = $6`,
+      [summary, JSON.stringify(memory), status, lastCompactedMessageId, nowIso(), conversationId],
+    )
   }
 
-  markCompactFailure(conversationId) {
-    this.db.prepare(`
-      UPDATE conversations SET compact_status = 'failed', updated_at = ? WHERE id = ?
-    `).run(nowIso(), conversationId)
+  async markCompactFailure(conversationId) {
+    await this.query('UPDATE conversations SET compact_status = $1, updated_at = $2 WHERE id = $3', ['failed', nowIso(), conversationId])
   }
 
-  calculateRevenue({ from, to }) {
-    const row = this.db.prepare(`
-      SELECT
-        COUNT(*) AS all_orders,
-        SUM(CASE WHEN status IN ('paid', 'completed') THEN 1 ELSE 0 END) AS included_orders,
-        COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN total_amount ELSE 0 END), 0) AS gross_revenue,
-        COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN refund_amount ELSE 0 END), 0) AS refunds,
-        COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN total_amount - refund_amount ELSE 0 END), 0) AS net_revenue,
-        SUM(CASE WHEN is_demo = 1 THEN 1 ELSE 0 END) AS demo_orders,
-        SUM(CASE WHEN is_demo = 0 THEN 1 ELSE 0 END) AS real_orders
-      FROM orders
-      WHERE business_date BETWEEN ? AND ?
-    `).get(from, to)
+  async calculateRevenue({ from, to }) {
+    const rowRes = await this.query(
+      `SELECT
+         COUNT(*) AS all_orders,
+         SUM(CASE WHEN status IN ('paid', 'completed') THEN 1 ELSE 0 END) AS included_orders,
+         COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN total_amount ELSE 0 END), 0) AS gross_revenue,
+         COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN refund_amount ELSE 0 END), 0) AS refunds,
+         COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN total_amount - refund_amount ELSE 0 END), 0) AS net_revenue,
+         SUM(CASE WHEN is_demo = 1 THEN 1 ELSE 0 END) AS demo_orders,
+         SUM(CASE WHEN is_demo = 0 THEN 1 ELSE 0 END) AS real_orders
+       FROM orders
+       WHERE business_date BETWEEN $1 AND $2`,
+      [from, to],
+    )
+    const row = rowRes.rows[0] || {}
+
     let customerRow = { all_orders: 0, included_orders: 0, gross_revenue: 0, refunds: 0, net_revenue: 0 }
     try {
-      customerRow = this.db.prepare(`
-        SELECT
-          COUNT(*) AS all_orders,
-          SUM(CASE WHEN status IN ('paid', 'completed') THEN 1 ELSE 0 END) AS included_orders,
-          COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN total ELSE 0 END), 0) AS gross_revenue,
-          0 AS refunds,
-          COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN total ELSE 0 END), 0) AS net_revenue
-        FROM customer_orders
-        WHERE substr(COALESCE(paid_at, created_at), 1, 10) BETWEEN ? AND ?
-      `).get(from, to)
+      const custRes = await this.query(
+        `SELECT
+           COUNT(*) AS all_orders,
+           SUM(CASE WHEN status IN ('paid', 'completed') THEN 1 ELSE 0 END) AS included_orders,
+           COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN total ELSE 0 END), 0) AS gross_revenue,
+           0 AS refunds,
+           COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN total ELSE 0 END), 0) AS net_revenue
+         FROM customer_orders
+         WHERE SUBSTRING(COALESCE(paid_at, created_at) FROM 1 FOR 10) BETWEEN $1 AND $2`,
+        [from, to],
+      )
+      if (custRes.rows[0]) customerRow = custRes.rows[0]
     } catch {
-      // Older/direct StoreDb consumers may not have run the customer schema
-      // migration yet; the legacy report remains valid in that case.
+      // customer_orders may not exist
     }
 
     const allOrders = Number(row.all_orders || 0) + Number(customerRow.all_orders || 0)

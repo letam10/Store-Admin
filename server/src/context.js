@@ -211,7 +211,7 @@ export function collectProductHints(messages, memory = {}) {
   return [...new Set(ids)]
 }
 
-export function prepareConversationContext({
+export async function prepareConversationContext({
   storeDb,
   conversation,
   systemPrompt,
@@ -219,7 +219,7 @@ export function prepareConversationContext({
   numCtx,
   outputBudget,
 }) {
-  const allMessages = storeDb.getMessages(conversation.id)
+  const allMessages = await storeDb.getMessages(conversation.id)
   const originalExtraction = conversation.summary || ''
   const originalMemory = storeDb.getConversationMemory(conversation)
   const originalMarker = Number(conversation.last_compacted_message_id || 0)
@@ -243,7 +243,7 @@ export function prepareConversationContext({
   if (estimated > hardBudget) {
     const keepRecent = 8
     if (activeMessages.length <= keepRecent) {
-      storeDb.markCompactFailure(conversation.id)
+      await storeDb.markCompactFailure(conversation.id)
       throw new ContextBudgetError('Ngữ cảnh vượt ngân sách và chưa có đủ phần cũ để rút gọn an toàn.')
     }
 
@@ -262,11 +262,11 @@ export function prepareConversationContext({
     })
 
     if (candidateEstimated > hardBudget) {
-      storeDb.markCompactFailure(conversation.id)
+      await storeDb.markCompactFailure(conversation.id)
       throw new ContextBudgetError('Rút gọn trích xuất không đủ để đưa ngữ cảnh về ngân sách an toàn.')
     }
 
-    storeDb.updateCompact({
+    await storeDb.updateCompact({
       conversationId: conversation.id,
       summary: candidateExtraction,
       memory: candidateMemory,

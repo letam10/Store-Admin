@@ -189,9 +189,15 @@ async function main() {
   if (existing.length === targetTotal - featuredProducts.length) {
     const snapshot = [...featuredRecords(), ...existing]
     mkdirSync(resolve(serverRoot, 'data'), { recursive: true })
-    writeFileSync(adminSnapshotPath, JSON.stringify(snapshot, null, 2) + '\n', 'utf8')
-    const db = new StoreDb(config.dbPath)
-    try { db.upsertCatalogProducts(snapshot) } finally { db.close() }
+    const defaultTarget = config.databaseUrl ||
+      (config.pgHost && config.pgUser && config.pgDatabase ? { host: config.pgHost, port: config.pgPort, user: config.pgUser, password: config.pgPassword, database: config.pgDatabase } : config.pgDataPath)
+    const db = new StoreDb(defaultTarget)
+    try {
+      await db.ready
+      await db.upsertCatalogProducts(snapshot)
+    } finally {
+      await db.close()
+    }
     console.log(`Đã xác nhận snapshot đồng bộ ${snapshot.length} sản phẩm.`)
     return
   }
@@ -222,8 +228,15 @@ async function main() {
     const snapshot = [...existing, ...additions.map(({ record }) => record)]
     writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2) + '\n', 'utf8')
     writeFileSync(adminSnapshotPath, JSON.stringify([...featuredRecords(), ...snapshot], null, 2) + '\n', 'utf8')
-    const db = new StoreDb(config.dbPath)
-    try { db.upsertCatalogProducts([...featuredRecords(), ...snapshot]) } finally { db.close() }
+    const defaultTarget = config.databaseUrl ||
+      (config.pgHost && config.pgUser && config.pgDatabase ? { host: config.pgHost, port: config.pgPort, user: config.pgUser, password: config.pgPassword, database: config.pgDatabase } : config.pgDataPath)
+    const db = new StoreDb(defaultTarget)
+    try {
+      await db.ready
+      await db.upsertCatalogProducts([...featuredRecords(), ...snapshot])
+    } finally {
+      await db.close()
+    }
     console.log(`Đã đồng bộ ${snapshot.length + featuredProducts.length} sản phẩm: ${featuredProducts.length} sản phẩm Store + ${snapshot.length} sản phẩm nhập.`)
   } finally {
     rmSync(stageRoot, { recursive: true, force: true })

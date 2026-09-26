@@ -131,17 +131,20 @@ async function main() {
     }
   }
 
-  const db = new StoreDb(config.dbPath)
+  const defaultTarget = config.databaseUrl ||
+    (config.pgHost && config.pgUser && config.pgDatabase ? { host: config.pgHost, port: config.pgPort, user: config.pgUser, password: config.pgPassword, database: config.pgDatabase } : config.pgDataPath)
+  const db = new StoreDb(defaultTarget)
   try {
-    db.upsertCatalogProducts(records)
+    await db.ready
+    await db.upsertCatalogProducts(records)
   } finally {
-    db.close()
+    await db.close()
   }
   const previous = existsSync(snapshotPath) ? JSON.parse(readFileSync(snapshotPath, 'utf8')) : []
   const baseIds = new Set(records.map((record) => record.id))
   const extra = previous.filter((record) => !baseIds.has(record.id))
   writeFileSync(snapshotPath, JSON.stringify([...records, ...extra], null, 2) + '\n', 'utf8')
-  console.log(`Đã nhập ${records.length} sản phẩm demo vào SQLite và giữ ${extra.length} mục bổ sung tại ${snapshotPath}`)
+  console.log(`Đã nhập ${records.length} sản phẩm demo vào PostgreSQL và giữ ${extra.length} mục bổ sung tại ${snapshotPath}`)
 }
 
 main().catch((error) => {

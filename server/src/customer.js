@@ -71,11 +71,11 @@ export function shippingFee({ region, distanceKm = 0, weightKg = 1, fulfillment 
 }
 
 function publicVoucher(row) {
-  return { code: row.code, label: row.label, type: row.type, value: row.value, scope: row.scope || 'goods', expiresAt: row.expires_at, source: row.source }
+  return { code: row.code, label: row.label, type: row.type, value: Number(row.value), scope: row.scope || 'goods', expiresAt: row.expires_at, source: row.source }
 }
 
-function cleanExpired(sql, time) {
-  sql.prepare('DELETE FROM customer_vouchers WHERE expires_at <= ?').run(time)
+async function cleanExpired(storeDb, time) {
+  await storeDb.query('DELETE FROM customer_vouchers WHERE expires_at <= $1', [time])
 }
 
 function createCode() {
@@ -84,62 +84,6 @@ function createCode() {
 }
 
 export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin, requireCsrf }) {
-  const sql = storeDb.db
-  sql.exec(`
-    CREATE TABLE IF NOT EXISTS customers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-      email TEXT NOT NULL UNIQUE COLLATE NOCASE, password_salt TEXT NOT NULL,
-      password_hash TEXT NOT NULL, points INTEGER NOT NULL DEFAULT 0,
-      paid_goods_total INTEGER NOT NULL DEFAULT 0, spin_credits INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS customer_sessions (
-      token_hash TEXT PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-      expires_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS voucher_codes (code TEXT PRIMARY KEY, created_at TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS customer_vouchers (
-      code TEXT PRIMARY KEY REFERENCES voucher_codes(code),
-      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-      label TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('amount','percent')),
-      value INTEGER NOT NULL CHECK(value > 0), scope TEXT NOT NULL DEFAULT 'goods' CHECK(scope IN ('goods','shipping')), expires_at TEXT NOT NULL,
-      source TEXT NOT NULL, created_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_customer_vouchers_owner ON customer_vouchers(customer_id, expires_at);
-    CREATE INDEX IF NOT EXISTS idx_customer_vouchers_expiry ON customer_vouchers(expires_at);
-    CREATE TABLE IF NOT EXISTS customer_favorites (
-      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-      product_id TEXT NOT NULL, created_at TEXT NOT NULL,
-      PRIMARY KEY(customer_id, product_id)
-    );
-    CREATE TABLE IF NOT EXISTS product_reviews (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-      product_id TEXT NOT NULL, rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
-      comment TEXT NOT NULL, admin_reply TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL, replied_at TEXT,
-      UNIQUE(customer_id, product_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_product_reviews_product ON product_reviews(product_id, created_at);
-    CREATE TABLE IF NOT EXISTS customer_orders (
-      id TEXT PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-      items_json TEXT NOT NULL, recipient TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '',
-      address TEXT NOT NULL DEFAULT '', fulfillment TEXT NOT NULL, region TEXT NOT NULL,
-      distance_km INTEGER NOT NULL DEFAULT 0, subtotal INTEGER NOT NULL,
-      discount INTEGER NOT NULL, goods_total INTEGER NOT NULL, shipping_fee INTEGER NOT NULL,
-      total INTEGER NOT NULL, voucher_codes_json TEXT NOT NULL, tier TEXT NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('pending','paid')),
-      points_earned INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, paid_at TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_customer_orders_owner ON customer_orders(customer_id, created_at);
-  `)
-  const voucherColumns = sql.prepare('PRAGMA table_info(customer_vouchers)').all().map((column) => column.name)
-  if (!voucherColumns.includes('scope')) sql.exec("ALTER TABLE customer_vouchers ADD COLUMN scope TEXT NOT NULL DEFAULT 'goods'")
-  const orderColumns = sql.prepare('PRAGMA table_info(customer_orders)').all().map((column) => column.name)
-  for (const field of ['recipient', 'phone', 'address']) {
-    if (!orderColumns.includes(field)) sql.exec(`ALTER TABLE customer_orders ADD COLUMN ${field} TEXT NOT NULL DEFAULT ''`)
-  }
-  if (!orderColumns.includes('weight_kg')) sql.exec('ALTER TABLE customer_orders ADD COLUMN weight_kg REAL NOT NULL DEFAULT 1')
-
   const customerLimiter = new Map()
   function limited(ip) {
     const time = Date.now()
@@ -149,92 +93,133 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     if (customerLimiter.size > 5000) customerLimiter.clear()
     return entries.length > 30
   }
-  function customer(req, res) {
+
+  async function customer(req, res) {
     const token = parseCookies(req.headers.cookie)[COOKIE]
     if (!token) return null
-    const row = sql.prepare(`SELECT c.*, s.expires_at FROM customer_sessions s
-      JOIN customers c ON c.id = s.customer_id WHERE s.token_hash = ?`).get(hashToken(token))
+    const resRow = await storeDb.query(
+      `SELECT c.*, s.expires_at FROM customer_sessions s
+       JOIN customers c ON c.id = s.customer_id WHERE s.token_hash = $1`,
+      [hashToken(token)],
+    )
+    const row = resRow.rows[0]
     if (!row || row.expires_at <= now().toISOString()) {
-      sql.prepare('DELETE FROM customer_sessions WHERE token_hash = ?').run(hashToken(token))
+      await storeDb.query('DELETE FROM customer_sessions WHERE token_hash = $1', [hashToken(token)])
       clearCookie(res, COOKIE, { secure: config.cookieSecure })
       return null
     }
     return { ...row, rawToken: token, csrfToken: hashToken('customer-csrf:' + token) }
   }
-  function requireCustomer(req, res, next) {
-    const row = customer(req, res)
+
+  async function requireCustomer(req, res, next) {
+    const row = await customer(req, res)
     if (!row) return res.status(401).json({ error: 'LOGIN_REQUIRED' })
     req.customer = row
     next()
   }
+
   function customerCsrf(req, res, next) {
     if (req.get('x-csrf-token') !== req.customer.csrfToken) return res.status(403).json({ error: 'CSRF_INVALID' })
     next()
   }
+
   function publicCustomer(row) {
-    return { id: row.id, username: row.username, email: row.email, points: row.points,
-      tier: tierForPoints(row.points), spinCredits: row.spin_credits, csrfToken: row.csrfToken }
+    return {
+      id: Number(row.id),
+      username: row.username,
+      email: row.email,
+      points: Number(row.points),
+      tier: tierForPoints(Number(row.points)),
+      spinCredits: Number(row.spin_credits),
+      csrfToken: row.csrfToken,
+    }
   }
-  function beginSession(res, row) {
+
+  async function beginSession(res, row) {
     const token = randomToken()
-    sql.prepare('INSERT INTO customer_sessions (token_hash, customer_id, expires_at) VALUES (?, ?, ?)')
-      .run(hashToken(token), row.id, new Date(now().getTime() + SESSION_SECONDS * 1000).toISOString())
+    await storeDb.query(
+      'INSERT INTO customer_sessions (token_hash, customer_id, expires_at) VALUES ($1, $2, $3)',
+      [hashToken(token), row.id, new Date(now().getTime() + SESSION_SECONDS * 1000).toISOString()],
+    )
     setCookie(res, COOKIE, token, { maxAge: SESSION_SECONDS, secure: config.cookieSecure })
     return publicCustomer({ ...row, csrfToken: hashToken('customer-csrf:' + token) })
   }
-  function productById(id) {
-    const basic = baseProducts.find((item) => String(item.id) === id)
+
+  async function productById(id) {
+    const strId = String(id)
+    const basic = baseProducts.find((item) => String(item.id) === strId)
     if (basic) return { ...basic, stockCount: 20, discountPercent: 0 }
-    const item = sql.prepare('SELECT id, name, category, price, image, symbol, discount_percent AS discountPercent, stock_count AS stockCount FROM catalog_products WHERE id = ?').get(id)
+    const res = await storeDb.query(
+      'SELECT id, name, category, price, image, symbol, discount_percent AS "discountPercent", stock_count AS "stockCount" FROM catalog_products WHERE id = $1',
+      [strId],
+    )
+    const item = res.rows[0]
     if (!item) return null
-    return { ...item, stockCount: Number.isInteger(item.stockCount) && item.stockCount >= 0 ? item.stockCount : 20 }
+    return {
+      ...item,
+      price: Number(item.price),
+      discountPercent: Number(item.discountPercent || 0),
+      stockCount: Number.isInteger(item.stockCount) && item.stockCount >= 0 ? item.stockCount : 20,
+    }
   }
-  function issueVoucher(customerId, { label, type, value, scope = 'goods', expiresAt, source }) {
+
+  async function issueVoucher(customerId, { label, type, value, scope = 'goods', expiresAt, source }) {
     for (let attempt = 0; attempt < 30; attempt += 1) {
       const code = createCode()
       try {
-        sql.prepare('INSERT INTO voucher_codes (code, created_at) VALUES (?, ?)').run(code, now().toISOString())
+        await storeDb.query('INSERT INTO voucher_codes (code, created_at) VALUES ($1, $2)', [code, now().toISOString()])
       } catch (error) {
-        if (error.code === 'SQLITE_CONSTRAINT_PRIMARYKEY' || error.code === 'SQLITE_CONSTRAINT_UNIQUE') continue
+        if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('UNIQUE')) continue
         throw error
       }
-      sql.prepare(`INSERT INTO customer_vouchers (code, customer_id, label, type, value, scope, expires_at, source, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(code, customerId, label, type, value, scope, expiresAt, source, now().toISOString())
+      await storeDb.query(
+        `INSERT INTO customer_vouchers (code, customer_id, label, type, value, scope, expires_at, source, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [code, customerId, label, type, value, scope, expiresAt, source, now().toISOString()],
+      )
       return { code, label, type, value, scope, expiresAt, source }
     }
     throw new Error('VOUCHER_CODE_EXHAUSTED')
   }
-  function vouchersFor(id) {
-    cleanExpired(sql, now().toISOString())
-    return sql.prepare('SELECT * FROM customer_vouchers WHERE customer_id = ? ORDER BY created_at DESC').all(id).map(publicVoucher)
+
+  async function vouchersFor(id) {
+    await cleanExpired(storeDb, now().toISOString())
+    const res = await storeDb.query('SELECT * FROM customer_vouchers WHERE customer_id = $1 ORDER BY created_at DESC', [id])
+    return res.rows.map(publicVoucher)
   }
-  function quote(row, body) {
+
+  async function quote(row, body) {
     if (!body || !Array.isArray(body.items) || body.items.length < 1 || body.items.length > 99 ||
       !['delivery', 'pickup'].includes(body.fulfillment)) throw new Error('INVALID_ORDER')
     const ids = new Set()
-    const items = body.items.map((line) => {
+    const items = []
+    for (const line of body.items) {
       const id = String(line.id || '')
       if (ids.has(id) || !Number.isInteger(line.quantity) || line.quantity < 1 || line.quantity > 99) throw new Error('INVALID_ORDER')
       ids.add(id)
-      const product = productById(id)
+      const product = await productById(id)
       if (!product || product.stockCount === 0 || (product.stockCount !== null && product.stockCount < line.quantity)) throw new Error('PRODUCT_UNAVAILABLE')
       const price = Math.round(product.price * (100 - product.discountPercent) / 1000) * 10
-      return { id, name: product.name, quantity: line.quantity, price }
-    })
+      items.push({ id, name: product.name, quantity: line.quantity, price })
+    }
     const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
     const tier = tierForPoints(row.points)
     const codes = body.voucherCodes || []
     if (!Array.isArray(codes) || codes.length > 20 || new Set(codes).size !== codes.length) throw new Error('INVALID_VOUCHER')
-    cleanExpired(sql, now().toISOString())
+    await cleanExpired(storeDb, now().toISOString())
     let remaining = subtotal
     const shippingCodes = []
     for (const code of codes) {
       if (typeof code !== 'string' || !/^[A-Z2-9]{10}$/.test(code)) throw new Error('INVALID_VOUCHER')
-      const voucher = sql.prepare('SELECT * FROM customer_vouchers WHERE code = ? AND customer_id = ? AND expires_at > ?').get(code, row.id, now().toISOString())
+      const vRes = await storeDb.query(
+        'SELECT * FROM customer_vouchers WHERE code = $1 AND customer_id = $2 AND expires_at > $3',
+        [code, row.id, now().toISOString()],
+      )
+      const voucher = vRes.rows[0]
       if (!voucher) throw new Error('INVALID_VOUCHER')
       if ((voucher.scope || 'goods') === 'shipping') shippingCodes.push(voucher)
       else {
-        const raw = voucher.type === 'amount' ? voucher.value : Math.floor(remaining * voucher.value / 100)
+        const raw = voucher.type === 'amount' ? Number(voucher.value) : Math.floor(remaining * Number(voucher.value) / 100)
         remaining -= Math.min(remaining, raw)
       }
     }
@@ -247,13 +232,28 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     const originalFee = shippingFee({ region, distanceKm, weightKg, fulfillment }, tier)
     let fee = originalFee
     for (const voucher of shippingCodes) {
-      const raw = voucher.type === 'amount' ? voucher.value : Math.floor(fee * voucher.value / 100)
+      const raw = voucher.type === 'amount' ? Number(voucher.value) : Math.floor(fee * Number(voucher.value) / 100)
       fee -= Math.min(fee, raw)
     }
     const discountTotal = subtotal - remaining + originalFee - fee
-    return { items, subtotal, discount: discountTotal, goodsTotal: remaining, shippingFee: fee, shippingFeeBeforeDiscount: originalFee,
-      shippingDiscount: originalFee - fee, total: remaining + fee, tier, voucherCodes: codes, fulfillment, region, distanceKm, weightKg }
+    return {
+      items,
+      subtotal,
+      discount: discountTotal,
+      goodsTotal: remaining,
+      shippingFee: fee,
+      shippingFeeBeforeDiscount: originalFee,
+      shippingDiscount: originalFee - fee,
+      total: remaining + fee,
+      tier,
+      voucherCodes: codes,
+      fulfillment,
+      region,
+      distanceKm,
+      weightKg,
+    }
   }
+
   function fail(res, error) {
     const code = error.message
     const status = ['INVALID_ORDER', 'PRODUCT_UNAVAILABLE', 'INVALID_VOUCHER', 'INVALID_DELIVERY_REGION'].includes(code) ? 400 : 500
@@ -261,7 +261,8 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
   }
 
   app.use('/api/customer', (req, res, next) => { res.set('Cache-Control', 'no-store'); next() })
-  app.post('/api/customer/register', (req, res) => {
+
+  app.post('/api/customer/register', async (req, res) => {
     if (limited(req.ip)) return res.status(429).json({ error: 'RATE_LIMITED' })
     const username = String(req.body?.username || '').trim()
     const email = String(req.body?.email || '').trim().toLowerCase()
@@ -270,155 +271,248 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       typeof password !== 'string' || password.length < 8 || password.length > 256) return res.status(400).json({ error: 'INVALID_REGISTRATION' })
     const { salt, hash } = hashPassword(password)
     try {
-      const result = sql.prepare('INSERT INTO customers (username, email, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?, ?)')
-        .run(username, email, salt, hash, now().toISOString())
-      res.status(201).json({ account: beginSession(res, { id: result.lastInsertRowid, username, email, points: 0, spin_credits: 0 }) })
+      const result = await storeDb.query(
+        'INSERT INTO customers (username, email, password_salt, password_hash, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+        [username, email, salt, hash, now().toISOString()],
+      )
+      const newId = result.rows[0].id
+      const sessionAccount = await beginSession(res, { id: newId, username, email, points: 0, spin_credits: 0 })
+      res.status(201).json({ account: sessionAccount })
     } catch (error) {
-      if (error.code?.startsWith('SQLITE_CONSTRAINT')) return res.status(409).json({ error: 'ACCOUNT_EXISTS' })
+      if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('UNIQUE')) {
+        return res.status(409).json({ error: 'ACCOUNT_EXISTS' })
+      }
       throw error
     }
   })
-  app.post('/api/customer/login', (req, res) => {
+
+  app.post('/api/customer/login', async (req, res) => {
     if (limited(req.ip)) return res.status(429).json({ error: 'RATE_LIMITED' })
     const login = normalizeUsername(req.body?.username)
     const password = req.body?.password
     if (!login || typeof password !== 'string' || password.length > 256) return res.status(400).json({ error: 'INVALID_CREDENTIALS' })
-    const row = sql.prepare('SELECT * FROM customers WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE').get(login, login)
+    const resRow = await storeDb.query(
+      'SELECT * FROM customers WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($2)',
+      [login, login],
+    )
+    const row = resRow.rows[0]
     if (!row || !verifyPassword(password, row.password_salt, row.password_hash)) return res.status(401).json({ error: 'INVALID_CREDENTIALS' })
-    res.json({ account: beginSession(res, row) })
+    res.json({ account: await beginSession(res, row) })
   })
-  app.get('/api/customer/session', (req, res) => {
-    const row = customer(req, res)
+
+  app.get('/api/customer/session', async (req, res) => {
+    const row = await customer(req, res)
     if (!row) return res.status(401).json({ authenticated: false })
     res.json({ authenticated: true, account: publicCustomer(row) })
   })
-  app.post('/api/customer/logout', requireCustomer, customerCsrf, (req, res) => {
-    sql.prepare('DELETE FROM customer_sessions WHERE token_hash = ?').run(hashToken(req.customer.rawToken))
+
+  app.post('/api/customer/logout', requireCustomer, customerCsrf, async (req, res) => {
+    await storeDb.query('DELETE FROM customer_sessions WHERE token_hash = $1', [hashToken(req.customer.rawToken)])
     clearCookie(res, COOKIE, { secure: config.cookieSecure })
     res.json({ ok: true })
   })
-  app.get('/api/customer/vouchers', requireCustomer, (req, res) => res.json({ vouchers: vouchersFor(req.customer.id) }))
-  app.get('/api/customer/favorites', requireCustomer, (req, res) => {
-    res.json({ ids: sql.prepare('SELECT product_id FROM customer_favorites WHERE customer_id = ? ORDER BY created_at DESC').all(req.customer.id).map((item) => item.product_id) })
+
+  app.get('/api/customer/vouchers', requireCustomer, async (req, res) => {
+    res.json({ vouchers: await vouchersFor(req.customer.id) })
   })
-  app.put('/api/customer/favorites/:id', requireCustomer, customerCsrf, (req, res) => {
+
+  app.get('/api/customer/favorites', requireCustomer, async (req, res) => {
+    const resFav = await storeDb.query('SELECT product_id FROM customer_favorites WHERE customer_id = $1 ORDER BY created_at DESC', [req.customer.id])
+    res.json({ ids: resFav.rows.map((item) => item.product_id) })
+  })
+
+  app.put('/api/customer/favorites/:id', requireCustomer, customerCsrf, async (req, res) => {
     const id = String(req.params.id)
-    if (!productById(id)) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
-    sql.prepare('INSERT OR IGNORE INTO customer_favorites (customer_id, product_id, created_at) VALUES (?, ?, ?)').run(req.customer.id, id, now().toISOString())
+    if (!(await productById(id))) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    await storeDb.query(
+      'INSERT INTO customer_favorites (customer_id, product_id, created_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+      [req.customer.id, id, now().toISOString()],
+    )
     res.json({ saved: true })
   })
-  app.delete('/api/customer/favorites/:id', requireCustomer, customerCsrf, (req, res) => {
-    sql.prepare('DELETE FROM customer_favorites WHERE customer_id = ? AND product_id = ?').run(req.customer.id, req.params.id)
+
+  app.delete('/api/customer/favorites/:id', requireCustomer, customerCsrf, async (req, res) => {
+    await storeDb.query('DELETE FROM customer_favorites WHERE customer_id = $1 AND product_id = $2', [req.customer.id, req.params.id])
     res.json({ saved: false })
   })
-  app.get('/api/storefront/products/:id/reviews', (req, res) => {
+
+  app.get('/api/storefront/products/:id/reviews', async (req, res) => {
     const id = String(req.params.id)
-    if (!productById(id)) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
-    const rows = sql.prepare(`SELECT r.id, r.rating, r.comment, r.admin_reply AS adminReply,
-      r.created_at AS createdAt, r.replied_at AS repliedAt, c.username
-      FROM product_reviews r JOIN customers c ON c.id = r.customer_id
-      WHERE r.product_id = ? ORDER BY r.created_at DESC LIMIT 200`).all(id)
-    res.json({ reviews: rows, total: rows.length })
+    if (!(await productById(id))) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    const rowsRes = await storeDb.query(
+      `SELECT r.id, r.rating, r.comment, r.admin_reply AS "adminReply",
+              r.created_at AS "createdAt", r.replied_at AS "repliedAt", c.username
+       FROM product_reviews r JOIN customers c ON c.id = r.customer_id
+       WHERE r.product_id = $1 ORDER BY r.created_at DESC LIMIT 200`,
+      [id],
+    )
+    res.json({ reviews: rowsRes.rows, total: rowsRes.rows.length })
   })
-  app.post('/api/storefront/products/:id/reviews', requireCustomer, customerCsrf, (req, res) => {
+
+  app.post('/api/storefront/products/:id/reviews', requireCustomer, customerCsrf, async (req, res) => {
     const id = String(req.params.id)
     const rating = req.body?.rating
     const comment = String(req.body?.comment || '').trim()
-    if (!productById(id)) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    if (!(await productById(id))) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
     if (!Number.isInteger(rating) || rating < 1 || rating > 5 || comment.length > 2000) return res.status(400).json({ error: 'INVALID_REVIEW' })
-    sql.prepare(`INSERT INTO product_reviews (customer_id, product_id, rating, comment, created_at)
-      VALUES (?, ?, ?, ?, ?) ON CONFLICT(customer_id, product_id) DO UPDATE SET rating=excluded.rating,
-      comment=excluded.comment, admin_reply='', replied_at=NULL, created_at=excluded.created_at`).run(req.customer.id, id, rating, comment, now().toISOString())
+    await storeDb.query(
+      `INSERT INTO product_reviews (customer_id, product_id, rating, comment, created_at)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT(customer_id, product_id) DO UPDATE SET
+         rating = EXCLUDED.rating, comment = EXCLUDED.comment, admin_reply = '', replied_at = NULL, created_at = EXCLUDED.created_at`,
+      [req.customer.id, id, rating, comment, now().toISOString()],
+    )
     res.json({ ok: true })
   })
-  app.post('/api/customer/spin', requireCustomer, customerCsrf, (req, res) => {
-    const outcome = sql.transaction(() => {
-      const current = sql.prepare('SELECT spin_credits FROM customers WHERE id = ?').get(req.customer.id)
-      if (current.spin_credits < 1) return null
-      sql.prepare('UPDATE customers SET spin_credits = spin_credits - 1 WHERE id = ?').run(req.customer.id)
+
+  app.post('/api/customer/spin', requireCustomer, customerCsrf, async (req, res) => {
+    const outcome = await storeDb.transaction(async (tx) => {
+      const curRes = await tx.query('SELECT spin_credits FROM customers WHERE id = $1', [req.customer.id])
+      const current = curRes.rows[0]
+      if (!current || Number(current.spin_credits) < 1) return null
+      await tx.query('UPDATE customers SET spin_credits = spin_credits - 1 WHERE id = $1', [req.customer.id])
       const index = randomInt(PRIZES.length)
       const prize = PRIZES[index]
-      const voucher = prize.kind === 'none' ? null : issueVoucher(req.customer.id, {
-        label: prize.label, type: prize.kind, value: prize.value,
-        scope: 'goods', expiresAt: new Date(now().getTime() + 30 * 86400000).toISOString(), source: 'wheel',
-      })
-      return { index, prize: prize.label, voucher, spinCredits: current.spin_credits - 1 }
-    })()
+      let voucher = null
+      if (prize.kind !== 'none') {
+        const code = createCode()
+        const exp = new Date(now().getTime() + 30 * 86400000).toISOString()
+        await tx.query('INSERT INTO voucher_codes (code, created_at) VALUES ($1, $2)', [code, now().toISOString()])
+        await tx.query(
+          `INSERT INTO customer_vouchers (code, customer_id, label, type, value, scope, expires_at, source, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [code, req.customer.id, prize.label, prize.kind, prize.value, 'goods', exp, 'wheel', now().toISOString()],
+        )
+        voucher = { code, label: prize.label, type: prize.kind, value: prize.value, scope: 'goods', expiresAt: exp, source: 'wheel' }
+      }
+      return { index, prize: prize.label, voucher, spinCredits: Number(current.spin_credits) - 1 }
+    })
     if (!outcome) return res.status(409).json({ error: 'NO_SPIN_CREDITS' })
     res.json(outcome)
   })
-  app.post('/api/customer/quote', requireCustomer, customerCsrf, (req, res) => {
-    try { res.json(quote(req.customer, req.body)) } catch (error) { fail(res, error) }
+
+  app.post('/api/customer/quote', requireCustomer, customerCsrf, async (req, res) => {
+    try {
+      const q = await quote(req.customer, req.body)
+      res.json(q)
+    } catch (error) {
+      fail(res, error)
+    }
   })
-  app.post('/api/customer/orders', requireCustomer, customerCsrf, (req, res) => {
+
+  app.post('/api/customer/orders', requireCustomer, customerCsrf, async (req, res) => {
     try {
       const recipient = String(req.body?.recipient || '').trim()
       const phone = String(req.body?.phone || '').trim()
       const address = String(req.body?.address || '').trim()
       if (recipient.length < 2 || recipient.length > 100 || !/^[+0-9 ()-]{9,20}$/.test(phone) ||
         (req.body?.fulfillment === 'delivery' && (address.length < 5 || address.length > 300))) throw new Error('INVALID_ORDER')
-      const order = sql.transaction(() => {
-        const fresh = sql.prepare('SELECT * FROM customers WHERE id = ?').get(req.customer.id)
-        const data = quote(fresh, req.body)
+
+      const order = await storeDb.transaction(async (tx) => {
+        const freshRes = await tx.query('SELECT * FROM customers WHERE id = $1', [req.customer.id])
+        const fresh = freshRes.rows[0]
+        const data = await quote(fresh, req.body)
         const id = 'ST-' + randomUUID().slice(0, 12).toUpperCase()
         const createdAt = now().toISOString()
-        sql.prepare(`INSERT INTO customer_orders (id, customer_id, items_json, recipient, phone, address, fulfillment, region, distance_km, weight_kg,
-          subtotal, discount, goods_total, shipping_fee, total, voucher_codes_json, tier, status, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`).run(id, fresh.id,
-          JSON.stringify(data.items), recipient, phone, address, data.fulfillment, data.region, data.distanceKm, data.weightKg,
-          data.subtotal, data.discount, data.goodsTotal, data.shippingFee, data.total, JSON.stringify(data.voucherCodes), data.tier, createdAt)
-        for (const code of data.voucherCodes) sql.prepare('DELETE FROM customer_vouchers WHERE customer_id = ? AND code = ?').run(fresh.id, code)
+        await tx.query(
+          `INSERT INTO customer_orders (
+             id, customer_id, items_json, recipient, phone, address, fulfillment, region, distance_km, weight_kg,
+             subtotal, discount, goods_total, shipping_fee, total, voucher_codes_json, tier, status, created_at
+           ) VALUES (
+             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+             $11, $12, $13, $14, $15, $16, $17, 'pending', $18
+           )`,
+          [
+            id, fresh.id, JSON.stringify(data.items), recipient, phone, address, data.fulfillment, data.region, data.distanceKm, data.weightKg,
+            data.subtotal, data.discount, data.goodsTotal, data.shippingFee, data.total, JSON.stringify(data.voucherCodes), data.tier, createdAt,
+          ],
+        )
+        for (const code of data.voucherCodes) {
+          await tx.query('DELETE FROM customer_vouchers WHERE customer_id = $1 AND code = $2', [fresh.id, code])
+        }
         return { id, ...data, status: 'pending', createdAt, pointsEarned: 0 }
-      })()
+      })
       res.status(201).json({ order })
-    } catch (error) { fail(res, error) }
+    } catch (error) {
+      fail(res, error)
+    }
   })
-  app.get('/api/customer/orders', requireCustomer, (req, res) => {
-    const orders = sql.prepare('SELECT * FROM customer_orders WHERE customer_id = ? ORDER BY created_at DESC LIMIT 100').all(req.customer.id)
-      .map((item) => ({ id: item.id, items: JSON.parse(item.items_json), itemCount: JSON.parse(item.items_json).reduce((sum, line) => sum + line.quantity, 0),
-        fulfillment: item.fulfillment, subtotal: item.subtotal, discount: item.discount, goodsTotal: item.goods_total,
-        shippingFee: item.shipping_fee, weightKg: item.weight_kg, total: item.total, voucherCodes: JSON.parse(item.voucher_codes_json),
-        tier: item.tier, status: item.status, pointsEarned: item.points_earned, createdAt: item.created_at }))
+
+  app.get('/api/customer/orders', requireCustomer, async (req, res) => {
+    const resOrders = await storeDb.query('SELECT * FROM customer_orders WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 100', [req.customer.id])
+    const orders = resOrders.rows.map((item) => ({
+      id: item.id,
+      items: JSON.parse(item.items_json),
+      itemCount: JSON.parse(item.items_json).reduce((sum, line) => sum + line.quantity, 0),
+      fulfillment: item.fulfillment,
+      subtotal: Number(item.subtotal),
+      discount: Number(item.discount),
+      goodsTotal: Number(item.goods_total),
+      shippingFee: Number(item.shipping_fee),
+      weightKg: Number(item.weight_kg),
+      total: Number(item.total),
+      voucherCodes: JSON.parse(item.voucher_codes_json),
+      tier: item.tier,
+      status: item.status,
+      pointsEarned: Number(item.points_earned),
+      createdAt: item.created_at,
+    }))
     res.json({ orders })
   })
-  app.get('/api/admin/customers', requireAdmin, (req, res) => {
-    const customers = sql.prepare(`SELECT id, username, email, points, paid_goods_total AS paidGoodsTotal,
-      spin_credits AS spinCredits, created_at AS createdAt FROM customers ORDER BY points DESC, id ASC`).all()
-      .map((item) => ({ ...item, tier: tierForPoints(item.points) }))
+
+  app.get('/api/admin/customers', requireAdmin, async (req, res) => {
+    const resCust = await storeDb.query(
+      `SELECT id, username, email, points, paid_goods_total AS "paidGoodsTotal",
+              spin_credits AS "spinCredits", created_at AS "createdAt"
+       FROM customers ORDER BY points DESC, id ASC`,
+    )
+    const customers = resCust.rows.map((item) => ({
+      ...item,
+      id: Number(item.id),
+      points: Number(item.points),
+      paidGoodsTotal: Number(item.paidGoodsTotal),
+      spinCredits: Number(item.spinCredits),
+      tier: tierForPoints(Number(item.points)),
+    }))
     res.json({ customers })
   })
-  app.post('/api/admin/customers/:id/vouchers', requireAdmin, requireCsrf, (req, res) => {
+
+  app.post('/api/admin/customers/:id/vouchers', requireAdmin, requireCsrf, async (req, res) => {
     const customerId = Number(req.params.id)
     const type = req.body?.type
     const scope = req.body?.scope === undefined ? 'goods' : req.body.scope
     const value = req.body?.value
     const date = new Date(req.body?.expiresAt)
-    if (!sql.prepare('SELECT id FROM customers WHERE id = ?').get(customerId)) return res.status(404).json({ error: 'CUSTOMER_NOT_FOUND' })
+    const custExists = await storeDb.query('SELECT id FROM customers WHERE id = $1', [customerId])
+    if (!custExists.rows.length) return res.status(404).json({ error: 'CUSTOMER_NOT_FOUND' })
     if (!['amount', 'percent'].includes(type) || !['goods', 'shipping'].includes(scope) || !Number.isInteger(value) || value < 1 || value > (type === 'percent' ? 100 : 10000000) ||
       !Number.isFinite(date.getTime()) || date <= now() || date.getTime() > now().getTime() + 365 * 86400000) return res.status(400).json({ error: 'INVALID_VOUCHER' })
     const label = scope === 'shipping'
       ? `Ship ${type === 'amount' ? 'giảm ' + new Intl.NumberFormat('vi-VN').format(value) + ' ₫' : 'giảm ' + value + '%'}`
       : type === 'amount' ? `Giảm ${new Intl.NumberFormat('vi-VN').format(value)} ₫` : `Giảm ${value}%`
-    res.status(201).json({ voucher: issueVoucher(customerId, { label, type, value, scope, expiresAt: date.toISOString(), source: 'admin' }) })
+    const voucher = await issueVoucher(customerId, { label, type, value, scope, expiresAt: date.toISOString(), source: 'admin' })
+    res.status(201).json({ voucher })
   })
-  // Voucher management endpoint used by the dedicated admin Voucher module.
-  // Codes are generated and persisted only by the server; they are immutable.
-  app.get('/api/admin/vouchers', requireAdmin, (req, res) => {
-    cleanExpired(sql, now().toISOString())
-    const vouchers = sql.prepare(`SELECT v.code, v.label, v.type, v.value, v.scope, v.expires_at AS expiresAt,
-      v.source, v.created_at AS createdAt, c.id AS customerId, c.username, c.email
-      FROM customer_vouchers v JOIN customers c ON c.id = v.customer_id
-      ORDER BY v.created_at DESC`).all()
-    res.json({ vouchers })
+
+  app.get('/api/admin/vouchers', requireAdmin, async (req, res) => {
+    await cleanExpired(storeDb, now().toISOString())
+    const resVouchers = await storeDb.query(
+      `SELECT v.code, v.label, v.type, v.value, v.scope, v.expires_at AS "expiresAt",
+              v.source, v.created_at AS "createdAt", c.id AS "customerId", c.username, c.email
+       FROM customer_vouchers v JOIN customers c ON c.id = v.customer_id
+       ORDER BY v.created_at DESC`,
+    )
+    res.json({ vouchers: resVouchers.rows })
   })
-  app.post('/api/admin/vouchers', requireAdmin, requireCsrf, (req, res) => {
+
+  app.post('/api/admin/vouchers', requireAdmin, requireCsrf, async (req, res) => {
     const customerId = Number(req.body?.customerId)
     const type = req.body?.type
     const scope = req.body?.scope === undefined ? 'goods' : req.body.scope
     const value = req.body?.value
     const date = new Date(req.body?.expiresAt)
-    if (!Number.isInteger(customerId) || customerId < 1 ||
-      !sql.prepare('SELECT id FROM customers WHERE id = ?').get(customerId) ||
+    const custExists = await storeDb.query('SELECT id FROM customers WHERE id = $1', [customerId])
+    if (!Number.isInteger(customerId) || customerId < 1 || !custExists.rows.length ||
       !['amount', 'percent'].includes(type) || !['goods', 'shipping'].includes(scope) || !Number.isInteger(value) || value < 1 || value > (type === 'percent' ? 100 : 10000000) ||
       !Number.isFinite(date.getTime()) || date <= now() || date.getTime() > now().getTime() + 365 * 86400000) {
       return res.status(400).json({ error: 'INVALID_VOUCHER', message: 'Voucher khong hop le.' })
@@ -428,69 +522,97 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       ? `Ship ${type === 'amount' ? 'giảm ' + new Intl.NumberFormat('vi-VN').format(value) + ' ₫' : 'giảm ' + value + '%'}`
       : type === 'amount' ? `Giảm ${new Intl.NumberFormat('vi-VN').format(value)} ₫` : `Giảm ${value}%`
     if (label.length > 120) return res.status(400).json({ error: 'INVALID_VOUCHER', message: 'Ten voucher qua dai.' })
-    res.status(201).json({ voucher: issueVoucher(customerId, { label: label || generatedLabel, type, value, scope, expiresAt: date.toISOString(), source: 'admin' }) })
+    const voucher = await issueVoucher(customerId, { label: label || generatedLabel, type, value, scope, expiresAt: date.toISOString(), source: 'admin' })
+    res.status(201).json({ voucher })
   })
-  app.delete('/api/admin/vouchers/:code', requireAdmin, requireCsrf, (req, res) => {
+
+  app.delete('/api/admin/vouchers/:code', requireAdmin, requireCsrf, async (req, res) => {
     const code = String(req.params.code || '').toUpperCase()
     if (!/^[A-Z2-9]{10}$/.test(code)) return res.status(400).json({ error: 'INVALID_VOUCHER', message: 'Ma voucher khong hop le.' })
-    const removed = sql.transaction(() => {
-      const exists = sql.prepare('SELECT code FROM voucher_codes WHERE code = ?').get(code)
-      if (!exists) return false
-      sql.prepare('DELETE FROM customer_vouchers WHERE code = ?').run(code)
-      // Keep the reservation row forever so a revoked code can never be
-      // generated again by a later random attempt.
+    const removed = await storeDb.transaction(async (tx) => {
+      const existsRes = await tx.query('SELECT code FROM voucher_codes WHERE code = $1', [code])
+      if (!existsRes.rows.length) return false
+      await tx.query('DELETE FROM customer_vouchers WHERE code = $1', [code])
       return true
-    })()
+    })
     if (!removed) return res.status(404).json({ error: 'VOUCHER_NOT_FOUND' })
     res.json({ ok: true, code })
   })
-  app.get('/api/admin/favorites', requireAdmin, (req, res) => {
-    const favorites = sql.prepare('SELECT product_id AS id, COUNT(*) AS count FROM customer_favorites GROUP BY product_id ORDER BY count DESC, product_id').all()
-      .map((item) => {
-        const product = productById(item.id)
-        return { ...item, name: product?.name || item.id, image: product?.image || null, symbol: product?.symbol || '✦' }
-      })
+
+  app.get('/api/admin/favorites', requireAdmin, async (req, res) => {
+    const favRes = await storeDb.query('SELECT product_id AS id, COUNT(*) AS count FROM customer_favorites GROUP BY product_id ORDER BY count DESC, product_id')
+    const favorites = []
+    for (const item of favRes.rows) {
+      const product = await productById(item.id)
+      favorites.push({ ...item, count: Number(item.count), name: product?.name || item.id, image: product?.image || null, symbol: product?.symbol || '✦' })
+    }
     res.json({ favorites })
   })
-  app.get('/api/admin/reviews', requireAdmin, (req, res) => {
-    const reviews = sql.prepare(`SELECT r.id, r.product_id AS productId, r.rating, r.comment,
-      r.admin_reply AS adminReply, r.created_at AS createdAt, c.username
-      FROM product_reviews r JOIN customers c ON c.id = r.customer_id ORDER BY r.created_at DESC`).all()
-      .map((item) => ({ ...item, productName: productById(item.productId)?.name || item.productId }))
+
+  app.get('/api/admin/reviews', requireAdmin, async (req, res) => {
+    const revRes = await storeDb.query(
+      `SELECT r.id, r.product_id AS "productId", r.rating, r.comment,
+              r.admin_reply AS "adminReply", r.created_at AS "createdAt", c.username
+       FROM product_reviews r JOIN customers c ON c.id = r.customer_id ORDER BY r.created_at DESC`,
+    )
+    const reviews = []
+    for (const item of revRes.rows) {
+      const product = await productById(item.productId)
+      reviews.push({ ...item, productName: product?.name || item.productId })
+    }
     res.json({ reviews })
   })
-  app.patch('/api/admin/reviews/:id/reply', requireAdmin, requireCsrf, (req, res) => {
+
+  app.patch('/api/admin/reviews/:id/reply', requireAdmin, requireCsrf, async (req, res) => {
     const reply = String(req.body?.reply || '').trim()
     if (reply.length < 1 || reply.length > 2000) return res.status(400).json({ error: 'INVALID_REPLY' })
-    const result = sql.prepare('UPDATE product_reviews SET admin_reply = ?, replied_at = ? WHERE id = ?').run(reply, now().toISOString(), Number(req.params.id))
-    if (!result.changes) return res.status(404).json({ error: 'REVIEW_NOT_FOUND' })
+    const result = await storeDb.query('UPDATE product_reviews SET admin_reply = $1, replied_at = $2 WHERE id = $3', [reply, now().toISOString(), Number(req.params.id)])
+    if (!result.rowCount) return res.status(404).json({ error: 'REVIEW_NOT_FOUND' })
     res.json({ ok: true, reply })
   })
-  app.get('/api/admin/customer-orders', requireAdmin, (req, res) => {
-    const orders = sql.prepare(`SELECT o.id, o.recipient, o.phone, o.address, o.region,
-      o.distance_km AS distanceKm, o.goods_total AS goodsTotal, o.shipping_fee AS shippingFee,
-      o.total, o.status, o.created_at AS createdAt, o.points_earned AS pointsEarned, c.username
-      FROM customer_orders o JOIN customers c ON c.id = o.customer_id ORDER BY o.created_at DESC LIMIT 200`).all()
+
+  app.get('/api/admin/customer-orders', requireAdmin, async (req, res) => {
+    const ordersRes = await storeDb.query(
+      `SELECT o.id, o.recipient, o.phone, o.address, o.region,
+              o.distance_km AS "distanceKm", o.goods_total AS "goodsTotal", o.shipping_fee AS "shippingFee",
+              o.total, o.status, o.created_at AS "createdAt", o.points_earned AS "pointsEarned", c.username
+       FROM customer_orders o JOIN customers c ON c.id = o.customer_id ORDER BY o.created_at DESC LIMIT 200`,
+    )
+    const orders = ordersRes.rows.map((row) => ({
+      ...row,
+      distanceKm: Number(row.distanceKm),
+      goodsTotal: Number(row.goodsTotal),
+      shippingFee: Number(row.shippingFee),
+      total: Number(row.total),
+      pointsEarned: Number(row.pointsEarned),
+    }))
     res.json({ orders })
   })
-  app.post('/api/admin/customer-orders/:id/paid', requireAdmin, requireCsrf, (req, res) => {
-    const result = sql.transaction(() => {
-      const order = sql.prepare('SELECT * FROM customer_orders WHERE id = ?').get(req.params.id)
+
+  app.post('/api/admin/customer-orders/:id/paid', requireAdmin, requireCsrf, async (req, res) => {
+    const result = await storeDb.transaction(async (tx) => {
+      const orderRes = await tx.query('SELECT * FROM customer_orders WHERE id = $1', [req.params.id])
+      const order = orderRes.rows[0]
       if (!order) return null
-      if (order.status === 'paid') return { alreadyPaid: true, pointsEarned: order.points_earned }
-      const account = sql.prepare('SELECT * FROM customers WHERE id = ?').get(order.customer_id)
-      const tier = tierForPoints(account.points)
-      const pointsEarned = pointsForPaidGoods(order.goods_total, tier)
-      const before = Math.floor(account.paid_goods_total / 100000)
-      const after = Math.floor((account.paid_goods_total + order.goods_total) / 100000)
-      sql.prepare('UPDATE customers SET points = points + ?, paid_goods_total = paid_goods_total + ?, spin_credits = spin_credits + ? WHERE id = ?')
-        .run(pointsEarned, order.goods_total, after - before, account.id)
-      sql.prepare("UPDATE customer_orders SET status = 'paid', paid_at = ?, points_earned = ? WHERE id = ?")
-        .run(now().toISOString(), pointsEarned, order.id)
+      if (order.status === 'paid') return { alreadyPaid: true, pointsEarned: Number(order.points_earned) }
+      const accRes = await tx.query('SELECT * FROM customers WHERE id = $1', [order.customer_id])
+      const account = accRes.rows[0]
+      const tier = tierForPoints(Number(account.points))
+      const goodsTotal = Number(order.goods_total)
+      const pointsEarned = pointsForPaidGoods(goodsTotal, tier)
+      const paidGoodsTotal = Number(account.paid_goods_total)
+      const before = Math.floor(paidGoodsTotal / 100000)
+      const after = Math.floor((paidGoodsTotal + goodsTotal) / 100000)
+      await tx.query(
+        'UPDATE customers SET points = points + $1, paid_goods_total = paid_goods_total + $2, spin_credits = spin_credits + $3 WHERE id = $4',
+        [pointsEarned, goodsTotal, after - before, account.id],
+      )
+      await tx.query("UPDATE customer_orders SET status = 'paid', paid_at = $1, points_earned = $2 WHERE id = $3", [now().toISOString(), pointsEarned, order.id])
       return { alreadyPaid: false, pointsEarned, spinCreditsAdded: after - before }
-    })()
+    })
     if (!result) return res.status(404).json({ error: 'ORDER_NOT_FOUND' })
     res.json(result)
   })
+
   return { requireCustomer, customerCsrf }
 }

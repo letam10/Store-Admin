@@ -100,8 +100,15 @@ async function main() {
   const importedAt = new Date().toISOString()
   const extra = selected.flatMap(({ group, items }) => items.map(({ item }) => record(group, item, importedAt)))
   if (extra.length !== 300 || new Set(extra.map((item) => item.id)).size !== 300) throw new Error('Không đủ 300 sản phẩm duy nhất')
-  const db = new StoreDb(config.dbPath)
-  try { db.upsertCatalogProducts(extra) } finally { db.close() }
+  const defaultTarget = config.databaseUrl ||
+    (config.pgHost && config.pgUser && config.pgDatabase ? { host: config.pgHost, port: config.pgPort, user: config.pgUser, password: config.pgPassword, database: config.pgDatabase } : config.pgDataPath)
+  const db = new StoreDb(defaultTarget)
+  try {
+    await db.ready
+    await db.upsertCatalogProducts(extra)
+  } finally {
+    await db.close()
+  }
   mkdirSync(storeImages, { recursive: true })
   mkdirSync(adminImages, { recursive: true })
   for (const { items } of selected) for (const { item, bytes } of items) {
