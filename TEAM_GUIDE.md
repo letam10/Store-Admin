@@ -32,7 +32,7 @@ cd server && npm ci && cd ..
 1. Trong thư mục `Store-Admin/server/`, tạo file **`.env`** (nếu chưa có).
 2. Dán cấu hình kết nối Database chung của nhóm vào:
 ```env
-PORT=8787
+PORT=3001
 DATABASE_URL=<DAN_DUONG_DAN_DATABASE_NEON_TRONG_FILE_ENV_LOCAL>
 ```
 
@@ -48,7 +48,7 @@ Mở 2 cửa sổ Terminal:
   ```bash
   npm run dev:api
   ```
-  *(Backend sẽ chạy tại `http://127.0.0.1:8787` hoặc cổng cấu hình)*
+  *(Backend sẽ chạy tại `http://127.0.0.1:3001`)*
 
 * **Terminal 2 - Khởi chạy Frontend Quản Trị (Admin Portal)**:
   ```bash
