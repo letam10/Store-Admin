@@ -5,6 +5,8 @@ Tài liệu này là quy tắc bắt buộc áp dụng cho mọi AI coding agent
 ---
 
 ## 1. Quy Định Bắt Buộc Về Git Commit & Push
+* **Bao gồm đầy đủ tất cả tệp đã chỉnh sửa & sửa lỗi**:
+  * Khi thực hiện commit, phải stage và gom toàn bộ tất cả các file đã chỉnh sửa, tạo mới hoặc sửa lỗi (`git add -A` hoặc các tệp liên quan), tuyệt đối không để sót file chưa commit.
 * **100% Thông điệp Git Commit (Commit Message) phải viết bằng Tiếng Việt**:
   * Tuyệt đối **KHÔNG** sử dụng tiếng Anh cho commit message (trừ tên biến, tên hàm, tên bảng đặc thù).
   * Commit message phải rõ ràng, ngắn gọn, mô tả đúng bản chất công việc vừa làm.
