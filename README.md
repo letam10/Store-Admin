@@ -9,9 +9,8 @@ Node 24.19.0, npm 11.17.0 như Store; không tự nâng runtime.
 - Terminal 2: npm run dev (http://127.0.0.1:5174)
 - Tạo tài khoản: npm --prefix server run create-admin -- ten_admin (nhập mật khẩu trong terminal tương tác); xem BACKEND.md.
 - Kiểm tra: npm test, npm run lint, npm run build, npm run test:api.
-- **Hướng dẫn kết nối nhóm & dùng chung Database Cloud**: Xem chi tiết tại [TEAM_GUIDE.md](./TEAM_GUIDE.md).
 
-Lần cài mới: sao chép `server/.env.example` thành `server/.env` hoặc cấu hình `DATABASE_URL` theo hướng dẫn trong `TEAM_GUIDE.md`.
+Lần cài mới: sao chép `server/.env.example` thành `server/.env` và cấu hình `DATABASE_URL`.
 
 ## Ranh giới
 - src/pages/Admin*: toàn bộ giao diện admin, không còn trong bundle Store.
