@@ -16,3 +16,12 @@ Cài extension `C# Dev Kit`, đặt breakpoint trong `Controllers` hoặc `Data/
 Mặc định API đọc SQLite hiện tại ở `../server/data/store.sqlite`. Đổi đường dẫn bằng biến môi trường `ConnectionStrings__StoreDb`.
 
 Các route C# đầu tiên giữ nguyên contract `/api/health`, `/api/storefront/catalog`, `/api/storefront/appearance`, `/api/storefront/products/{id}/view`, `/api/customer/*` cơ bản và `/api/admin/login`. Backend Node cũ vẫn là đường chạy chính cho đến khi các route còn lại được port và kiểm thử.
+
+Để thử frontend với C# mà không đổi cấu hình mặc định, chạy Vite bằng:
+
+```powershell
+$env:VITE_API_TARGET = 'http://127.0.0.1:5000'
+npm run dev
+```
+
+Khi không đặt biến này, hai frontend vẫn dùng backend Node cũ ở cổng `3001`.
