@@ -33,7 +33,7 @@ cd server && npm ci && cd ..
 2. Dán cấu hình kết nối Database chung của nhóm vào:
 ```env
 PORT=8787
-DATABASE_URL=postgresql://neondb_owner:npg_gVZL84Ajmatn@ep-shiny-surf-b3dkgt4j-pooler.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+DATABASE_URL=<DAN_DUONG_DAN_DATABASE_NEON_TRONG_FILE_ENV_LOCAL>
 ```
 
 > ⚠️ **Lưu ý**: File `.env` chứa thông tin kết nối và đã được đưa vào `.gitignore` nên sẽ không bị push lên GitHub.
@@ -75,3 +75,4 @@ npm run create-admin -- <tên_đăng_nhập_của_bạn>
   git config user.name "<tên_github_của_bạn>"
   git config user.email "<email_github_của_bạn>"
   ```
+
