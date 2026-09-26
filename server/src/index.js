@@ -1,3 +1,5 @@
+// LEGACY NODE BACKEND: retained for rollback while server-dotnet is migrated and verified.
+// Do not delete this entry point until the C# API passes the complete contract suite.
 import { createApp } from './app.js'
 import { config } from './config.js'
 

@@ -1,0 +1,36 @@
+{
+  "version": 2,
+  "dgSpecHash": "Nj6m65bJtU0=",
+  "success": true,
+  "projectFilePath": "D:\\Học Tập\\Website_React\\Store-Admin\\server-dotnet\\server-dotnet.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\TAM\\.nuget\\packages\\microsoft.data.sqlite\\8.0.28\\microsoft.data.sqlite.8.0.28.nupkg.sha512",
+    "C:\\Users\\TAM\\.nuget\\packages\\microsoft.data.sqlite.core\\8.0.28\\microsoft.data.sqlite.core.8.0.28.nupkg.sha512",
+    "C:\\Users\\TAM\\.nuget\\packages\\microsoft.extensions.apidescription.server\\6.0.5\\microsoft.extensions.apidescription.server.6.0.5.nupkg.sha512",
+    "C:\\Users\\TAM\\.nuget\\packages\\microsoft.openapi\\1.6.14\\microsoft.openapi.1.6.14.nupkg.sha512",
+    "C:\\Users\\TAM\\.nuget\\packages\\scrypt\\2.0.0\\scrypt.2.0.0.nupkg.sha512",
+    "C:\\Users\\TAM\\.nuget\\packages\\sqlitepclraw.bundle_e_sqlite3\\2.1.6\\sqlitepclraw.bundle_e_sqlite3.2.1.6.nupkg.sha512",
+    "C:\\Users\\TAM\\.nuget\\packages\\sqlitepclraw.core\\2.1.6\\sqlitepclraw.core.2.1.6.nupkg.sha512",
+    "C:\\Users\\TAM\\.nuget\\packages\\sqlitepclraw.lib.e_sqlite3\\2.1.6\\sqlitepclraw.lib.e_sqlite3.2.1.6.nupkg.sha512",
+    "C:\\Users\\TAM\\.nuget\\packages\\sqlitepclraw.provider.e_sqlite3\\2.1.6\\sqlitepclraw.provider.e_sqlite3.2.1.6.nupkg.sha512",
+    "C:\\Users\\TAM\\.nuget\\packages\\swashbuckle.aspnetcore\\6.6.2\\swashbuckle.aspnetcore.6.6.2.nupkg.sha512",
+    "C:\\Users\\TAM\\.nuget\\packages\\swashbuckle.aspnetcore.swagger\\6.6.2\\swashbuckle.aspnetcore.swagger.6.6.2.nupkg.sha512",
+    "C:\\Users\\TAM\\.nuget\\packages\\swashbuckle.aspnetcore.swaggergen\\6.6.2\\swashbuckle.aspnetcore.swaggergen.6.6.2.nupkg.sha512",
+    "C:\\Users\\TAM\\.nuget\\packages\\swashbuckle.aspnetcore.swaggerui\\6.6.2\\swashbuckle.aspnetcore.swaggerui.6.6.2.nupkg.sha512",
+    "C:\\Users\\TAM\\.nuget\\packages\\system.memory\\4.5.3\\system.memory.4.5.3.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1701",
+      "level": "Warning",
+      "message": "Package 'SCrypt 2.0.0' was restored using '.NETFramework,Version=v4.6.1, .NETFramework,Version=v4.6.2, .NETFramework,Version=v4.7, .NETFramework,Version=v4.7.1, .NETFramework,Version=v4.7.2, .NETFramework,Version=v4.8, .NETFramework,Version=v4.8.1' instead of the project target framework 'net8.0'. This package may not be fully compatible with your project.",
+      "projectPath": "D:\\Học Tập\\Website_React\\Store-Admin\\server-dotnet\\server-dotnet.csproj",
+      "warningLevel": 1,
+      "filePath": "D:\\Học Tập\\Website_React\\Store-Admin\\server-dotnet\\server-dotnet.csproj",
+      "libraryId": "SCrypt",
+      "targetGraphs": [
+        "net8.0"
+      ]
+    }
+  ]
+}
