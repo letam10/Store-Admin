@@ -705,10 +705,26 @@ export class StoreDb {
       FROM orders
       WHERE business_date BETWEEN ? AND ?
     `).get(from, to)
+    let customerRow = { all_orders: 0, included_orders: 0, gross_revenue: 0, refunds: 0, net_revenue: 0 }
+    try {
+      customerRow = this.db.prepare(`
+        SELECT
+          COUNT(*) AS all_orders,
+          SUM(CASE WHEN status IN ('paid', 'completed') THEN 1 ELSE 0 END) AS included_orders,
+          COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN total ELSE 0 END), 0) AS gross_revenue,
+          0 AS refunds,
+          COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN total ELSE 0 END), 0) AS net_revenue
+        FROM customer_orders
+        WHERE substr(COALESCE(paid_at, created_at), 1, 10) BETWEEN ? AND ?
+      `).get(from, to)
+    } catch {
+      // Older/direct StoreDb consumers may not have run the customer schema
+      // migration yet; the legacy report remains valid in that case.
+    }
 
-    const allOrders = Number(row.all_orders || 0)
+    const allOrders = Number(row.all_orders || 0) + Number(customerRow.all_orders || 0)
     const demoOrders = Number(row.demo_orders || 0)
-    const realOrders = Number(row.real_orders || 0)
+    const realOrders = Number(row.real_orders || 0) + Number(customerRow.all_orders || 0)
     let dataMode = 'none'
     if (allOrders > 0 && demoOrders === allOrders) dataMode = 'demo'
     else if (allOrders > 0 && realOrders === allOrders) dataMode = 'real'
@@ -721,10 +737,10 @@ export class StoreDb {
       includedStatuses: ['paid', 'completed'],
       excludedStatuses: ['cancelled'],
       allOrders,
-      includedOrders: Number(row.included_orders || 0),
-      grossRevenue: Number(row.gross_revenue || 0),
-      refunds: Number(row.refunds || 0),
-      netRevenue: Number(row.net_revenue || 0),
+      includedOrders: Number(row.included_orders || 0) + Number(customerRow.included_orders || 0),
+      grossRevenue: Number(row.gross_revenue || 0) + Number(customerRow.gross_revenue || 0),
+      refunds: Number(row.refunds || 0) + Number(customerRow.refunds || 0),
+      netRevenue: Number(row.net_revenue || 0) + Number(customerRow.net_revenue || 0),
       currency: 'VND',
       dataMode,
     }

@@ -101,6 +101,10 @@ test('catalog stock defaults to 20, zero stock is unavailable, and voucher manag
     assert.equal(dashboardBody.dashboard.customerOrders, 1)
     assert.ok(dashboardBody.dashboard.revenueByDay.some((item) => item.date === '2026-09-26' && item.revenue === 250000))
     assert.ok(dashboardBody.dashboard.orderStatus.some((item) => item.status === 'paid' && item.count >= 1))
+    const dailyStats = storeDb.calculateRevenue({ from: '2026-09-26', to: '2026-09-26' })
+    assert.equal(dailyStats.dataMode, 'real')
+    assert.equal(dailyStats.includedOrders, 1)
+    assert.equal(dailyStats.netRevenue, 250000)
 
     const invalidScope = await fetch(root + '/api/admin/vouchers', {
       method: 'POST', headers, body: JSON.stringify({ customerId: customer.id, type: 'percent', scope: 'unknown', value: 20, expiresAt: '2026-10-01T00:00:00.000Z' }),
