@@ -1,0 +1,5 @@
+# Cursor / Codex Rules
+- Every git commit message must ALWAYS be written in Vietnamese (100% Tiếng Việt).
+- Never write English git commit messages.
+- Format: "thêm/sửa/tối ưu/cập nhật <mô tả chi tiết bằng tiếng Việt>".
+- Always communicate with the user in Vietnamese.
