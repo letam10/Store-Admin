@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Store API C#",
+      "type": "coreclr",
+      "request": "launch",
+      "program": "${workspaceFolder}/server-dotnet/bin/Debug/net8.0/server-dotnet.dll",
+      "cwd": "${workspaceFolder}/server-dotnet",
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "stopAtEntry": false,
+      "launchBrowser": true,
+      "launchUrl": "http://127.0.0.1:5000/swagger"
+    }
+  ]
+}

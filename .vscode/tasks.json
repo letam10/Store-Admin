@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Store API C#",
+      "type": "shell",
+      "command": "dotnet build server-dotnet/server-dotnet.csproj",
+      "problemMatcher": "$msCompile",
+      "group": "build"
+    },
+    {
+      "label": "Run Store API C#",
+      "type": "shell",
+      "command": "dotnet watch --project server-dotnet run --urls http://127.0.0.1:5000",
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}
