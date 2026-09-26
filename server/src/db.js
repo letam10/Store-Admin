@@ -6,13 +6,6 @@ import { PGlite } from '@electric-sql/pglite'
 
 const { Pool } = pg
 
-const DEMO_ORDERS = Object.freeze([
-  ['DEMO-1001', '2026-09-01', 'completed', 890000, 0, 1],
-  ['DEMO-1002', '2026-09-03', 'paid', 249000, 0, 1],
-  ['DEMO-1003', '2026-09-07', 'completed', 1290000, 159000, 1],
-  ['DEMO-1004', '2026-09-09', 'cancelled', 159000, 0, 1],
-])
-
 function nowIso() {
   return new Date().toISOString()
 }
@@ -383,36 +376,43 @@ export class StoreDb {
   }
 
   async seedDemoOrders() {
-    for (const [id, businessDate, status, totalAmount, refundAmount, isDemo] of DEMO_ORDERS) {
-      await this.query(
-        'INSERT INTO orders (id, business_date, status, total_amount, refund_amount, is_demo) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING',
-        [id, businessDate, status, totalAmount, refundAmount, isDemo],
-      )
-    }
+    await this.query(
+      `INSERT INTO orders (id, business_date, status, total_amount, refund_amount, is_demo)
+       VALUES 
+         ('DEMO-1001', '2026-09-01', 'completed', 890000, 0, 1),
+         ('DEMO-1002', '2026-09-03', 'paid', 249000, 0, 1),
+         ('DEMO-1003', '2026-09-07', 'completed', 1290000, 159000, 1),
+         ('DEMO-1004', '2026-09-09', 'cancelled', 159000, 0, 1)
+       ON CONFLICT (id) DO NOTHING`
+    )
   }
 
   async seedDemoOperations() {
-    const rows = [
-      ['inventory', 'Nhập kho tuần 39', { kind: 'Nhập', warehouse: 'Kho trung tâm', quantity: '240' }, 'Đã duyệt'],
-      ['inventory', 'Xuất kho đơn demo', { kind: 'Xuất', warehouse: 'Kho trung tâm', quantity: '36' }, 'Đang xử lý'],
-      ['logistics', 'Tuyến TP.HCM → Bình Dương', { route: 'Nội thành', progress: 'Đang giao', updated: 'Hôm nay 09:30' }, 'Đang dùng'],
-      ['logistics', 'Tuyến TP.HCM → Hà Nội', { route: 'Liên tỉnh', progress: 'Chờ lấy hàng', updated: 'Hôm qua 16:10' }, 'Chờ duyệt'],
-      ['order-types', 'Đơn giao tận nơi', { priority: 'Cao', sla: '24 giờ', note: 'Ưu tiên hàng đã thanh toán' }, 'Đang dùng'],
-      ['staff', 'Nguyễn Minh An', { role: 'Điều phối', shift: '08:00 – 17:00', login: 'an.store' }, 'Đang dùng'],
-      ['staff', 'Trần Gia Hân', { role: 'CSKH', shift: '13:00 – 21:00', login: 'han.store' }, 'Đang dùng'],
-      ['overtime', 'Trực cuối tuần', { kind: 'Tăng ca', value: '4 giờ', note: 'Hỗ trợ chốt đơn' }, 'Chờ duyệt'],
-      ['support', 'CSKH · Đổi sản phẩm', { customer: 'tam.demo', topic: 'Đổi sản phẩm lỗi', assignee: 'Trần Gia Hân' }, 'Đang xử lý'],
-    ]
+    const exists = await this.query("SELECT 1 FROM admin_records WHERE module IN ('inventory','logistics','order-types','staff','overtime','support') LIMIT 1")
+    if (exists.rows.length) return
     const now = nowIso()
-    for (const [module, title, data, status] of rows) {
-      const exists = await this.query('SELECT 1 FROM admin_records WHERE module = $1 AND title = $2', [module, title])
-      if (!exists.rows.length) {
-        await this.query(
-          'INSERT INTO admin_records (module, title, data_json, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)',
-          [module, title, JSON.stringify(data), status, now, now],
-        )
-      }
+    const rows = [
+      ['inventory', 'Nhập kho tuần 39', JSON.stringify({ kind: 'Nhập', warehouse: 'Kho trung tâm', quantity: '240' }), 'Đã duyệt'],
+      ['inventory', 'Xuất kho đơn demo', JSON.stringify({ kind: 'Xuất', warehouse: 'Kho trung tâm', quantity: '36' }), 'Đang xử lý'],
+      ['logistics', 'Tuyến TP.HCM → Bình Dương', JSON.stringify({ route: 'Nội thành', progress: 'Đang giao', updated: 'Hôm nay 09:30' }), 'Đang dùng'],
+      ['logistics', 'Tuyến TP.HCM → Hà Nội', JSON.stringify({ route: 'Liên tỉnh', progress: 'Chờ lấy hàng', updated: 'Hôm qua 16:10' }), 'Chờ duyệt'],
+      ['order-types', 'Đơn giao tận nơi', JSON.stringify({ priority: 'Cao', sla: '24 giờ', note: 'Ưu tiên hàng đã thanh toán' }), 'Đang dùng'],
+      ['staff', 'Nguyễn Minh An', JSON.stringify({ role: 'Điều phối', shift: '08:00 – 17:00', login: 'an.store' }), 'Đang dùng'],
+      ['staff', 'Trần Gia Hân', JSON.stringify({ role: 'CSKH', shift: '13:00 – 21:00', login: 'han.store' }), 'Đang dùng'],
+      ['overtime', 'Trực cuối tuần', JSON.stringify({ kind: 'Tăng ca', value: '4 giờ', note: 'Hỗ trợ chốt đơn' }), 'Chờ duyệt'],
+      ['support', 'CSKH · Đổi sản phẩm', JSON.stringify({ customer: 'tam.demo', topic: 'Đổi sản phẩm lỗi', assignee: 'Trần Gia Hân' }), 'Đang xử lý'],
+    ]
+    const placeholders = []
+    const values = []
+    let p = 1
+    for (const [module, title, dataJson, status] of rows) {
+      placeholders.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`)
+      values.push(module, title, dataJson, status, now, now)
     }
+    await this.query(
+      `INSERT INTO admin_records (module, title, data_json, status, created_at, updated_at) VALUES ${placeholders.join(', ')}`,
+      values,
+    )
   }
 
   async #seedCatalogSnapshot(databasePath) {

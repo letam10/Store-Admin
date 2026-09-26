@@ -1,4 +1,5 @@
 import express from 'express'
+import { randomUUID } from 'node:crypto'
 import { products as originalProducts } from '../../shared/products.js'
 import { config, ALLOWED_CONTEXT_SIZES } from './config.js'
 import { StoreDb } from './db.js'

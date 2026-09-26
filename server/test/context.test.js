@@ -1,7 +1,4 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import test from 'node:test'
 import { extractStructuredMemory, prepareConversationContext, collectProductHints } from '../src/context.js'
 import { StoreDb } from '../src/db.js'
