@@ -38,6 +38,17 @@ test('catalog stock defaults to 20, zero stock is unavailable, and voucher manag
   await withServer(async ({ root, storeDb }) => {
     const admin = await adminSession(root, storeDb)
     const headers = { cookie: admin.cookie, 'content-type': 'application/json', 'x-csrf-token': admin.body.csrfToken }
+    const returnsSchema = await fetch(root + '/api/admin/records/returns', { headers: { cookie: admin.cookie } })
+    assert.equal(returnsSchema.status, 200)
+    assert.deepEqual((await returnsSchema.json()).schema.fields, ['customer', 'order', 'reason', 'assignee'])
+    const returnRecord = await fetch(root + '/api/admin/records/returns', {
+      method: 'POST', headers, body: JSON.stringify({ title: 'Đổi hàng ORDER-1', data: { customer: 'buyer', order: 'ORDER-1', reason: 'Lỗi sản phẩm', assignee: 'CSKH' }, status: 'Đang xử lý' }),
+    })
+    assert.equal(returnRecord.status, 201)
+    const invalidRecord = await fetch(root + '/api/admin/records/returns', {
+      method: 'POST', headers, body: JSON.stringify({ title: 'Dữ liệu lạ', data: { unknown: 'x' }, status: 'Nháp' }),
+    })
+    assert.equal(invalidRecord.status, 400)
     const publicCatalog = await fetch(root + '/api/storefront/catalog')
     const publicProducts = (await publicCatalog.json()).products
     assert.equal(publicProducts.find((item) => item.id === '1').stockCount, 20)

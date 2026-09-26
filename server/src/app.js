@@ -33,7 +33,28 @@ const ADMIN_SESSION_SECONDS = 60 * 60 * 12
 const SUPPORT_COOKIE_SECONDS = 60 * 60 * 24 * 30
 const MAX_MESSAGE_LENGTH = 2000
 const REQUEST_ID_RE = /^[A-Za-z0-9_-]{8,100}$/
-const ADMIN_RECORD_MODULES = new Set(['inventory', 'logistics', 'order-types', 'staff', 'overtime', 'support'])
+const ADMIN_RECORD_SCHEMAS = Object.freeze({
+  inventory: Object.freeze({ fields: ['kind', 'warehouse', 'quantity'] }),
+  logistics: Object.freeze({ fields: ['route', 'progress', 'updated'] }),
+  'order-types': Object.freeze({ fields: ['priority', 'sla', 'note'] }),
+  staff: Object.freeze({ fields: ['role', 'shift', 'login'] }),
+  overtime: Object.freeze({ fields: ['kind', 'value', 'note'] }),
+  support: Object.freeze({ fields: ['customer', 'topic', 'assignee'] }),
+  returns: Object.freeze({ fields: ['customer', 'order', 'reason', 'assignee'] }),
+  settings: Object.freeze({ fields: ['key', 'value', 'description'] }),
+})
+const ADMIN_RECORD_MODULES = new Set(Object.keys(ADMIN_RECORD_SCHEMAS))
+
+function validateRecordData(module, data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false
+  const fields = ADMIN_RECORD_SCHEMAS[module]?.fields || []
+  if (Object.keys(data).some((key) => !fields.includes(key))) return false
+  return Object.values(data).every((value) => (
+    (typeof value === 'string' && value.length <= 500) ||
+    (typeof value === 'number' && Number.isFinite(value)) ||
+    typeof value === 'boolean'
+  ))
+}
 
 const SUPPORT_PROMPT =
   'Bạn là trợ lý hỗ trợ khách hàng của Store. Trả lời tiếng Việt, ngắn gọn. ' +
@@ -543,7 +564,7 @@ export function createApp(overrides = {}) {
 
   app.get('/api/admin/records/:module', requireAdmin, (req, res) => {
     if (!ADMIN_RECORD_MODULES.has(req.params.module)) return res.status(404).json({ error: 'MODULE_NOT_FOUND' })
-    res.json({ module: req.params.module, records: storeDb.listAdminRecords(req.params.module) })
+    res.json({ module: req.params.module, schema: ADMIN_RECORD_SCHEMAS[req.params.module], records: storeDb.listAdminRecords(req.params.module) })
   })
 
   app.post('/api/admin/records/:module', requireAdmin, requireCsrf, (req, res) => {
@@ -552,7 +573,7 @@ export function createApp(overrides = {}) {
     const title = String(body.title || '').trim()
     const status = String(body.status || 'Đang dùng').trim()
     const data = body.data
-    if (!title || title.length > 160 || !data || typeof data !== 'object' || Array.isArray(data) || status.length > 60) return res.status(400).json({ error: 'INVALID_RECORD' })
+    if (!title || title.length > 160 || !validateRecordData(req.params.module, data) || status.length > 60) return res.status(400).json({ error: 'INVALID_RECORD' })
     res.status(201).json({ record: storeDb.createAdminRecord({ module: req.params.module, title, data, status }) })
   })
 
@@ -562,7 +583,7 @@ export function createApp(overrides = {}) {
     const title = String(body.title || '').trim()
     const status = String(body.status || 'Đang dùng').trim()
     const data = body.data
-    if (!title || title.length > 160 || !data || typeof data !== 'object' || Array.isArray(data) || status.length > 60) return res.status(400).json({ error: 'INVALID_RECORD' })
+    if (!title || title.length > 160 || !validateRecordData(req.params.module, data) || status.length > 60) return res.status(400).json({ error: 'INVALID_RECORD' })
     const record = storeDb.updateAdminRecord(Number(req.params.id), { module: req.params.module, title, data, status })
     if (!record) return res.status(404).json({ error: 'RECORD_NOT_FOUND' })
     res.json({ record })
