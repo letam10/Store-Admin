@@ -31,7 +31,12 @@ export function AdminCustomers() {
   const rows = useMemo(() => (data?.customers || []).filter((item) =>
     item.points >= Number(minPoints || 0) && (item.username.toLowerCase().includes(query.toLowerCase()) || item.email.toLowerCase().includes(query.toLowerCase()))),
   [data, minPoints, query])
+  const customers = data?.customers || []
+  const totalPoints = customers.reduce((sum, item) => sum + Number(item.points || 0), 0)
+  const topCustomer = [...customers].sort((a, b) => Number(b.points || 0) - Number(a.points || 0))[0]
+  const activeSpinCredits = customers.reduce((sum, item) => sum + Number(item.spinCredits || 0), 0)
   return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">KHÁCH HÀNG THỰC</p><h2>Điểm và hạng thành viên</h2><p>Sắp xếp theo điểm giảm dần. Điểm chỉ cộng khi đơn được ghi nhận thanh toán.</p></div><span className="admin-preview-badge">{data?.customers.length || 0} khách</span></div>
+    <div className="admin-commerce-summary"><div><small>Tổng khách</small><b>{customers.length}</b><span>Đang theo dõi</span></div><div><small>Tổng điểm</small><b>{totalPoints.toLocaleString('vi-VN')}</b><span>Điểm tích lũy</span></div><div><small>Người dẫn đầu</small><b>{topCustomer?.username || '—'}</b><span>{topCustomer ? topCustomer.points.toLocaleString('vi-VN') + ' điểm' : 'Chưa có dữ liệu'}</span></div><div><small>Lượt quay còn lại</small><b>{activeSpinCredits}</b><span>Toàn hệ thống</span></div></div>
     <div className="admin-module-toolbar"><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm tên hoặc email" /><label>Điểm tối thiểu <input type="number" min="0" value={minPoints} onChange={(event) => setMinPoints(event.target.value)} /></label></div>
     {error && <p role="alert">{error}</p>}{!data && !error && <p>Đang tải…</p>}
      {data && <div className="admin-table-wrap"><table><thead><tr><th>Khách</th><th>Điểm</th><th>Hạng</th><th>Tiền hàng đã thanh toán</th><th>Lượt quay</th></tr></thead><tbody>{rows.map((item) => <tr key={item.id} className="admin-clickable-row" onClick={() => setSelected(item)}><td><button className="admin-link-button" type="button" onClick={() => setSelected(item)}>{item.username}</button><small>{item.email}</small></td><td><b>{item.points.toLocaleString('vi-VN')}</b></td><td>{item.tier}</td><td>{money.format(item.paidGoodsTotal)}</td><td>{item.spinCredits}</td></tr>)}</tbody></table></div>}
@@ -69,7 +74,7 @@ export function AdminVouchers({ csrfToken }) {
     try { await apiJson('/api/admin/vouchers/' + encodeURIComponent(voucher.code), { method: 'DELETE', headers: { 'x-csrf-token': csrfToken } }); reloadVouchers() }
     catch (failure) { setSubmitError(adminErrorMessage(failure, 'Khong xoa duoc voucher.')) }
   }
-  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">VOUCHER STORE</p><h2>Voucher</h2><p>Thêm voucher mới cho khách hàng. Mã 10 ký tự được tạo duy nhất trên máy chủ và không thể sửa.</p></div><span className="admin-preview-badge">{voucherData?.vouchers?.length || 0} voucher</span></div>
+  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">VOUCHER STORE</p><h2>Voucher</h2><p>Thêm voucher mới cho khách hàng. Mã 10 ký tự được tạo duy nhất trên máy chủ và không thể sửa.</p></div><span className="admin-preview-badge">{voucherData?.vouchers?.length || 0} voucher</span></div><div className="reward-policy-grid"><div><span className="reward-policy-icon">60%</span><b>Lần sau may mắn</b><small>Tỷ lệ hệ thống · không hiển thị cho khách</small></div><div><span className="reward-policy-icon">30%</span><b>Voucher 100K</b><small>Phần thưởng quay may mắn</small></div><div><span className="reward-policy-icon">10%</span><b>Voucher giảm 20%</b><small>Phần thưởng quay may mắn</small></div></div>
     {error && <p role="alert">{error}</p>}
     <form className="admin-commerce-form" onSubmit={submit}>
       <label>Khách hàng<select required value={customerId} onChange={(event) => setCustomerId(event.target.value)}><option value="">Chọn khách</option>{data?.customers.map((item) => <option key={item.id} value={item.id}>{item.username} · {item.points} điểm</option>)}</select></label>
@@ -97,6 +102,9 @@ export function AdminReviews({ csrfToken }) {
   const { data, error, reload } = useReport('/api/admin/reviews')
   const [drafts, setDrafts] = useState({})
   const [saveError, setSaveError] = useState('')
+  const reviews = data?.reviews || []
+  const averageRating = reviews.length ? (reviews.reduce((sum, item) => sum + Number(item.rating || 0), 0) / reviews.length).toFixed(1) : '—'
+  const unanswered = reviews.filter((item) => !item.adminReply).length
   async function reply(id) {
     setSaveError('')
     try {
@@ -104,7 +112,7 @@ export function AdminReviews({ csrfToken }) {
       reload()
     } catch (failure) { setSaveError(failure.message) }
   }
-  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">PHẢN HỒI KHÁCH HÀNG</p><h2>Đánh giá và bình luận</h2></div><span className="admin-preview-badge">{data?.reviews.length || 0} đánh giá</span></div>
+  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">PHẢN HỒI KHÁCH HÀNG</p><h2>Đánh giá và bình luận</h2></div><span className="admin-preview-badge">{data?.reviews.length || 0} đánh giá</span></div><div className="admin-commerce-summary admin-commerce-summary--three"><div><small>Tổng đánh giá</small><b>{reviews.length}</b><span>Đã nhận</span></div><div><small>Điểm trung bình</small><b>★ {averageRating}</b><span>Trên thang 5</span></div><div><small>Chưa trả lời</small><b>{unanswered}</b><span>Cần xử lý</span></div></div>
     {error && <p role="alert">{error}</p>}{saveError && <p role="alert">{saveError}</p>}
     {!data && !error && <p>Đang tải…</p>}
     <div className="admin-commerce-list">{data?.reviews.map((item) => <article key={item.id}><h3>{item.productName}</h3><p>{item.username} · {'★'.repeat(item.rating)} · {new Date(item.createdAt).toLocaleDateString('vi-VN')}</p><blockquote>{item.comment}</blockquote>{item.adminReply && <p><b>Store trả lời:</b> {item.adminReply}</p>}<label>Trả lời khách<textarea rows="2" maxLength="2000" value={drafts[item.id] ?? item.adminReply} onChange={(event) => setDrafts((current) => ({ ...current, [item.id]: event.target.value }))} /></label><button type="button" disabled={!(drafts[item.id] || '').trim()} onClick={() => reply(item.id)}>Gửi trả lời</button></article>)}</div>
@@ -115,6 +123,10 @@ export function AdminReviews({ csrfToken }) {
 export function AdminOrders({ csrfToken }) {
   const { data, error, reload } = useReport('/api/admin/customer-orders')
   const [actionError, setActionError] = useState('')
+  const orders = data?.orders || []
+  const pendingOrders = orders.filter((item) => item.status === 'pending').length
+  const paidOrders = orders.filter((item) => item.status === 'paid').length
+  const orderValue = orders.reduce((sum, item) => sum + Number(item.total || 0), 0)
   async function markPaid(id) {
     setActionError('')
     try {
@@ -122,7 +134,7 @@ export function AdminOrders({ csrfToken }) {
       reload()
     } catch (failure) { setActionError(failure.message) }
   }
-  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">ĐƠN KHÁCH HÀNG</p><h2>Ghi nhận thanh toán</h2><p>Chỉ bấm sau khi đã xác nhận tiền thực nhận. Điểm và lượt quay sẽ được cộng đúng một lần.</p></div></div>
+  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">ĐƠN KHÁCH HÀNG</p><h2>Ghi nhận thanh toán</h2><p>Chỉ bấm sau khi đã xác nhận tiền thực nhận. Điểm và lượt quay sẽ được cộng đúng một lần.</p></div></div><div className="admin-commerce-summary"><div><small>Tổng đơn</small><b>{orders.length}</b><span>Toàn bộ đơn hàng</span></div><div><small>Chờ thanh toán</small><b>{pendingOrders}</b><span>Cần xác nhận</span></div><div><small>Đã thanh toán</small><b>{paidOrders}</b><span>Đã ghi nhận</span></div><div><small>Giá trị đơn</small><b>{money.format(orderValue)}</b><span>Trước hoàn tiền</span></div></div>
     {error && <p role="alert">{error}</p>}{actionError && <p role="alert">{actionError}</p>}
     {!data && !error && <p>Đang tải…</p>}
     {data && <div className="admin-table-wrap"><table><thead><tr><th>Đơn</th><th>Khách / giao nhận</th><th>Tiền hàng sau giảm</th><th>Phí giao</th><th>Tổng</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>{data.orders.map((item) => <tr key={item.id}><td>{item.id}</td><td>{item.username}<small>{item.recipient} · {item.phone}</small><small>{item.address || 'Nhận tại cửa hàng'} · {item.region}{item.region === 'far' ? ' · ' + item.distanceKm + ' km' : ''}</small></td><td>{money.format(item.goodsTotal)}</td><td>{money.format(item.shippingFee)}</td><td>{money.format(item.total)}</td><td>{item.status === 'paid' ? 'Đã thanh toán · +' + item.pointsEarned + ' điểm' : 'Chờ thanh toán'}</td><td>{item.status === 'pending' && <button type="button" onClick={() => markPaid(item.id)}>Ghi nhận đã thanh toán</button>}</td></tr>)}</tbody></table>{data.orders.length === 0 && <p>Chưa có đơn.</p>}</div>}

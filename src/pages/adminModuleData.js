@@ -9,6 +9,7 @@ export const adminModules = [
   ['logistics', 'Lưu thông', '⇄'],
   ['inventory', 'Xuất nhập kho', '▦'],
   ['appearance', 'Trang trí & chỉnh sửa', '✦'],
+  ['returns', 'Đổi / trả hàng', '↩'],
   ['statistics', 'Thống kê', '▥'],
   ['ai-local', 'AI local', '✺'],
   ['order-types', 'Loại đơn hàng', '≡'],
@@ -16,4 +17,5 @@ export const adminModules = [
   ['rewards-wheel', 'Voucher', '◌'],
   ['staff', 'Nhân viên', '♙'],
   ['overtime', 'Tăng ca & khen thưởng', '★'],
+  ['settings', 'Cài đặt hệ thống', '⚙'],
 ]
