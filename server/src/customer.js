@@ -437,7 +437,8 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       const exists = sql.prepare('SELECT code FROM voucher_codes WHERE code = ?').get(code)
       if (!exists) return false
       sql.prepare('DELETE FROM customer_vouchers WHERE code = ?').run(code)
-      sql.prepare('DELETE FROM voucher_codes WHERE code = ?').run(code)
+      // Keep the reservation row forever so a revoked code can never be
+      // generated again by a later random attempt.
       return true
     })()
     if (!removed) return res.status(404).json({ error: 'VOUCHER_NOT_FOUND' })
