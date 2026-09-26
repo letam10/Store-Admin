@@ -8,11 +8,18 @@ export class ApiStreamError extends Error {
 }
 
 async function readError(response) {
+  const fallbackByCode = {
+    INVALID_PRODUCT: 'Du lieu san pham khong hop le.', INVALID_PRODUCT_OFFER: 'Gia tri giam gia hoac ton kho khong hop le.',
+    INVALID_VOUCHER: 'Thong tin voucher khong hop le.', PRODUCT_UNAVAILABLE: 'San pham da het hang hoac khong du ton kho.',
+    UNAUTHENTICATED: 'Phien dang nhap da het, vui long dang nhap lai.', CSRF_INVALID: 'Phien bao mat khong hop le, vui long tai lai trang.',
+    RATE_LIMITED: 'Ban thao tac qua nhanh, vui long thu lai sau.', RECORD_NOT_FOUND: 'Khong tim thay ban ghi.',
+  }
   try {
     const body = await response.json()
-    return new ApiStreamError(body.message || 'Yêu cầu API thất bại.', body.error || 'API_ERROR')
+    const code = body.error || 'API_ERROR'
+    return new ApiStreamError(fallbackByCode[code] || (body.message && !/^[A-Z0-9_ -]+$/.test(String(body.message)) ? body.message : 'Yeu cau API that bai.'), code)
   } catch {
-    return new ApiStreamError('Yêu cầu API thất bại với HTTP ' + response.status, 'HTTP_' + response.status)
+    return new ApiStreamError('Yeu cau API that bai voi HTTP ' + response.status, 'HTTP_' + response.status)
   }
 }
 
@@ -91,7 +98,8 @@ export async function streamChat({
     onEvent?.(event)
     if (event.type === 'done') terminalReceived = true
     if (event.type === 'error') {
-      throw new ApiStreamError(event.message || 'AI local không thể trả lời.', event.code, {
+      const localError = { UNAUTHENTICATED: 'Phien dang nhap da het, vui long dang nhap lai.', RATE_LIMITED: 'Ban thao tac qua nhanh, vui long thu lai sau.', INCOMPLETE_STREAM: 'Ket noi ket thuc som, vui long thu lai.' }
+      throw new ApiStreamError(localError[event.code] || (event.message && !/^[A-Z0-9_ -]+$/.test(String(event.message)) ? event.message : 'AI local khong the tra loi.'), event.code, {
         incomplete: Boolean(event.incomplete || event.partial),
       })
     }
