@@ -574,7 +574,7 @@ export function createApp(overrides = {}) {
 
   app.put('/api/admin/appearance', requireAdmin, requireCsrf, (req, res) => {
     const body = req.body || {}
-    const allowed = ['brandTagline', 'heroTitle', 'heroDescription', 'heroButton', 'footerText', 'accentColor', 'bannerLabel']
+    const allowed = ['brandName', 'brandTagline', 'headerSearchPlaceholder', 'navHome', 'navProducts', 'navFavorites', 'navRewards', 'navMembership', 'navContact', 'heroTitle', 'heroDescription', 'heroButton', 'footerText', 'footerSupport', 'footerInfo', 'footerShopTitle', 'footerProducts', 'footerCart', 'footerMembership', 'footerRewards', 'footerSupportTitle', 'footerContact', 'footerAccount', 'footerInfoTitle', 'footerCopyright', 'accentColor', 'bannerLabel']
     if (Object.keys(body).some((key) => !allowed.includes(key)) || allowed.some((key) => body[key] !== undefined && typeof body[key] !== 'string' || String(body[key] || '').length > 240)) {
       return res.status(400).json({ error: 'INVALID_APPEARANCE' })
     }

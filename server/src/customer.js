@@ -32,18 +32,46 @@ export function pointsForPaidGoods(amount, tier) {
   return Math.floor(basePoints * (tier === 'diamond' ? 1.5 : tier === 'gold' ? 1.2 : 1))
 }
 
-export function shippingFee({ region, distanceKm = 0, fulfillment = 'delivery' }) {
+export const SHIPPING_DESTINATIONS = Object.freeze([
+  ['hanoi', 'Hà Nội'], ['haiphong', 'Hải Phòng'], ['quang-ninh', 'Quảng Ninh'], ['bac-giang', 'Bắc Giang'],
+  ['phu-tho', 'Phú Thọ'], ['vinh-phuc', 'Vĩnh Phúc'], ['bac-ninh', 'Bắc Ninh'], ['hai-duong', 'Hải Dương'],
+  ['hung-yen', 'Hưng Yên'], ['thai-binh', 'Thái Bình'], ['nam-dinh', 'Nam Định'], ['ninh-binh', 'Ninh Bình'],
+  ['ha-nam', 'Hà Nam'], ['lao-cai', 'Lào Cai'], ['yen-bai', 'Yên Bái'], ['tuyen-quang', 'Tuyên Quang'],
+  ['ha-giang', 'Hà Giang'], ['cao-bang', 'Cao Bằng'], ['bac-kan', 'Bắc Kạn'], ['lang-son', 'Lạng Sơn'],
+  ['thai-nguyen', 'Thái Nguyên'], ['dien-bien', 'Điện Biên'], ['lai-chau', 'Lai Châu'], ['son-la', 'Sơn La'],
+  ['hoa-binh', 'Hòa Bình'], ['thanh-hoa', 'Thanh Hóa'], ['nghe-an', 'Nghệ An'], ['ha-tinh', 'Hà Tĩnh'],
+  ['quang-binh', 'Quảng Bình'], ['quang-tri', 'Quảng Trị'], ['thua-thien-hue', 'Thừa Thiên Huế'],
+  ['da-nang', 'Đà Nẵng'], ['quang-nam', 'Quảng Nam'], ['quang-ngai', 'Quảng Ngãi'], ['binh-dinh', 'Bình Định'],
+  ['phu-yen', 'Phú Yên'], ['khanh-hoa', 'Khánh Hòa'], ['ninh-thuan', 'Ninh Thuận'], ['binh-thuan', 'Bình Thuận'],
+  ['kon-tum', 'Kon Tum'], ['gia-lai', 'Gia Lai'], ['dak-lak', 'Đắk Lắk'], ['dak-nong', 'Đắk Nông'],
+  ['lam-dong', 'Lâm Đồng'], ['binh-phuoc', 'Bình Phước'], ['tay-ninh', 'Tây Ninh'], ['dong-nai', 'Đồng Nai'],
+  ['long-an', 'Long An'], ['tien-giang', 'Tiền Giang'], ['ben-tre', 'Bến Tre'], ['tra-vinh', 'Trà Vinh'],
+  ['vinh-long', 'Vĩnh Long'], ['dong-thap', 'Đồng Tháp'], ['an-giang', 'An Giang'], ['kien-giang', 'Kiên Giang'],
+  ['can-tho', 'Cần Thơ'], ['hau-giang', 'Hậu Giang'], ['soc-trang', 'Sóc Trăng'], ['bac-lieu', 'Bạc Liêu'],
+  ['ca-mau', 'Cà Mau'],
+])
+
+const SHIPPING_DESTINATION_IDS = new Set(SHIPPING_DESTINATIONS.map(([id]) => id))
+
+export function shippingFee({ region, distanceKm = 0, weightKg = 1, fulfillment = 'delivery' }) {
   if (fulfillment === 'pickup') return 0
-  if (!['hcm', 'binh-duong', 'ba-ria-vung-tau', 'nearby', 'far'].includes(region) ||
-    (region === 'far' && (!Number.isInteger(distanceKm) || distanceKm < 0 || distanceKm > 3000))) throw new Error('INVALID_DELIVERY_REGION')
+  const normalizedWeightKg = Number(weightKg)
+  if (!Number.isFinite(normalizedWeightKg) || normalizedWeightKg <= 0 || normalizedWeightKg > 1000) throw new Error('INVALID_DELIVERY_REGION')
+  if (region === 'international') {
+    return normalizedWeightKg <= 1 ? 200000 : Math.ceil(normalizedWeightKg / 5) * 400000
+  }
+  const provinceId = typeof region === 'string' && region.startsWith('province:') ? region.slice(9) : ''
+  if (provinceId && !SHIPPING_DESTINATION_IDS.has(provinceId)) throw new Error('INVALID_DELIVERY_REGION')
+  if (!['hcm', 'binh-duong', 'ba-ria-vung-tau', 'nearby', 'far'].includes(region) && !provinceId) throw new Error('INVALID_DELIVERY_REGION')
   if (region === 'hcm' || region === 'binh-duong' || region === 'ba-ria-vung-tau') return 30000
+  if (provinceId) return 60000
   if (region === 'nearby') return 60000
   if (region === 'far' && Number.isInteger(distanceKm) && distanceKm >= 0 && distanceKm <= 3000) return 60000 + distanceKm * 1000
   throw new Error('INVALID_DELIVERY_REGION')
 }
 
 function publicVoucher(row) {
-  return { code: row.code, label: row.label, type: row.type, value: row.value, expiresAt: row.expires_at, source: row.source }
+  return { code: row.code, label: row.label, type: row.type, value: row.value, scope: row.scope || 'goods', expiresAt: row.expires_at, source: row.source }
 }
 
 function cleanExpired(sql, time) {
@@ -74,7 +102,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       code TEXT PRIMARY KEY REFERENCES voucher_codes(code),
       customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
       label TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('amount','percent')),
-      value INTEGER NOT NULL CHECK(value > 0), expires_at TEXT NOT NULL,
+      value INTEGER NOT NULL CHECK(value > 0), scope TEXT NOT NULL DEFAULT 'goods' CHECK(scope IN ('goods','shipping')), expires_at TEXT NOT NULL,
       source TEXT NOT NULL, created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_customer_vouchers_owner ON customer_vouchers(customer_id, expires_at);
@@ -104,10 +132,13 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     );
     CREATE INDEX IF NOT EXISTS idx_customer_orders_owner ON customer_orders(customer_id, created_at);
   `)
+  const voucherColumns = sql.prepare('PRAGMA table_info(customer_vouchers)').all().map((column) => column.name)
+  if (!voucherColumns.includes('scope')) sql.exec("ALTER TABLE customer_vouchers ADD COLUMN scope TEXT NOT NULL DEFAULT 'goods'")
   const orderColumns = sql.prepare('PRAGMA table_info(customer_orders)').all().map((column) => column.name)
   for (const field of ['recipient', 'phone', 'address']) {
     if (!orderColumns.includes(field)) sql.exec(`ALTER TABLE customer_orders ADD COLUMN ${field} TEXT NOT NULL DEFAULT ''`)
   }
+  if (!orderColumns.includes('weight_kg')) sql.exec('ALTER TABLE customer_orders ADD COLUMN weight_kg REAL NOT NULL DEFAULT 1')
 
   const customerLimiter = new Map()
   function limited(ip) {
@@ -157,7 +188,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     const item = sql.prepare('SELECT id, name, category, price, image, symbol, discount_percent AS discountPercent, stock_count AS stockCount FROM catalog_products WHERE id = ?').get(id)
     return item || null
   }
-  function issueVoucher(customerId, { label, type, value, expiresAt, source }) {
+  function issueVoucher(customerId, { label, type, value, scope = 'goods', expiresAt, source }) {
     for (let attempt = 0; attempt < 30; attempt += 1) {
       const code = createCode()
       try {
@@ -166,9 +197,9 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
         if (error.code === 'SQLITE_CONSTRAINT_PRIMARYKEY' || error.code === 'SQLITE_CONSTRAINT_UNIQUE') continue
         throw error
       }
-      sql.prepare(`INSERT INTO customer_vouchers (code, customer_id, label, type, value, expires_at, source, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(code, customerId, label, type, value, expiresAt, source, now().toISOString())
-      return { code, label, type, value, expiresAt, source }
+      sql.prepare(`INSERT INTO customer_vouchers (code, customer_id, label, type, value, scope, expires_at, source, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(code, customerId, label, type, value, scope, expiresAt, source, now().toISOString())
+      return { code, label, type, value, scope, expiresAt, source }
     }
     throw new Error('VOUCHER_CODE_EXHAUSTED')
   }
@@ -195,22 +226,32 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     if (!Array.isArray(codes) || codes.length > 20 || new Set(codes).size !== codes.length) throw new Error('INVALID_VOUCHER')
     cleanExpired(sql, now().toISOString())
     let remaining = subtotal
+    const shippingCodes = []
     for (const code of codes) {
       if (typeof code !== 'string' || !/^[A-Z2-9]{10}$/.test(code)) throw new Error('INVALID_VOUCHER')
       const voucher = sql.prepare('SELECT * FROM customer_vouchers WHERE code = ? AND customer_id = ? AND expires_at > ?').get(code, row.id, now().toISOString())
       if (!voucher) throw new Error('INVALID_VOUCHER')
-      const raw = voucher.type === 'amount' ? voucher.value : Math.floor(remaining * voucher.value / 100)
-      remaining -= Math.min(remaining, raw)
+      if ((voucher.scope || 'goods') === 'shipping') shippingCodes.push(voucher)
+      else {
+        const raw = voucher.type === 'amount' ? voucher.value : Math.floor(remaining * voucher.value / 100)
+        remaining -= Math.min(remaining, raw)
+      }
     }
     const tierRate = { bronze: 0, silver: 1, gold: 2, diamond: 5 }[tier]
     remaining -= Math.min(remaining, Math.floor(remaining * tierRate / 100))
-    const discount = subtotal - remaining
     const fulfillment = body.fulfillment
     const region = fulfillment === 'pickup' ? 'pickup' : String(body.region || '')
     const distanceKm = fulfillment === 'pickup' ? 0 : Number(body.distanceKm || 0)
-    const fee = shippingFee({ region, distanceKm, fulfillment }, tier)
-    return { items, subtotal, discount, goodsTotal: remaining, shippingFee: fee,
-      total: remaining + fee, tier, voucherCodes: codes, fulfillment, region, distanceKm }
+    const weightKg = fulfillment === 'pickup' ? 0 : Number(body.weightKg || 1)
+    const originalFee = shippingFee({ region, distanceKm, weightKg, fulfillment }, tier)
+    let fee = originalFee
+    for (const voucher of shippingCodes) {
+      const raw = voucher.type === 'amount' ? voucher.value : Math.floor(fee * voucher.value / 100)
+      fee -= Math.min(fee, raw)
+    }
+    const discountTotal = subtotal - remaining + originalFee - fee
+    return { items, subtotal, discount: discountTotal, goodsTotal: remaining, shippingFee: fee, shippingFeeBeforeDiscount: originalFee,
+      shippingDiscount: originalFee - fee, total: remaining + fee, tier, voucherCodes: codes, fulfillment, region, distanceKm, weightKg }
   }
   function fail(res, error) {
     const code = error.message
@@ -298,7 +339,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       const prize = PRIZES[index]
       const voucher = prize.kind === 'none' ? null : issueVoucher(req.customer.id, {
         label: prize.label, type: prize.kind, value: prize.value,
-        expiresAt: new Date(now().getTime() + 30 * 86400000).toISOString(), source: 'wheel',
+        scope: 'goods', expiresAt: new Date(now().getTime() + 30 * 86400000).toISOString(), source: 'wheel',
       })
       return { index, prize: prize.label, voucher, spinCredits: current.spin_credits - 1 }
     })()
@@ -320,11 +361,11 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
         const data = quote(fresh, req.body)
         const id = 'ST-' + randomUUID().slice(0, 12).toUpperCase()
         const createdAt = now().toISOString()
-        sql.prepare(`INSERT INTO customer_orders (id, customer_id, items_json, recipient, phone, address, fulfillment, region, distance_km,
+        sql.prepare(`INSERT INTO customer_orders (id, customer_id, items_json, recipient, phone, address, fulfillment, region, distance_km, weight_kg,
           subtotal, discount, goods_total, shipping_fee, total, voucher_codes_json, tier, status, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`).run(id, fresh.id,
-          JSON.stringify(data.items), recipient, phone, address, data.fulfillment, data.region, data.distanceKm, data.subtotal,
-          data.discount, data.goodsTotal, data.shippingFee, data.total, JSON.stringify(data.voucherCodes), data.tier, createdAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`).run(id, fresh.id,
+          JSON.stringify(data.items), recipient, phone, address, data.fulfillment, data.region, data.distanceKm, data.weightKg,
+          data.subtotal, data.discount, data.goodsTotal, data.shippingFee, data.total, JSON.stringify(data.voucherCodes), data.tier, createdAt)
         for (const code of data.voucherCodes) sql.prepare('DELETE FROM customer_vouchers WHERE customer_id = ? AND code = ?').run(fresh.id, code)
         return { id, ...data, status: 'pending', createdAt, pointsEarned: 0 }
       })()
@@ -335,7 +376,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     const orders = sql.prepare('SELECT * FROM customer_orders WHERE customer_id = ? ORDER BY created_at DESC LIMIT 100').all(req.customer.id)
       .map((item) => ({ id: item.id, items: JSON.parse(item.items_json), itemCount: JSON.parse(item.items_json).reduce((sum, line) => sum + line.quantity, 0),
         fulfillment: item.fulfillment, subtotal: item.subtotal, discount: item.discount, goodsTotal: item.goods_total,
-        shippingFee: item.shipping_fee, total: item.total, voucherCodes: JSON.parse(item.voucher_codes_json),
+        shippingFee: item.shipping_fee, weightKg: item.weight_kg, total: item.total, voucherCodes: JSON.parse(item.voucher_codes_json),
         tier: item.tier, status: item.status, pointsEarned: item.points_earned, createdAt: item.created_at }))
     res.json({ orders })
   })
@@ -348,13 +389,16 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
   app.post('/api/admin/customers/:id/vouchers', requireAdmin, requireCsrf, (req, res) => {
     const customerId = Number(req.params.id)
     const type = req.body?.type
+    const scope = req.body?.scope === 'shipping' ? 'shipping' : 'goods'
     const value = req.body?.value
     const date = new Date(req.body?.expiresAt)
     if (!sql.prepare('SELECT id FROM customers WHERE id = ?').get(customerId)) return res.status(404).json({ error: 'CUSTOMER_NOT_FOUND' })
     if (!['amount', 'percent'].includes(type) || !Number.isInteger(value) || value < 1 || value > (type === 'percent' ? 100 : 10000000) ||
       !Number.isFinite(date.getTime()) || date <= now() || date.getTime() > now().getTime() + 365 * 86400000) return res.status(400).json({ error: 'INVALID_VOUCHER' })
-    const label = type === 'amount' ? `Giảm ${new Intl.NumberFormat('vi-VN').format(value)} ₫` : `Giảm ${value}%`
-    res.status(201).json({ voucher: issueVoucher(customerId, { label, type, value, expiresAt: date.toISOString(), source: 'admin' }) })
+    const label = scope === 'shipping'
+      ? `Ship ${type === 'amount' ? 'giảm ' + new Intl.NumberFormat('vi-VN').format(value) + ' ₫' : 'giảm ' + value + '%'}`
+      : type === 'amount' ? `Giảm ${new Intl.NumberFormat('vi-VN').format(value)} ₫` : `Giảm ${value}%`
+    res.status(201).json({ voucher: issueVoucher(customerId, { label, type, value, scope, expiresAt: date.toISOString(), source: 'admin' }) })
   })
   app.get('/api/admin/favorites', requireAdmin, (req, res) => {
     const favorites = sql.prepare('SELECT product_id AS id, COUNT(*) AS count FROM customer_favorites GROUP BY product_id ORDER BY count DESC, product_id').all()

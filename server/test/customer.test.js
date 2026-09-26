@@ -36,6 +36,11 @@ test('membership thresholds, shipping bands and wheel weights are exact', () => 
   assert.equal(shippingFee({ region: 'nearby' }, 'silver'), 60000)
   assert.equal(shippingFee({ region: 'far', distanceKm: 20 }, 'silver'), 80000)
   assert.equal(shippingFee({ region: 'far', distanceKm: 20 }, 'diamond'), 80000)
+  assert.equal(shippingFee({ region: 'province:hanoi' }), 60000)
+  assert.equal(shippingFee({ region: 'international', weightKg: 1 }), 200000)
+  assert.equal(shippingFee({ region: 'international', weightKg: 5 }), 400000)
+  assert.equal(shippingFee({ region: 'international', weightKg: 5.1 }), 800000)
+  assert.throws(() => shippingFee({ region: 'international', weightKg: 0 }), /INVALID_DELIVERY_REGION/)
   assert.throws(() => shippingFee({ region: 'hanoi' }), /INVALID_DELIVERY_REGION/)
   assert.deepEqual(rewardPrizes().reduce((counts, prize) => ({ ...counts, [prize.kind]: (counts[prize.kind] || 0) + 1 }), {}),
     { none: 6, amount: 3, percent: 1 })

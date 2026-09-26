@@ -31,7 +31,10 @@ export class StoreDb {
     this.db.pragma('foreign_keys = ON')
     this.#migrate()
     this.#seedCatalogSnapshot(path)
-    if (seedDemoData) this.seedDemoOrders()
+    if (seedDemoData) {
+      this.seedDemoOrders()
+      this.seedDemoOperations()
+    }
   }
 
   close() {
@@ -214,6 +217,28 @@ export class StoreDb {
     transaction(DEMO_ORDERS)
   }
 
+  seedDemoOperations() {
+    const rows = [
+      ['inventory', 'Nhập kho tuần 39', { kind: 'Nhập', warehouse: 'Kho trung tâm', quantity: '240' }, 'Đã duyệt'],
+      ['inventory', 'Xuất kho đơn demo', { kind: 'Xuất', warehouse: 'Kho trung tâm', quantity: '36' }, 'Đang xử lý'],
+      ['logistics', 'Tuyến TP.HCM → Bình Dương', { route: 'Nội thành', progress: 'Đang giao', updated: 'Hôm nay 09:30' }, 'Đang dùng'],
+      ['logistics', 'Tuyến TP.HCM → Hà Nội', { route: 'Liên tỉnh', progress: 'Chờ lấy hàng', updated: 'Hôm qua 16:10' }, 'Chờ duyệt'],
+      ['order-types', 'Đơn giao tận nơi', { priority: 'Cao', sla: '24 giờ', note: 'Ưu tiên hàng đã thanh toán' }, 'Đang dùng'],
+      ['staff', 'Nguyễn Minh An', { role: 'Điều phối', shift: '08:00 – 17:00', login: 'an.store' }, 'Đang dùng'],
+      ['staff', 'Trần Gia Hân', { role: 'CSKH', shift: '13:00 – 21:00', login: 'han.store' }, 'Đang dùng'],
+      ['overtime', 'Trực cuối tuần', { kind: 'Tăng ca', value: '4 giờ', note: 'Hỗ trợ chốt đơn' }, 'Chờ duyệt'],
+      ['support', 'CSKH · Đổi sản phẩm', { customer: 'tam.demo', topic: 'Đổi sản phẩm lỗi', assignee: 'Trần Gia Hân' }, 'Đang xử lý'],
+    ]
+    const exists = this.db.prepare('SELECT 1 FROM admin_records WHERE module = ? AND title = ?')
+    const insert = this.db.prepare('INSERT INTO admin_records (module, title, data_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+    const now = nowIso()
+    this.db.transaction(() => {
+      for (const [module, title, data, status] of rows) {
+        if (!exists.get(module, title)) insert.run(module, title, JSON.stringify(data), status, now, now)
+      }
+    })()
+  }
+
   #seedCatalogSnapshot(databasePath) {
     const snapshotPath = resolve(dirname(databasePath), 'catalog-products.json')
     if (!existsSync(snapshotPath)) return
@@ -342,10 +367,21 @@ export class StoreDb {
     const count = (table) => {
       try { return this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count } catch { return 0 }
     }
+    const revenueByDay = this.db.prepare(`
+      SELECT business_date AS date,
+        COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount - refund_amount ELSE 0 END), 0) AS revenue,
+        SUM(CASE WHEN status IN ('paid','completed') THEN 1 ELSE 0 END) AS orders
+      FROM orders GROUP BY business_date ORDER BY business_date ASC
+    `).all().map((row) => ({ date: row.date, revenue: Number(row.revenue || 0), orders: Number(row.orders || 0) }))
+    const revenue = revenueByDay.reduce((sum, item) => sum + item.revenue, 0)
+    const includedOrders = revenueByDay.reduce((sum, item) => sum + item.orders, 0)
     return {
       products: count('catalog_products'), customers: count('customers'), orders: count('customer_orders'),
       reviews: count('product_reviews'), favorites: count('customer_favorites'), records: count('admin_records'),
-      openSupport: count('conversations'), totalViews: this.totalProductViews(),
+      openSupport: count('conversations'), totalViews: this.totalProductViews(), revenue, includedOrders,
+      revenueByDay, orderStatus: ['pending', 'paid', 'completed', 'cancelled'].map((status) => ({
+        status, count: this.db.prepare('SELECT COUNT(*) AS count FROM orders WHERE status = ?').get(status).count,
+      })),
     }
   }
 

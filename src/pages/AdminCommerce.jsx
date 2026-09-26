@@ -36,6 +36,7 @@ export function AdminCustomers() {
 export function AdminVouchers({ csrfToken }) {
   const { data, error, reload } = useReport('/api/admin/customers')
   const [customerId, setCustomerId] = useState('')
+  const [scope, setScope] = useState('goods')
   const [type, setType] = useState('amount')
   const [value, setValue] = useState(100000)
   const [days, setDays] = useState(30)
@@ -46,15 +47,16 @@ export function AdminVouchers({ csrfToken }) {
     event.preventDefault(); setBusy(true); setSubmitError(''); setCreated(null)
     try {
       const expiresAt = new Date(Date.now() + Number(days) * 86400000).toISOString()
-      const payload = await apiJson('/api/admin/customers/' + customerId + '/vouchers', { method: 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ type, value: Number(value), expiresAt }) })
+      const payload = await apiJson('/api/admin/customers/' + customerId + '/vouchers', { method: 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ type, scope, value: Number(value), expiresAt }) })
       setCreated(payload.voucher); reload()
     } catch (failure) { setSubmitError(failure.message) }
     finally { setBusy(false) }
   }
-  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">ƯU ĐÃI CỦA KHÁCH</p><h2>Cấp voucher</h2><p>Mã gồm 10 ký tự được tạo duy nhất trên máy chủ, không chỉnh sửa. Voucher hết hạn hoặc đã dùng sẽ biến mất khỏi tài khoản.</p></div></div>
+  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">ƯU ĐÃI CỦA KHÁCH</p><h2>Cấp voucher</h2><p>Mã gồm 10 ký tự được tạo duy nhất trên máy chủ. Chọn đúng nhóm hàng hóa hoặc phí vận chuyển để Store hiển thị đúng ô.</p></div></div>
     {error && <p role="alert">{error}</p>}
     <form className="admin-commerce-form" onSubmit={submit}>
       <label>Khách hàng<select required value={customerId} onChange={(event) => setCustomerId(event.target.value)}><option value="">Chọn khách</option>{data?.customers.map((item) => <option key={item.id} value={item.id}>{item.username} · {item.points} điểm</option>)}</select></label>
+      <label>Áp dụng cho<select value={scope} onChange={(event) => setScope(event.target.value)}><option value="goods">Hàng hóa</option><option value="shipping">Phí vận chuyển</option></select></label>
       <label>Loại<select value={type} onChange={(event) => { setType(event.target.value); setValue(event.target.value === 'amount' ? 100000 : 20) }}><option value="amount">Giảm số tiền</option><option value="percent">Giảm phần trăm</option></select></label>
       <label>Giá trị<input type="number" min="1" max={type === 'amount' ? '10000000' : '100'} value={value} onChange={(event) => setValue(event.target.value)} required /></label>
       <label>Hạn dùng sau (ngày)<input type="number" min="1" max="365" value={days} onChange={(event) => setDays(event.target.value)} required /></label>

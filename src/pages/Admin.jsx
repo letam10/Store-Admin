@@ -7,6 +7,7 @@ import AdminModule from './AdminModules'
 import { adminModules } from './adminModuleData'
 import { normalizeSearch } from '../storefront/state'
 import './Admin.css'
+import './AdminPolish.css'
 
 const moduleGroups = [
   { title: 'Tổng quan', ids: ['dashboard', 'statistics', 'ai-local'] },
@@ -56,6 +57,7 @@ export default function Admin() {
   const restoreEpochRef = useRef(0)
   const statsEpochRef = useRef(0)
   const settingsEpochRef = useRef(0)
+  const sessionProbeRef = useRef(0)
   const adminSearchRef = useRef(null)
 
   function clearSensitiveUi({ removeStorageFor = '' } = {}) {
@@ -87,9 +89,10 @@ export default function Admin() {
   useEffect(() => {
     let disposed = false
     const gate = gateRef.current
+    const probe = ++sessionProbeRef.current
     apiJson('/api/admin/session')
-      .then((payload) => { if (!disposed) setSession(payload) })
-      .catch(() => { if (!disposed) setSession(false) })
+      .then((payload) => { if (!disposed && probe === sessionProbeRef.current) setSession(payload) })
+      .catch(() => { if (!disposed && probe === sessionProbeRef.current) setSession(false) })
     return () => { disposed = true; gate.cancel(); loadEpochRef.current += 1 }
   }, [])
 
@@ -153,10 +156,11 @@ export default function Admin() {
     event.preventDefault()
     setLoginError('')
     clearSensitiveUi()
+    const probe = ++sessionProbeRef.current
     const epoch = loadEpochRef.current
     try {
       const payload = await apiJson('/api/admin/login', { method: 'POST', body: JSON.stringify(credentials) })
-      if (epoch !== loadEpochRef.current) return
+      if (epoch !== loadEpochRef.current || probe !== sessionProbeRef.current) return
       setCredentials({ username: '', password: '' })
       setSession(payload)
     } catch (error) {
@@ -169,6 +173,7 @@ export default function Admin() {
   async function logout() {
     const current = session
     clearSensitiveUi({ removeStorageFor: current?.username })
+    ++sessionProbeRef.current
     setSession(false)
     const epoch = loadEpochRef.current
     if (!current?.csrfToken) return
