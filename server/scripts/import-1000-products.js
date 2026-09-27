@@ -13,7 +13,7 @@ import { products as featuredProducts } from '../../../Store/shared/products.js'
 import { config } from '../src/config.js'
 import { StoreDb } from '../src/db.js'
 
-const targetTotal = 1000
+const targetTotal = 2000
 const dummyApi = 'https://dummyjson.com/products?limit=0'
 const aboApi = 'https://store.halukaksoy.dev/api/products'
 const aboImageRoot = 'https://amazon-berkeley-objects.s3.amazonaws.com/images/small/'

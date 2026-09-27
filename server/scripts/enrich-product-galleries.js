@@ -78,7 +78,7 @@ async function imageBytes(path) {
 // Chức năng main: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 async function main() {
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-  if (products.length !== 500) throw new Error('Cần đúng 500 sản phẩm nhập trước khi bổ sung ảnh')
+  if (products.length !== 1996) throw new Error('Cần đúng 1.996 sản phẩm nhập trước khi bổ sung ảnh')
   const needed = products.filter((product) => product.description.startsWith('Sản phẩm mẫu nhóm'))
   const details = new Map()
   for (let start = 0; start < needed.length; start += 8) {
@@ -129,7 +129,7 @@ async function main() {
     delete item.galleryFiles
   }
   writeFileSync(snapshotPath, JSON.stringify(updates, null, 2) + '\n', 'utf8')
-  console.log(`Đã bổ sung ${imageCount} ảnh phụ cho ${updates.filter((item) => item.images.length > 1).length}/500 sản phẩm.`)
+  console.log(`Đã bổ sung ${imageCount} ảnh phụ cho ${updates.filter((item) => item.images.length > 1).length}/1.996 sản phẩm.`)
 }
 
 main().catch((error) => { console.error(error.message); process.exitCode = 1 })
