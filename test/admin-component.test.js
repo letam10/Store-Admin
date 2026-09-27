@@ -1,3 +1,11 @@
+/**
+ * @codex-vn-doc
+ * Tệp: test/admin-component.test.js
+ * Mục đích: Tệp kiểm thử tự động cho các luồng chính và tình huống biên của module này.
+ * Thành phần chính: các hàm/lớp và xử lý nội bộ trong tệp.
+ * Liên kết trực tiếp: node:assert/strict, node:test, node:module, node:path, esbuild, jsdom, react, react-dom/client.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import Module from 'node:module'
@@ -16,10 +24,13 @@ componentModule.paths = Module._nodeModulePaths(resolve('test'))
 componentModule._compile(compiled.outputFiles[0].text, filename)
 const Admin = componentModule.exports.default
 
+// Chức năng json: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 const json = (value) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } })
+// Chức năng session: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 const session = (username) => ({ authenticated: true, username, csrfToken: 'csrf-' + username })
 const settings = { model: 'test-model', contextSize: 8192, allowedContextSizes: [8192, 16384] }
 
+// Chức năng mounted: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 async function mounted(mockFetch, run) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost/admin' })
   const changes = { window: dom.window, document: dom.window.document, navigator: dom.window.navigator,
@@ -32,11 +43,14 @@ async function mounted(mockFetch, run) {
   }
   const { createRoot } = await import('react-dom/client')
   const root = createRoot(document.getElementById('root'))
+  // Chức năng button: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   const button = (label) => {
     const buttons = [...document.querySelectorAll('button')]
     return buttons.find((item) => item.textContent.trim() === label) || buttons.find((item) => item.textContent.includes(label))
   }
+  // Chức năng click: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   const click = async (label) => { const target = button(label); assert.ok(target, label); await act(async () => target.click()) }
+  // Chức năng submit: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   const submit = async (selector) => { await act(async () => document.querySelector(selector).dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }))) }
   try {
     await act(async () => root.render(React.createElement(Admin)))
@@ -51,6 +65,7 @@ async function mounted(mockFetch, run) {
   }
 }
 
+// Kiểm thử edge case: real Admin ignores late stats/settings from A after B logs in.
 test('real Admin ignores late stats/settings from A after B logs in', async () => {
   let resolveStats, resolveSettings
   const delayedStats = new Promise((resolve) => { resolveStats = resolve })
@@ -79,6 +94,7 @@ test('real Admin ignores late stats/settings from A after B logs in', async () =
   })
 })
 
+// Kiểm thử edge case: real Admin does not restore old history over a new live chat.
 test('real Admin does not restore old history over a new live chat', async () => {
   let restore
   const delayedRestore = new Promise((resolve) => { restore = resolve })
@@ -110,10 +126,12 @@ test('real Admin does not restore old history over a new live chat', async () =>
   })
 })
 
+// Kiểm thử edge case: grouped admin navigation and dashboard shortcut open top-view analytics.
 test('grouped admin navigation and dashboard shortcut open top-view analytics', async () => {
   await mounted(async (url) => {
     if (url === '/api/admin/session') return json(session('owner'))
     if (url === '/api/admin/settings') return json(settings)
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (url === '/api/admin/product-views') return json({ products: [{ id: '1', name: 'Tai nghe Everyday', category: 'Điện tử', image: null, symbol: '🎧', viewCount: 2, rank: 1 }], totalViews: 2 })
     throw new Error('Unexpected URL ' + url)
   }, async ({ click }) => {

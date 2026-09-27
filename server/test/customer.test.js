@@ -1,3 +1,11 @@
+/**
+ * @codex-vn-doc
+ * Tệp: server/test/customer.test.js
+ * Mục đích: Tệp kiểm thử tự động cho các luồng chính và tình huống biên của module này.
+ * Thành phần chính: các hàm/lớp và xử lý nội bộ trong tệp.
+ * Liên kết trực tiếp: node:assert/strict, node:fs, node:os, node:path, node:test, ../src/app.js, ../src/customer.js, ../src/db.js.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -8,6 +16,7 @@ import { tierForPoints, shippingFee, rewardPrizes, pointsForPaidGoods } from '..
 import { StoreDb } from '../src/db.js'
 import { hashPassword } from '../src/security.js'
 
+// Chức năng harness: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 async function harness(run) {
   const dir = mkdtempSync(join(tmpdir(), 'store-customer-test-'))
   const storeDb = new StoreDb(join(dir, 'test.pgdata'))
@@ -24,11 +33,14 @@ async function harness(run) {
   }
 }
 
+// Chức năng cookies: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function cookies(response) { return response.headers.get('set-cookie')?.split(';')[0] || '' }
+// Chức năng write: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function write(root, path, cookie, csrf, body, method = 'POST') {
   return fetch(root + path, { method, headers: { cookie, 'content-type': 'application/json', 'x-csrf-token': csrf }, body: JSON.stringify(body) })
 }
 
+// Kiểm thử edge case: membership thresholds, shipping bands and wheel weights are exact.
 test('membership thresholds, shipping bands and wheel weights are exact', () => {
   assert.deepEqual([0, 99, 100, 999, 1000, 9999, 10000].map(tierForPoints),
     ['bronze', 'bronze', 'silver', 'silver', 'gold', 'gold', 'diamond'])
@@ -51,6 +63,7 @@ test('membership thresholds, shipping bands and wheel weights are exact', () => 
   assert.equal(pointsForPaidGoods(5000, 'diamond'), 7)
 })
 
+// Kiểm thử edge case: customer rewards require recorded payment, accumulate exact points and consume vouchers once.
 test('customer rewards require recorded payment, accumulate exact points and consume vouchers once', async () => {
   await harness(async ({ root, storeDb }) => {
     const guestChat = await fetch(root + '/api/support/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: 'Xin chào', requestId: 'request_guest_001' }) })

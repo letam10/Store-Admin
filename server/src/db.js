@@ -1,3 +1,11 @@
+/**
+ * @codex-vn-doc
+ * Tệp: server/src/db.js
+ * Mục đích: StoreDb: truy vấn và transaction cho catalog, khách hàng, voucher, đơn hàng, chat và admin.
+ * Thành phần chính: StoreDb.
+ * Liên kết trực tiếp: node:fs, node:path, node:crypto, pg, @electric-sql/pglite.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -6,11 +14,14 @@ import { PGlite } from '@electric-sql/pglite'
 
 const { Pool } = pg
 
+// Chức năng nowIso: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function nowIso() {
   return new Date().toISOString()
 }
 
+// Chức năng parseJson: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function parseJson(value, fallback) {
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (value === null || value === undefined) return fallback
   if (typeof value === 'object') return value
   try {
@@ -59,13 +70,16 @@ export class StoreDb {
 
   async #rawQuery(sqlText, params = []) {
     if (this.isPglite) {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const res = await this.pglite.query(sqlText, params)
       return { rows: res.rows || [], rowCount: res.affectedRows ?? res.rows?.length ?? 0 }
     }
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.pool.query(sqlText, params)
     return { rows: res.rows || [], rowCount: res.rowCount || 0 }
   }
 
+  // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
   async query(sqlText, params = []) {
     if (!this._isInitializing) {
       await this.ready
@@ -73,37 +87,47 @@ export class StoreDb {
     return this.#rawQuery(sqlText, params)
   }
 
+  // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
   async transaction(fn) {
     if (!this._isInitializing) {
       await this.ready
     }
     if (this.isPglite) {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await this.pglite.query('BEGIN')
       try {
         const clientWrapper = {
+          // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
           query: async (text, params = []) => {
+            // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
             const res = await this.pglite.query(text, params)
             return { rows: res.rows || [], rowCount: res.affectedRows ?? res.rows?.length ?? 0 }
           },
         }
         const result = await fn(clientWrapper)
+        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
         await this.pglite.query('COMMIT')
         return result
       } catch (err) {
+        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
         await this.pglite.query('ROLLBACK')
         throw err
       }
     }
     const client = await this.pool.connect()
     try {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await client.query('BEGIN')
       const clientWrapper = {
+        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
         query: async (text, params = []) => client.query(text, params),
       }
       const result = await fn(clientWrapper)
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await client.query('COMMIT')
       return result
     } catch (err) {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await client.query('ROLLBACK')
       throw err
     } finally {
@@ -344,6 +368,7 @@ export class StoreDb {
     if (this.isPglite) {
       await this.pglite.exec(ddl)
     } else {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await this.pool.query(ddl)
     }
   }
@@ -351,7 +376,9 @@ export class StoreDb {
   async claimBackend() {
     await this.ready
     const token = randomUUID()
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.transaction(async (tx) => {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const res = await tx.query('SELECT * FROM backend_owner WHERE singleton = 1')
       const owner = res.rows[0]
       if (owner) {
@@ -359,14 +386,18 @@ export class StoreDb {
         try {
           process.kill(owner.pid, 0)
         } catch (error) {
+          // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
           if (error.code === 'ESRCH') alive = false
         }
+        // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
         if (alive) throw new Error('Database đang thuộc một backend còn hoạt động; không phục hồi lượt chat.')
       }
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await tx.query(
         'INSERT INTO backend_owner (singleton, pid, token) VALUES (1, $1, $2) ON CONFLICT (singleton) DO UPDATE SET pid = EXCLUDED.pid, token = EXCLUDED.token',
         [process.pid, token],
       )
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await tx.query(
         "UPDATE chat_turns SET status = 'failed', error_code = 'SERVER_RESTART', updated_at = $1 WHERE status = 'running'",
         [nowIso()],
@@ -376,6 +407,7 @@ export class StoreDb {
   }
 
   async seedDemoOrders() {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query(
       `INSERT INTO orders (id, business_date, status, total_amount, refund_amount, is_demo)
        VALUES 
@@ -388,7 +420,9 @@ export class StoreDb {
   }
 
   async seedDemoOperations() {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const exists = await this.query("SELECT 1 FROM admin_records WHERE module IN ('inventory','logistics','order-types','staff','overtime','support') LIMIT 1")
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (exists.rows.length) return
     const now = nowIso()
     const rows = [
@@ -409,6 +443,7 @@ export class StoreDb {
       placeholders.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`)
       values.push(module, title, dataJson, status, now, now)
     }
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query(
       `INSERT INTO admin_records (module, title, data_json, status, created_at, updated_at) VALUES ${placeholders.join(', ')}`,
       values,
@@ -421,9 +456,12 @@ export class StoreDb {
     if (!existsSync(snapshotPath)) return
     try {
       const products = JSON.parse(readFileSync(snapshotPath, 'utf8'))
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (!Array.isArray(products) || products.length === 0) return
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const countRes = await this.query('SELECT COUNT(*) AS count FROM catalog_products')
       const current = Number(countRes.rows[0]?.count || 0)
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (current < products.length) await this.upsertCatalogProducts(products)
     } catch {
       // A corrupt optional snapshot must not prevent the backend from starting.
@@ -431,6 +469,7 @@ export class StoreDb {
   }
 
   async upsertCatalogProducts(products) {
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!products || !products.length) return
     const chunkSize = 50
     for (let i = 0; i < products.length; i += chunkSize) {
@@ -489,11 +528,13 @@ export class StoreDb {
           source_currency = EXCLUDED.source_currency, imported_at = EXCLUDED.imported_at,
           discount_percent = EXCLUDED.discount_percent, stock_count = EXCLUDED.stock_count
       `
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await this.query(sql, values)
     }
   }
 
   async listCatalogProducts() {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query(
       'SELECT p.*, COALESCE(v.view_count, 0) AS view_count FROM catalog_products p LEFT JOIN product_views v ON v.product_id = p.id ORDER BY p.category, p.name',
     )
@@ -522,9 +563,11 @@ export class StoreDb {
 
   async storefrontCatalog({ details = false } = {}) {
     if (details) return this.listCatalogProducts()
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query(
       'SELECT p.id, p.discount_percent, p.stock_count, COALESCE(v.view_count, 0) AS view_count FROM catalog_products p LEFT JOIN product_views v ON v.product_id = p.id',
     )
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const featuredRes = await this.query(
       "SELECT product_id AS id, view_count FROM product_views WHERE product_id IN ('1', '2', '3', '4')",
     )
@@ -543,6 +586,7 @@ export class StoreDb {
   }
 
   async updateCatalogOffer(id, { discountPercent, stockCount }) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query(
       'UPDATE catalog_products SET discount_percent = $1, stock_count = $2 WHERE id = $3',
       [discountPercent, stockCount, String(id)],
@@ -558,19 +602,23 @@ export class StoreDb {
   async updateCatalogProduct(id, patch) {
     const columns = { name: 'name', category: 'category', price: 'price', description: 'description', image: 'image', label: 'label', sourceUrl: 'source_url', stockCount: 'stock_count' }
     const entries = Object.keys(columns).filter((key) => patch[key] !== undefined)
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!entries.length) return this.getCatalogProduct(id)
     const assignments = entries.map((key, idx) => `${columns[key]} = $${idx + 1}`).join(', ')
     const values = entries.map((key) => patch[key])
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query(`UPDATE catalog_products SET ${assignments} WHERE id = $${entries.length + 1}`, [...values, String(id)])
     return res.rowCount ? this.getCatalogProduct(id) : null
   }
 
   async deleteCatalogProduct(id) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query('DELETE FROM catalog_products WHERE id = $1', [String(id)])
     return res.rowCount > 0
   }
 
   async listAdminRecords(module) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query(
       'SELECT id, module, title, data_json, status, created_at, updated_at FROM admin_records WHERE module = $1 ORDER BY updated_at DESC, id DESC',
       [module],
@@ -588,6 +636,7 @@ export class StoreDb {
 
   async createAdminRecord({ module, title, data = {}, status = 'Đang dùng' }) {
     const timestamp = nowIso()
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query(
       'INSERT INTO admin_records (module, title, data_json, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
       [module, title, JSON.stringify(data), status, timestamp, timestamp],
@@ -597,6 +646,7 @@ export class StoreDb {
 
   async updateAdminRecord(id, { module, title, data = {}, status = 'Đang dùng' }) {
     const timestamp = nowIso()
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query(
       'UPDATE admin_records SET module = $1, title = $2, data_json = $3, status = $4, updated_at = $5 WHERE id = $6',
       [module, title, JSON.stringify(data), status, timestamp, Number(id)],
@@ -605,13 +655,16 @@ export class StoreDb {
   }
 
   async deleteAdminRecord(id) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query('DELETE FROM admin_records WHERE id = $1', [Number(id)])
     return res.rowCount > 0
   }
 
   async adminOverview() {
+    // Chức năng count: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
     const count = async (table) => {
       try {
+        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
         const res = await this.query(`SELECT COUNT(*) AS count FROM ${table}`)
         return Number(res.rows[0]?.count || 0)
       } catch {
@@ -619,6 +672,7 @@ export class StoreDb {
       }
     }
 
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const revenueRes = await this.query(`
       SELECT business_date AS date,
         COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount - refund_amount ELSE 0 END), 0) AS revenue,
@@ -629,6 +683,7 @@ export class StoreDb {
 
     let customerRevenueByDay = []
     try {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const custRes = await this.query(`
         SELECT SUBSTRING(COALESCE(paid_at, created_at) FROM 1 FOR 10) AS date,
           COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total ELSE 0 END), 0) AS revenue,
@@ -657,10 +712,12 @@ export class StoreDb {
 
     let orderStatus = []
     for (const status of ['pending', 'paid', 'completed', 'cancelled']) {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const res = await this.query('SELECT COUNT(*) AS count FROM orders WHERE status = $1', [status])
       orderStatus.push({ status, count: Number(res.rows[0]?.count || 0) })
     }
     try {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const custStatusRes = await this.query('SELECT status, COUNT(*) AS count FROM customer_orders GROUP BY status')
       const counts = new Map(orderStatus.map((item) => [item.status, Number(item.count || 0)]))
       for (const item of custStatusRes.rows) {
@@ -671,6 +728,7 @@ export class StoreDb {
       // Keep legacy status
     }
 
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const openSupportRes = await this.query("SELECT COUNT(*) AS count FROM conversations WHERE kind = 'support'")
     const totalViews = await this.totalProductViews()
 
@@ -694,31 +752,39 @@ export class StoreDb {
 
   async recordProductView(id) {
     const strId = String(id)
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const exists = /^[1-4]$/.test(strId) || Boolean((await this.query('SELECT 1 FROM catalog_products WHERE id = $1', [strId])).rows.length)
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!exists) return null
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query(
       'INSERT INTO product_views (product_id, view_count) VALUES ($1, 1) ON CONFLICT(product_id) DO UPDATE SET view_count = product_views.view_count + 1',
       [strId],
     )
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query('SELECT view_count FROM product_views WHERE product_id = $1', [strId])
     return Number(res.rows[0]?.view_count || 0)
   }
 
   async getProductViewCount(id) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query('SELECT view_count FROM product_views WHERE product_id = $1', [String(id)])
     return Number(res.rows[0]?.view_count || 0)
   }
 
   async totalProductViews() {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query('SELECT COALESCE(SUM(view_count), 0) AS total FROM product_views')
     return Number(res.rows[0]?.total || 0)
   }
 
   async clearOrders() {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query('DELETE FROM orders')
   }
 
   async insertOrder({ id, businessDate, status, totalAmount, refundAmount = 0, isDemo = false }) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query(
       'INSERT INTO orders (id, business_date, status, total_amount, refund_amount, is_demo) VALUES ($1, $2, $3, $4, $5, $6)',
       [id, businessDate, status, totalAmount, refundAmount, isDemo ? 1 : 0],
@@ -726,12 +792,14 @@ export class StoreDb {
   }
 
   async getSetting(key) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query('SELECT value FROM settings WHERE key = $1', [key])
     return res.rows[0]?.value ?? null
   }
 
   async setSetting(key, value) {
     const now = nowIso()
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query(
       'INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, $3) ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at',
       [key, String(value), now],
@@ -739,6 +807,7 @@ export class StoreDb {
   }
 
   async createAdmin({ username, passwordSalt, passwordHash }) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query(
       'INSERT INTO admins (username, password_salt, password_hash, created_at) VALUES ($1, $2, $3, $4) RETURNING id',
       [username, passwordSalt, passwordHash, nowIso()],
@@ -747,11 +816,13 @@ export class StoreDb {
   }
 
   async getAdminByUsername(username) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query('SELECT * FROM admins WHERE LOWER(username) = LOWER($1)', [username])
     return res.rows[0] ?? null
   }
 
   async createAdminSession({ tokenHash, adminId, expiresAt }) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query(
       'INSERT INTO admin_sessions (token_hash, admin_id, expires_at, created_at) VALUES ($1, $2, $3, $4)',
       [tokenHash, adminId, expiresAt, nowIso()],
@@ -759,6 +830,7 @@ export class StoreDb {
   }
 
   async getAdminSession(tokenHash) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query(
       `SELECT s.token_hash, s.expires_at, a.id AS admin_id, a.username
        FROM admin_sessions s
@@ -770,14 +842,17 @@ export class StoreDb {
   }
 
   async expireAdminSessionForTest(tokenHash) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query('UPDATE admin_sessions SET expires_at = $1 WHERE token_hash = $2', ['2000-01-01T00:00:00.000Z', tokenHash])
   }
 
   async deleteAdminSession(tokenHash) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query('DELETE FROM admin_sessions WHERE token_hash = $1', [tokenHash])
   }
 
   async cleanupExpiredSessions() {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query('DELETE FROM admin_sessions WHERE expires_at <= $1', [nowIso()])
   }
 
@@ -794,6 +869,7 @@ export class StoreDb {
       created_at: now,
       updated_at: now,
     }
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query(
       `INSERT INTO conversations
          (id, kind, owner_key, summary, memory_json, compact_status, last_compacted_message_id, created_at, updated_at)
@@ -815,22 +891,26 @@ export class StoreDb {
   }
 
   async getConversation(id) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query('SELECT * FROM conversations WHERE id = $1', [id])
     return res.rows[0] ?? null
   }
 
   async getMessages(conversationId) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query('SELECT * FROM messages WHERE conversation_id = $1 ORDER BY id ASC', [conversationId])
     return res.rows
   }
 
   async getPublicHistory(conversationId) {
     const messages = await this.getMessages(conversationId)
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const turnRes = await this.query('SELECT * FROM chat_turns WHERE conversation_id = $1 ORDER BY id', [conversationId])
     const turns = turnRes.rows
     const linked = new Set(turns.map((turn) => Number(turn.user_message_id)))
     const assistantIds = new Set()
     for (const turn of turns) {
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (turn.status !== 'completed') continue
       if (turn.assistant_message_id) {
         assistantIds.add(Number(turn.assistant_message_id))
@@ -886,21 +966,26 @@ export class StoreDb {
 
   async addMessage({ conversationId, role, content, sources = [], completed = true }) {
     const now = nowIso()
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query(
       'INSERT INTO messages (conversation_id, role, content, completed, sources_json, created_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
       [conversationId, role, content, completed ? 1 : 0, JSON.stringify(sources), now],
     )
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query('UPDATE conversations SET updated_at = $1 WHERE id = $2', [now, conversationId])
     return Number(res.rows[0].id)
   }
 
   async getTurn(ownerKey, requestId) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query('SELECT * FROM chat_turns WHERE owner_key = $1 AND request_id = $2', [ownerKey, requestId])
     return res.rows[0] ?? null
   }
 
   async startTurn({ ownerKey, kind, conversationId, requestId, message }) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     return this.transaction(async (tx) => {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const existingRes = await tx.query('SELECT * FROM chat_turns WHERE owner_key = $1 AND request_id = $2', [ownerKey, requestId])
       const existing = existingRes.rows[0]
       if (existing) {
@@ -910,8 +995,11 @@ export class StoreDb {
         if (conversationId && existing.conversation_id !== conversationId) {
           return { state: 'conflict', turn: existing }
         }
+        // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
         if (existing.status === 'completed') return { state: 'completed', turn: existing }
+        // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
         if (existing.status === 'running') return { state: 'running', turn: existing }
+        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
         await tx.query(
           `UPDATE chat_turns
            SET status = 'running', assistant_content = '', sources_json = '[]', report_json = 'null',
@@ -919,12 +1007,14 @@ export class StoreDb {
            WHERE id = $2`,
           [nowIso(), existing.id],
         )
+        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
         const updatedRes = await tx.query('SELECT * FROM chat_turns WHERE id = $1', [existing.id])
         return { state: 'retry', turn: updatedRes.rows[0] }
       }
 
       let activeConversationId = conversationId
       if (conversationId) {
+        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
         const convRes = await tx.query('SELECT * FROM conversations WHERE id = $1', [conversationId])
         const conversation = convRes.rows[0]
         if (!conversation || conversation.kind !== kind || conversation.owner_key !== ownerKey) {
@@ -933,6 +1023,7 @@ export class StoreDb {
       } else {
         const now = nowIso()
         const newConvId = randomUUID()
+        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
         await tx.query(
           `INSERT INTO conversations
              (id, kind, owner_key, summary, memory_json, compact_status, last_compacted_message_id, created_at, updated_at)
@@ -944,13 +1035,16 @@ export class StoreDb {
       }
 
       const now = nowIso()
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const msgRes = await tx.query(
         'INSERT INTO messages (conversation_id, role, content, completed, sources_json, created_at) VALUES ($1, $2, $3, 1, $4, $5) RETURNING id',
         [activeConversationId, 'user', message, '[]', now],
       )
       const userMessageId = Number(msgRes.rows[0].id)
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await tx.query('UPDATE conversations SET updated_at = $1 WHERE id = $2', [now, activeConversationId])
 
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const turnRes = await tx.query(
         `INSERT INTO chat_turns
            (request_id, owner_key, kind, conversation_id, user_message_id, user_content, status, created_at, updated_at)
@@ -963,19 +1057,25 @@ export class StoreDb {
   }
 
   async completeTurn({ turnId, content, sources = [], report = null, verified = null }) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     return this.transaction(async (tx) => {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const turnRes = await tx.query('SELECT * FROM chat_turns WHERE id = $1', [turnId])
       const turn = turnRes.rows[0]
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (!turn || turn.status !== 'running') return false
 
       const now = nowIso()
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const msgRes = await tx.query(
         'INSERT INTO messages (conversation_id, role, content, completed, sources_json, created_at) VALUES ($1, $2, $3, 1, $4, $5) RETURNING id',
         [turn.conversation_id, 'assistant', content, JSON.stringify(sources), now],
       )
       const assistantMessageId = Number(msgRes.rows[0].id)
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await tx.query('UPDATE conversations SET updated_at = $1 WHERE id = $2', [now, turn.conversation_id])
 
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await tx.query(
         `UPDATE chat_turns
          SET status = 'completed', assistant_content = $1, sources_json = $2, report_json = $3, verified_json = $4,
@@ -988,6 +1088,7 @@ export class StoreDb {
   }
 
   async failTurn(turnId, { status = 'failed', errorCode = 'AI_ERROR', partialContent = '' } = {}) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query(
       `UPDATE chat_turns
        SET status = $1, assistant_content = $2, error_code = $3, updated_at = $4
@@ -1001,6 +1102,7 @@ export class StoreDb {
   }
 
   async updateCompact({ conversationId, summary, memory, status, lastCompactedMessageId }) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query(
       `UPDATE conversations
        SET summary = $1, memory_json = $2, compact_status = $3, last_compacted_message_id = $4, updated_at = $5
@@ -1010,10 +1112,12 @@ export class StoreDb {
   }
 
   async markCompactFailure(conversationId) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await this.query('UPDATE conversations SET compact_status = $1, updated_at = $2 WHERE id = $3', ['failed', nowIso(), conversationId])
   }
 
   async calculateRevenue({ from, to }) {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const rowRes = await this.query(
       `SELECT
          COUNT(*) AS all_orders,
@@ -1031,6 +1135,7 @@ export class StoreDb {
 
     let customerRow = { all_orders: 0, included_orders: 0, gross_revenue: 0, refunds: 0, net_revenue: 0 }
     try {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const custRes = await this.query(
         `SELECT
            COUNT(*) AS all_orders,
@@ -1042,6 +1147,7 @@ export class StoreDb {
          WHERE SUBSTRING(COALESCE(paid_at, created_at) FROM 1 FOR 10) BETWEEN $1 AND $2`,
         [from, to],
       )
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (custRes.rows[0]) customerRow = custRes.rows[0]
     } catch {
       // customer_orders may not exist
@@ -1051,8 +1157,11 @@ export class StoreDb {
     const demoOrders = Number(row.demo_orders || 0)
     const realOrders = Number(row.real_orders || 0) + Number(customerRow.all_orders || 0)
     let dataMode = 'none'
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (allOrders > 0 && demoOrders === allOrders) dataMode = 'demo'
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     else if (allOrders > 0 && realOrders === allOrders) dataMode = 'real'
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     else if (allOrders > 0) dataMode = 'mixed'
 
     return {

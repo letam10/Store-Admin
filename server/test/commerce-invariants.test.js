@@ -1,11 +1,21 @@
+/**
+ * @codex-vn-doc
+ * Tệp: server/test/commerce-invariants.test.js
+ * Mục đích: Tệp kiểm thử tự động cho các luồng chính và tình huống biên của module này.
+ * Thành phần chính: các hàm/lớp và xử lý nội bộ trong tệp.
+ * Liên kết trực tiếp: node:assert/strict, node:test, ../src/app.js, ../src/db.js, ../src/security.js.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createApp } from '../src/app.js'
 import { StoreDb } from '../src/db.js'
 import { hashPassword } from '../src/security.js'
 
+// Chức năng cookiePair: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function cookiePair(response) { return response.headers.get('set-cookie')?.split(';')[0] || '' }
 
+// Chức năng withServer: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 async function withServer(run) {
   const storeDb = new StoreDb(':memory:')
   await storeDb.ready
@@ -20,6 +30,7 @@ async function withServer(run) {
   }
 }
 
+// Chức năng adminSession: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 async function adminSession(root, storeDb) {
   const credentials = hashPassword('correct-horse-battery-staple')
   await storeDb.createAdmin({ username: 'owner', passwordSalt: credentials.salt, passwordHash: credentials.hash })
@@ -30,6 +41,7 @@ async function adminSession(root, storeDb) {
   return { cookie: cookiePair(response), body: await response.json() }
 }
 
+// Kiểm thử edge case: catalog stock defaults to 20, zero stock is unavailable, and voucher management is server-owned.
 test('catalog stock defaults to 20, zero stock is unavailable, and voucher management is server-owned', async () => {
   await withServer(async ({ root, storeDb }) => {
     const admin = await adminSession(root, storeDb)
@@ -56,7 +68,6 @@ test('catalog stock defaults to 20, zero stock is unavailable, and voucher manag
       method: 'POST', headers, body: JSON.stringify({ name: 'Giá bằng không', price: 0, stockCount: 20 }),
     })
     assert.equal(zeroPrice.status, 400)
-
     const created = await fetch(root + '/api/admin/products', {
       method: 'POST', headers, body: JSON.stringify({ name: 'Sản phẩm hết hàng', price: 1000, stockCount: 0 }),
     })
@@ -71,7 +82,6 @@ test('catalog stock defaults to 20, zero stock is unavailable, and voucher manag
       sourceCurrency: 'VND', importedAt: new Date().toISOString(),
     }])
     assert.equal((await storeDb.getCatalogProduct('default-stock-test')).stockCount, 20)
-
     const register = await fetch(root + '/api/customer/register', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ username: 'buyer', email: 'buyer@example.com', password: 'secure-password-123' }),
@@ -84,7 +94,6 @@ test('catalog stock defaults to 20, zero stock is unavailable, and voucher manag
     })
     assert.equal(quote.status, 400)
     assert.equal((await quote.json()).error, 'PRODUCT_UNAVAILABLE')
-
     await storeDb.query(`INSERT INTO customer_orders
       (id, customer_id, items_json, recipient, phone, address, fulfillment, region, distance_km, weight_kg,
        subtotal, discount, goods_total, shipping_fee, total, voucher_codes_json, tier, status, points_earned, created_at, paid_at)
@@ -101,7 +110,6 @@ test('catalog stock defaults to 20, zero stock is unavailable, and voucher manag
     assert.equal(dailyStats.dataMode, 'real')
     assert.equal(dailyStats.includedOrders, 1)
     assert.equal(dailyStats.netRevenue, 250000)
-
     const invalidScope = await fetch(root + '/api/admin/vouchers', {
       method: 'POST', headers, body: JSON.stringify({ customerId: customer.id, type: 'percent', scope: 'unknown', value: 20, expiresAt: '2026-10-01T00:00:00.000Z' }),
     })

@@ -1,18 +1,29 @@
+/**
+ * @codex-vn-doc
+ * Tệp: src/pages/AdminCommerce.jsx
+ * Mục đích: Giao diện quản lý sản phẩm, voucher, đơn hàng, khách hàng và dữ liệu thương mại.
+ * Thành phần chính: AdminCustomers, AdminVouchers, AdminFavorites, AdminReviews, AdminOrders.
+ * Liên kết trực tiếp: react, ../api/chat.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 import { useEffect, useMemo, useState } from 'react'
 import { apiJson } from '../api/chat'
 import './AdminCommerce.css'
 
 const money = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' })
 
+// Chức năng adminErrorMessage: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function adminErrorMessage(failure, fallback = 'Co loi xay ra, vui long thu lai.') {
   const code = String(failure?.code || '').toUpperCase()
   const known = { INVALID_PRODUCT: 'Du lieu san pham khong hop le.', INVALID_PRODUCT_OFFER: 'Gia tri giam gia hoac ton kho khong hop le.', INVALID_VOUCHER: 'Thong tin voucher khong hop le.', CUSTOMER_NOT_FOUND: 'Khong tim thay khach hang.', UNAUTHENTICATED: 'Phien dang nhap da het, vui long dang nhap lai.' }
   return known[code] || (failure?.message && !/^[A-Z0-9_ -]+$/.test(String(failure.message)) ? failure.message : fallback)
 }
 
+// Chức năng useReport: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function useReport(path) {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
+  // Chức năng reload: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   const reload = () => apiJson(path).then(setData).catch((failure) => setError(failure.message))
   useEffect(() => {
     const controller = new AbortController()
@@ -23,12 +34,15 @@ function useReport(path) {
   return { data, error, reload }
 }
 
+// Chức năng AdminCustomers: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function AdminCustomers() {
   const { data, error } = useReport('/api/admin/customers')
+  // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
   const [query, setQuery] = useState('')
   const [minPoints, setMinPoints] = useState(0)
   const [selected, setSelected] = useState(null)
   const rows = useMemo(() => (data?.customers || []).filter((item) =>
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     item.points >= Number(minPoints || 0) && (item.username.toLowerCase().includes(query.toLowerCase()) || item.email.toLowerCase().includes(query.toLowerCase()))),
   [data, minPoints, query])
   const customers = data?.customers || []
@@ -37,6 +51,7 @@ export function AdminCustomers() {
   const activeSpinCredits = customers.reduce((sum, item) => sum + Number(item.spinCredits || 0), 0)
   return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">KHÁCH HÀNG THỰC</p><h2>Điểm và hạng thành viên</h2><p>Sắp xếp theo điểm giảm dần. Điểm chỉ cộng khi đơn được ghi nhận thanh toán.</p></div><span className="admin-preview-badge">{data?.customers.length || 0} khách</span></div>
     <div className="admin-commerce-summary"><div><small>Tổng khách</small><b>{customers.length}</b><span>Đang theo dõi</span></div><div><small>Tổng điểm</small><b>{totalPoints.toLocaleString('vi-VN')}</b><span>Điểm tích lũy</span></div><div><small>Người dẫn đầu</small><b>{topCustomer?.username || '—'}</b><span>{topCustomer ? topCustomer.points.toLocaleString('vi-VN') + ' điểm' : 'Chưa có dữ liệu'}</span></div><div><small>Lượt quay còn lại</small><b>{activeSpinCredits}</b><span>Toàn hệ thống</span></div></div>
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     <div className="admin-module-toolbar"><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm tên hoặc email" /><label>Điểm tối thiểu <input type="number" min="0" value={minPoints} onChange={(event) => setMinPoints(event.target.value)} /></label></div>
     {error && <p role="alert">{error}</p>}{!data && !error && <p>Đang tải…</p>}
      {data && <div className="admin-table-wrap"><table><thead><tr><th>Khách</th><th>Điểm</th><th>Hạng</th><th>Tiền hàng đã thanh toán</th><th>Lượt quay</th></tr></thead><tbody>{rows.map((item) => <tr key={item.id} className="admin-clickable-row" onClick={() => setSelected(item)}><td><button className="admin-link-button" type="button" onClick={() => setSelected(item)}>{item.username}</button><small>{item.email}</small></td><td><b>{item.points.toLocaleString('vi-VN')}</b></td><td>{item.tier}</td><td>{money.format(item.paidGoodsTotal)}</td><td>{item.spinCredits}</td></tr>)}</tbody></table></div>}
@@ -44,6 +59,7 @@ export function AdminCustomers() {
   </section>
 }
 
+// Chức năng AdminVouchers: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function AdminVouchers({ csrfToken }) {
   const { data, error, reload: reloadCustomers } = useReport('/api/admin/customers')
   const { data: voucherData, error: voucherError, reload: reloadVouchers } = useReport('/api/admin/vouchers')
@@ -55,13 +71,16 @@ export function AdminVouchers({ csrfToken }) {
   const [created, setCreated] = useState(null)
   const [submitError, setSubmitError] = useState('')
   const [busy, setBusy] = useState(false)
+  // Chức năng submit: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function submit(event) {
     event.preventDefault(); setBusy(true); setSubmitError(''); setCreated(null)
     try {
       const numericValue = Number(value)
       const numericDays = Number(days)
       const maxValue = type === 'amount' ? 10000000 : 100
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (!Number.isInteger(numericValue) || numericValue < 1 || numericValue > maxValue) throw Object.assign(new Error(''), { code: 'INVALID_VOUCHER' })
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (!Number.isInteger(numericDays) || numericDays < 1 || numericDays > 365) throw Object.assign(new Error(''), { code: 'INVALID_VOUCHER' })
       const expiresAt = new Date(Date.now() + Number(days) * 86400000).toISOString()
       const payload = await apiJson('/api/admin/vouchers', { method: 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ customerId: Number(customerId), type, scope, value: numericValue, expiresAt }) })
@@ -69,9 +88,12 @@ export function AdminVouchers({ csrfToken }) {
     } catch (failure) { setSubmitError(adminErrorMessage(failure, 'Khong tao duoc voucher.')) }
     finally { setBusy(false) }
   }
+  // Chức năng remove: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function remove(voucher) {
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!window.confirm('Xoa voucher ' + voucher.code + '?')) return
     try { await apiJson('/api/admin/vouchers/' + encodeURIComponent(voucher.code), { method: 'DELETE', headers: { 'x-csrf-token': csrfToken } }); reloadVouchers() }
+    // Nhánh lỗi: chuyển ngoại lệ thành phản hồi an toàn và giữ trạng thái nhất quán.
     catch (failure) { setSubmitError(adminErrorMessage(failure, 'Khong xoa duoc voucher.')) }
   }
   return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">VOUCHER STORE</p><h2>Voucher</h2><p>Thêm voucher mới cho khách hàng. Mã 10 ký tự được tạo duy nhất trên máy chủ và không thể sửa.</p></div><span className="admin-preview-badge">{voucherData?.vouchers?.length || 0} voucher</span></div><div className="reward-policy-grid"><div><span className="reward-policy-icon">60%</span><b>Lần sau may mắn</b><small>Tỷ lệ hệ thống · không hiển thị cho khách</small></div><div><span className="reward-policy-icon">30%</span><b>Voucher 100K</b><small>Phần thưởng quay may mắn</small></div><div><span className="reward-policy-icon">10%</span><b>Voucher giảm 20%</b><small>Phần thưởng quay may mắn</small></div></div>
@@ -89,6 +111,7 @@ export function AdminVouchers({ csrfToken }) {
   </section>
 }
 
+// Chức năng AdminFavorites: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function AdminFavorites() {
   const { data, error } = useReport('/api/admin/favorites')
   const highest = data?.favorites[0]?.count || 1
@@ -98,6 +121,7 @@ export function AdminFavorites() {
   </section>
 }
 
+// Chức năng AdminReviews: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function AdminReviews({ csrfToken }) {
   const { data, error, reload } = useReport('/api/admin/reviews')
   const [drafts, setDrafts] = useState({})
@@ -105,6 +129,7 @@ export function AdminReviews({ csrfToken }) {
   const reviews = data?.reviews || []
   const averageRating = reviews.length ? (reviews.reduce((sum, item) => sum + Number(item.rating || 0), 0) / reviews.length).toFixed(1) : '—'
   const unanswered = reviews.filter((item) => !item.adminReply).length
+  // Chức năng reply: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function reply(id) {
     setSaveError('')
     try {
@@ -120,6 +145,7 @@ export function AdminReviews({ csrfToken }) {
   </section>
 }
 
+// Chức năng AdminOrders: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function AdminOrders({ csrfToken }) {
   const { data, error, reload } = useReport('/api/admin/customer-orders')
   const [actionError, setActionError] = useState('')
@@ -127,6 +153,7 @@ export function AdminOrders({ csrfToken }) {
   const pendingOrders = orders.filter((item) => item.status === 'pending').length
   const paidOrders = orders.filter((item) => item.status === 'paid').length
   const orderValue = orders.reduce((sum, item) => sum + Number(item.total || 0), 0)
+  // Chức năng markPaid: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function markPaid(id) {
     setActionError('')
     try {

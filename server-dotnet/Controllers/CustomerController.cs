@@ -1,3 +1,11 @@
+/*
+ * @codex-vn-doc
+ * Tệp: server-dotnet/Controllers/CustomerController.cs
+ * Mục đích: Endpoint tài khoản và thao tác customer của API C#.
+ * Thành phần chính: CustomerController.
+ * Liên kết trực tiếp: System.Text.Json, Microsoft.AspNetCore.Mvc, StoreApi.Data, StoreApi.Models, StoreApi.Security.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using StoreApi.Data;
@@ -8,6 +16,7 @@ namespace StoreApi.Controllers;
 
 [ApiController]
 [Route("api/customer")]
+// Vai trò kiểu CustomerController: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
 public sealed class CustomerController(StoreDb db) : ControllerBase
 {
     private const string Cookie = "store_customer_session";
@@ -32,6 +41,7 @@ public sealed class CustomerController(StoreDb db) : ControllerBase
             var id = db.CreateCustomer(request.Username.Trim(), request.Email.Trim(), salt, hash);
             return LoginInternal(request.Username.Trim(), id);
         }
+        // Nhánh lỗi: chuyển ngoại lệ thành phản hồi an toàn, không làm lộ dữ liệu nhạy cảm.
         catch { return Conflict(new { error = "CUSTOMER_EXISTS" }); }
     }
 
@@ -54,6 +64,7 @@ public sealed class CustomerController(StoreDb db) : ControllerBase
     }
 
     [HttpGet("favorites")]
+    // Chức năng Favorites: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.
     public IActionResult Favorites() => RequireAccount(out var customer) ? Ok(new { favorites = db.Favorites(customer.Id) }) : Unauthorized(new { error = "LOGIN_REQUIRED" });
 
     [HttpPut("favorites/{id}")]
@@ -72,6 +83,7 @@ public sealed class CustomerController(StoreDb db) : ControllerBase
     }
 
     [HttpGet("vouchers")]
+    // Chức năng Vouchers: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.
     public IActionResult Vouchers() => RequireAccount(out var customer) ? Ok(new { vouchers = db.Vouchers(customer.Id) }) : Unauthorized(new { error = "LOGIN_REQUIRED" });
 
     private IActionResult LoginInternal(string username, long id)
@@ -87,6 +99,7 @@ public sealed class CustomerController(StoreDb db) : ControllerBase
         var raw = Request.Cookies[Cookie]; return string.IsNullOrWhiteSpace(raw) ? null : db.FindCustomerBySession(Tokens.Sha256(raw));
     }
 
+    // Chức năng CsrfValid: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.
     private bool CsrfValid(string raw) => Request.Headers.TryGetValue("x-csrf-token", out var value) && value == Tokens.Sha256("customer-csrf:" + raw);
     private bool RequireAccount(out (long Id, string Username, string Email, int Points, int SpinCredits) customer)
     {
@@ -96,6 +109,8 @@ public sealed class CustomerController(StoreDb db) : ControllerBase
     {
         raw = Request.Cookies[Cookie] ?? string.Empty; var current = Current(); customer = current ?? default; return current is not null && raw.Length > 0;
     }
+    // Chức năng Tier: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.
     private static string Tier(int points) => points >= 10000 ? "diamond" : points >= 1000 ? "gold" : points >= 100 ? "silver" : "bronze";
+    // Chức năng Account: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.
     private static object Account((long Id, string Username, string Email, int Points, int SpinCredits) c, string csrf) => new { id = c.Id, username = c.Username, email = c.Email, points = c.Points, tier = Tier(c.Points), spinCredits = c.SpinCredits, csrfToken = csrf };
 }

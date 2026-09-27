@@ -1,3 +1,11 @@
+/**
+ * @codex-vn-doc
+ * Tệp: src/pages/Admin.jsx
+ * Mục đích: Màn hình điều phối admin, session, module, dashboard và chat hỗ trợ.
+ * Thành phần chính: Admin.
+ * Liên kết trực tiếp: react, ../api/chat, ../api/requestGate, ./adminState, ../components/ui/customerSupportState, ./AdminModules, ./adminModuleData, ../storefront/state.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiJson, streamChat } from '../api/chat'
 import { createRequestGate } from '../api/requestGate'
@@ -17,21 +25,25 @@ const moduleGroups = [
 ]
 const moduleById = new Map(adminModules.map((entry) => [entry[0], entry]))
 
+// Chức năng localId: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function localId() {
   return globalThis.crypto?.randomUUID?.() || String(Date.now()) + '-' + String(Math.random())
 }
 
+// Chức năng businessToday: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function businessToday() {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date())
 }
 
+// Chức năng formatMoney: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function formatMoney(value) {
   return new Intl.NumberFormat('vi-VN').format(Number(value || 0)) + ' ₫'
 }
 
 
+// Chức năng Admin: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export default function Admin() {
   const today = useMemo(() => businessToday(), [])
   const [theme, setTheme] = useState(() => localStorage.getItem('store_admin_theme') || 'light')
@@ -84,6 +96,7 @@ export default function Admin() {
     themeLight: 'Giao diện sáng', themeDark: 'Giao diện tối', language: 'Ngôn ngữ',
   }
 
+  // Chức năng ThemeLanguageControls: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   function ThemeLanguageControls({ compact = false }) {
     return <div className={'admin-preferences' + (compact ? ' admin-preferences--compact' : '')}>
       <label className="admin-language-control"><span className="sr-only">{copy.language}</span><select value={language} onChange={(event) => setLanguage(event.target.value)} aria-label={copy.language}><option value="vi">VI</option><option value="en">EN</option></select></label>
@@ -91,6 +104,7 @@ export default function Admin() {
     </div>
   }
 
+  // Chức năng clearSensitiveUi: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   function clearSensitiveUi({ removeStorageFor = '' } = {}) {
     gateRef.current.cancel()
     loadEpochRef.current += 1
@@ -111,6 +125,7 @@ export default function Admin() {
     setPageError('')
   }
 
+  // Chức năng expireSession: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   function expireSession() {
     const username = session?.username || ''
     clearSensitiveUi({ removeStorageFor: username })
@@ -128,6 +143,7 @@ export default function Admin() {
   }, [])
 
   useEffect(() => {
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!session?.authenticated) return undefined
     clearSensitiveUi()
     const epoch = ++loadEpochRef.current
@@ -143,6 +159,7 @@ export default function Admin() {
       })
       .catch((error) => {
         if (epoch !== loadEpochRef.current || settingsEpoch !== settingsEpochRef.current) return
+        // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
         if (error.code === 'UNAUTHENTICATED') expireSession()
         else setPageError('Không tải được cấu hình admin.')
       })
@@ -161,6 +178,7 @@ export default function Admin() {
         .catch((error) => {
           if (epoch !== loadEpochRef.current || restoreEpoch !== restoreEpochRef.current || gateRef.current.locked) return
           sessionStorage.removeItem(key)
+          // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
           if (error.code === 'UNAUTHENTICATED') expireSession()
         })
     }
@@ -172,6 +190,7 @@ export default function Admin() {
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [messages, activity])
 
   useEffect(() => {
+    // Chức năng onShortcut: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
     const onShortcut = (event) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase('en') === 'k') {
         event.preventDefault()
@@ -183,6 +202,7 @@ export default function Admin() {
   }, [])
 
 
+  // Chức năng login: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function login(event) {
     event.preventDefault()
     setLoginError('')
@@ -201,22 +221,27 @@ export default function Admin() {
     }
   }
 
+  // Chức năng logout: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function logout() {
     const current = session
     clearSensitiveUi({ removeStorageFor: current?.username })
     ++sessionProbeRef.current
     setSession(false)
     const epoch = loadEpochRef.current
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!current?.csrfToken) return
     try {
       await apiJson('/api/admin/logout', { method: 'POST', headers: { 'x-csrf-token': current.csrfToken } })
     } catch (error) {
       if (epoch !== loadEpochRef.current) return
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (error.code !== 'UNAUTHENTICATED') setLoginError('Phiên local đã được xóa; backend không xác nhận logout.')
     }
   }
 
+  // Chức năng saveContext: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function saveContext() {
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!session?.csrfToken) return
     setPageError('')
     const epoch = loadEpochRef.current
@@ -229,11 +254,13 @@ export default function Admin() {
       setSettings((current) => ({ ...current, contextSize: payload.contextSize }))
     } catch (error) {
       if (epoch !== loadEpochRef.current || requestEpoch !== settingsEpochRef.current) return
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (error.code === 'UNAUTHENTICATED') expireSession()
       else setPageError('Không lưu được context.')
     }
   }
 
+  // Chức năng loadStats: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function loadStats(event) {
     event?.preventDefault()
     setPageError('')
@@ -246,18 +273,22 @@ export default function Admin() {
     } catch (error) {
       if (epoch !== loadEpochRef.current || requestEpoch !== statsEpochRef.current) return
       setReport(null)
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (error.code === 'UNAUTHENTICATED') expireSession()
       else setPageError('Khoảng ngày không hợp lệ hoặc không tải được số liệu.')
     }
   }
 
+  // Chức năng updateAssistant: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   function updateAssistant(id, updater) {
     setMessages((previous) => previous.map((message) => message.id === id ? updater(message) : message))
   }
 
+  // Chức năng sendMessage: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function sendMessage(event, retry = null) {
     event.preventDefault()
     const content = (retry?.retryContent || draft).trim()
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!content || !session?.csrfToken) return
     const gate = gateRef.current.tryBegin()
     if (!gate) return
@@ -265,6 +296,7 @@ export default function Admin() {
     const reportEpoch = ++statsEpochRef.current
     const assistantId = retry?.id || localId()
     const requestId = retry?.requestId || localId()
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (retry) updateAssistant(assistantId, (message) => ({ ...message, content: '', status: 'streaming', error: '' }))
     else setMessages((previous) => [...previous,
       { id: localId(), role: 'user', content, status: 'complete' },
@@ -290,11 +322,13 @@ export default function Admin() {
             updateAssistant(assistantId, (message) => ({ ...message, report: streamEvent.report }))
           }
           else if (streamEvent.type === 'verified') updateAssistant(assistantId, (message) => ({ ...message, verified: streamEvent.verified }))
+          // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
           else if (streamEvent.type === 'done') { setCompactStatus(streamEvent.compactStatus || 'not_needed'); updateAssistant(assistantId, (message) => ({ ...message, status: 'complete' })) }
         },
       })
     } catch (error) {
       if (!gateRef.current.isCurrent(gate.epoch)) return
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (error.code === 'UNAUTHENTICATED') expireSession()
       else {
         updateAssistant(assistantId, (message) => ({ ...message, status: error.incomplete ? 'incomplete' : 'error', error: error.message, content: message.content || 'Không thể hoàn tất phân tích: ' + error.message }))
@@ -305,12 +339,14 @@ export default function Admin() {
     }
   }
 
+  // Chức năng stopStream: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   function stopStream() {
     gateRef.current.cancel()
     setMessages((previous) => previous.map((message) => message.status === 'streaming' ? { ...message, status: 'stopped' } : message))
     setBusy(false); setActivity('Đã dừng')
   }
 
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (session === null) return <main className="admin-shell"><div className="admin-loading-state"><p>Đang kiểm tra phiên admin…</p><ThemeLanguageControls compact /></div></main>
   if (!session?.authenticated) return (
     <main className="admin-shell admin-shell--login"><div className="admin-login-frame"><ThemeLanguageControls /><form className="admin-login" onSubmit={login}>

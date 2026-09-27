@@ -1,14 +1,24 @@
+/**
+ * @codex-vn-doc
+ * Tệp: server/test/context.test.js
+ * Mục đích: Tệp kiểm thử tự động cho các luồng chính và tình huống biên của module này.
+ * Thành phần chính: các hàm/lớp và xử lý nội bộ trong tệp.
+ * Liên kết trực tiếp: node:assert/strict, node:test, ../src/context.js, ../src/db.js.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { extractStructuredMemory, prepareConversationContext, collectProductHints } from '../src/context.js'
 import { StoreDb } from '../src/db.js'
 
+// Chức năng tempDb: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 async function tempDb() {
   const db = new StoreDb(':memory:')
   await db.ready
   return { db, cleanup: async () => { await db.close() } }
 }
 
+// Kiểm thử edge case: clarifying reply preserves pending request until backend confirms exact resolution.
 test('clarifying reply preserves pending request until backend confirms exact resolution', () => {
   const memory = extractStructuredMemory([
     { id: 1, role: 'user', content: 'Kiểm tra đơn ORDER-123 giúp tôi?', sources_json: '[]' },
@@ -21,12 +31,14 @@ test('clarifying reply preserves pending request until backend confirms exact re
   assert.equal(resolved.pendingRequests.length, 0)
 })
 
+// Kiểm thử edge case: recent product references precede old compact memory.
 test('recent product references precede old compact memory', () => {
   assert.deepEqual(collectProductHints([
     { id: 8, role: 'assistant', sources_json: JSON.stringify([{ kind: 'product', id: 'product:2' }]) },
   ], { entities: [{ kind: 'product', id: '1', messageId: 1 }] }), ['2', '1'])
 })
 
+// Kiểm thử edge case: structured extraction keeps facts after character 420 and provenance.
 test('structured extraction keeps facts after character 420 and provenance', () => {
   const longPrefix = 'x'.repeat(600)
   const memory = extractStructuredMemory([
@@ -38,6 +50,7 @@ test('structured extraction keeps facts after character 420 and provenance', () 
   assert.ok(memory.entities.some((item) => item.kind === 'product' && item.id === '1' && item.provenance === 'backend_source'))
 })
 
+// Kiểm thử edge case: prepareConversationContext preserves early structured facts across repeated extraction.
 test('prepareConversationContext preserves early structured facts across repeated extraction', async () => {
   const { db, cleanup } = await tempDb()
   try {
@@ -71,6 +84,7 @@ test('prepareConversationContext preserves early structured facts across repeate
   } finally { await cleanup() }
 })
 
+// Kiểm thử edge case: failed extraction keeps prior summary, memory and marker intact.
 test('failed extraction keeps prior summary, memory and marker intact', async () => {
   const { db, cleanup } = await tempDb()
   try {

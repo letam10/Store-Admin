@@ -1,3 +1,11 @@
+/**
+ * @codex-vn-doc
+ * Tệp: server/src/knowledge.js
+ * Mục đích: Xây knowledge đã xác minh và lọc output AI khỏi số liệu/chính sách bịa.
+ * Thành phần chính: searchProducts, renderVerifiedProducts, buildSupportKnowledge, isReportRequest, buildAdminKnowledge, screenSensitiveModelText, responseContract.
+ * Liên kết trực tiếp: ../../shared/products.js, ../../shared/storePolicies.js, ./dates.js.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 import { products, productDataMeta } from '../../shared/products.js'
 import { approvedPolicies, missingPolicyMessage } from '../../shared/storePolicies.js'
 import { normalizeVietnamese, resolveReportRange } from './dates.js'
@@ -9,10 +17,12 @@ const PRODUCT_TERMS = ['san pham', 'gia', 'mua', 'tai nghe', 'tui', 'dong ho', '
 const POLICY_TERMS = ['doi tra', 'hoan tien', 'bao hanh', 'giao hang', 'van chuyen', 'chinh sach', 'noi quy']
 const REPORT_TERMS = ['doanh thu', 'thong ke', 'bao cao', 'don hang', 'refund', 'hoan tien']
 
+// Chức năng includesAny: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function includesAny(normalized, terms) {
   return terms.some((term) => normalized.includes(term))
 }
 
+// Chức năng searchProducts: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function searchProducts(message, { limit = 4, fallbackIds = [] } = {}) {
   const normalized = normalizeVietnamese(message)
   const hasProductIntent = includesAny(normalized, PRODUCT_TERMS)
@@ -29,10 +39,12 @@ export function searchProducts(message, { limit = 4, fallbackIds = [] } = {}) {
     .sort((a, b) => b.score - a.score)
 
   const matched = ranked.filter((entry) => entry.score > 0).map((entry) => entry.product)
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (matched.length > 0) return matched.slice(0, limit)
 
   const followUp = /\b(cai do|no|mon do|bao nhieu|gia bao nhieu)\b/.test(normalized)
   if (followUp) {
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (fallbackIds.length > 1) return []
     const hinted = fallbackIds
       .map((id) => products.find((product) => String(product.id) === String(id)))
@@ -43,7 +55,9 @@ export function searchProducts(message, { limit = 4, fallbackIds = [] } = {}) {
   return hasProductIntent ? products.slice(0, limit) : []
 }
 
+// Chức năng renderVerifiedProducts: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function renderVerifiedProducts(matchedProducts) {
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (matchedProducts.length === 0) return null
   return {
     kind: 'products',
@@ -63,6 +77,7 @@ export function renderVerifiedProducts(matchedProducts) {
   }
 }
 
+// Chức năng buildSupportKnowledge: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function buildSupportKnowledge(message, { productHints = [] } = {}) {
   const normalized = normalizeVietnamese(message)
   const matchedProducts = searchProducts(message, { fallbackIds: productHints })
@@ -71,6 +86,7 @@ export function buildSupportKnowledge(message, { productHints = [] } = {}) {
   const sections = []
   const sources = []
 
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (matchedProducts.length > 0) {
     sections.push(
       'DỮ LIỆU SẢN PHẨM CÓ CẤU TRÚC:\n' +
@@ -91,6 +107,7 @@ export function buildSupportKnowledge(message, { productHints = [] } = {}) {
   }
 
   if (policyRequested) {
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (approvedPolicies.length === 0) {
       sections.push('CHÍNH SÁCH ĐÃ DUYỆT: chưa có.')
       sources.push({
@@ -104,11 +121,13 @@ export function buildSupportKnowledge(message, { productHints = [] } = {}) {
     }
   }
 
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (sections.length === 0) {
     sections.push('Không có dữ liệu Store liên quan được tra cứu cho câu hỏi này. Không suy đoán dữ liệu quan trọng.')
   }
 
   let deterministic = null
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (/\b(cai do|mon do|no)\b/.test(normalized) && productHints.length > 1 && matchedProducts.length === 0) {
     deterministic = { kind: 'clarify_product', text: 'Mình đang có nhiều sản phẩm trong hội thoại. Bạn cho biết tên hoặc mã sản phẩm muốn hỏi nhé.' }
   } else if (policyRequested && approvedPolicies.length === 0) {
@@ -128,12 +147,14 @@ export function buildSupportKnowledge(message, { productHints = [] } = {}) {
   }
 }
 
+// Chức năng isReportRequest: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function isReportRequest(message) {
   return includesAny(normalizeVietnamese(message), REPORT_TERMS)
 }
 
 export { resolveReportRange }
 
+// Chức năng buildAdminKnowledge: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function buildAdminKnowledge(message, report, { productHints = [] } = {}) {
   const support = buildSupportKnowledge(message, { productHints })
   const sections = [support.text]
@@ -164,10 +185,12 @@ export function buildAdminKnowledge(message, report, { productHints = [] } = {})
   return { ...support, text: sections.join('\n\n'), sources }
 }
 
+// Chức năng screenSensitiveModelText: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function screenSensitiveModelText(text, { scope }) {
   const choices = responseContract(scope).choices
   let decision
   try { decision = JSON.parse(text) } catch { /* rejected below */ }
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (!decision || Array.isArray(decision) || typeof decision.responseKey !== 'string' || Object.keys(decision).length !== 1 ||
       !Object.hasOwn(choices, decision.responseKey)) {
     return { accepted: false, text: 'Nội dung AI không đáp ứng hợp đồng dữ liệu nên đã bị ẩn. Vui lòng dùng dữ liệu Store được hiển thị riêng hoặc làm rõ yêu cầu.' }
@@ -177,6 +200,7 @@ export function screenSensitiveModelText(text, { scope }) {
 
 // Closed, server-rendered responses: never certify arbitrary prose with regex.
 // This MVP deliberately trades free-form language for verifiable business output.
+// Chức năng responseContract: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function responseContract(scope) {
   const choices = scope === 'report' ? {
     report_summary: 'Báo cáo backend hiển thị khoảng ngày, doanh thu gộp, hoàn tiền và doanh thu ròng. Chưa có báo cáo đối chiếu nên chưa kết luận tăng trưởng hoặc nguyên nhân biến động.',

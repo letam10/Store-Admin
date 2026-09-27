@@ -1,3 +1,11 @@
+/*
+ * @codex-vn-doc
+ * Tệp: server-dotnet/Program.cs
+ * Mục đích: Điểm khởi động ASP.NET Core C# và đăng ký DI, CORS, Swagger, controllers.
+ * Thành phần chính: các hàm/lớp và xử lý nội bộ trong tệp.
+ * Liên kết trực tiếp: Microsoft.OpenApi.Models, StoreApi.Data.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 using Microsoft.OpenApi.Models;
 using StoreApi.Data;
 

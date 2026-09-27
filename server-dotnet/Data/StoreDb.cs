@@ -1,9 +1,18 @@
+/*
+ * @codex-vn-doc
+ * Tệp: server-dotnet/Data/StoreDb.cs
+ * Mục đích: Lớp truy cập PostgreSQL bằng Npgsql cho API C#.
+ * Thành phần chính: StoreDb.
+ * Liên kết trực tiếp: System.Text.Json, Npgsql, StoreApi.Models, var db = Open(), var command = db.CreateCommand(), var db = Open(), var command = db.CreateCommand(), var reader = command.ExecuteReader().
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 using System.Text.Json;
 using Npgsql;
 using StoreApi.Models;
 
 namespace StoreApi.Data;
 
+// Vai trò kiểu StoreDb: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
 public sealed class StoreDb
 {
     private static readonly IReadOnlyList<CatalogProduct> BaseProducts =

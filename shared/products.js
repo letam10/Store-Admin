@@ -1,3 +1,11 @@
+/**
+ * @codex-vn-doc
+ * Tệp: shared/products.js
+ * Mục đích: Nguồn dữ liệu sản phẩm demo dùng chung giữa storefront và backend.
+ * Thành phần chính: products, productDataMeta.
+ * Liên kết trực tiếp: không có import/using trực tiếp được phát hiện.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 // Nguồn dữ liệu sản phẩm dùng chung cho frontend và backend.
 // Đây là dữ liệu demo; không chứa tồn kho hoặc dữ liệu nghiệp vụ thời gian thực.
 export const products = Object.freeze([

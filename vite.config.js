@@ -1,3 +1,11 @@
+/**
+ * @codex-vn-doc
+ * Tệp: vite.config.js
+ * Mục đích: Cấu hình Vite, proxy /api và cổng phát triển của frontend.
+ * Thành phần chính: các hàm/lớp và xử lý nội bộ trong tệp.
+ * Liên kết trực tiếp: @vitejs/plugin-react, vite.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 

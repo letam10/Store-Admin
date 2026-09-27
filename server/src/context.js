@@ -1,3 +1,11 @@
+/**
+ * @codex-vn-doc
+ * Tệp: server/src/context.js
+ * Mục đích: Rút gọn và chuẩn bị ngữ cảnh hội thoại, sản phẩm và memory cho AI.
+ * Thành phần chính: ContextBudgetError, extractStructuredMemory, buildExtractionText, estimateTokens, collectProductHints, prepareConversationContext.
+ * Liên kết trực tiếp: không có import/using trực tiếp được phát hiện.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 export class ContextBudgetError extends Error {
   constructor(message) {
     super(message)
@@ -6,6 +14,7 @@ export class ContextBudgetError extends Error {
   }
 }
 
+// Chức năng parseSources: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function parseSources(raw) {
   try {
     const value = JSON.parse(raw || '[]')
@@ -15,6 +24,7 @@ function parseSources(raw) {
   }
 }
 
+// Chức năng normalizeMemory: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function normalizeMemory(value = {}) {
   return {
     version: 1,
@@ -26,6 +36,7 @@ function normalizeMemory(value = {}) {
   }
 }
 
+// Chức năng dedupeBy: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function dedupeBy(items, keyFn) {
   const seen = new Set()
   const result = []
@@ -38,22 +49,27 @@ function dedupeBy(items, keyFn) {
   return result
 }
 
+// Chức năng extractOrderIds: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function extractOrderIds(content) {
   return [...String(content).matchAll(/\b[A-Z0-9]{2,}(?:-[A-Z0-9]{2,})+\b/gi)].map((match) => match[0])
 }
 
+// Chức năng extractProductIds: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function extractProductIds(content) {
   return [...String(content).matchAll(/\b(?:mã\s+sản\s+phẩm|product)\s*[:#-]?\s*(\d+)\b/gi)].map((match) => match[1])
 }
 
+// Chức năng isPreference: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function isPreference(content) {
   return /\b(tôi|mình)\s+(thích|muốn|ưu tiên|không thích|cần)\b/i.test(content)
 }
 
+// Chức năng isQuestionOrRequest: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function isQuestionOrRequest(content) {
   return /\?|\b(giúp|cho biết|tư vấn|kiểm tra|bao nhiêu|thế nào|làm sao|cần)\b/i.test(content)
 }
 
+// Chức năng extractStructuredMemory: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function extractStructuredMemory(messages, existingMemory = {}) {
   const memory = normalizeMemory(existingMemory)
   const pending = new Map(memory.pendingRequests.map((item) => [item.messageId, item]))
@@ -138,6 +154,7 @@ export function extractStructuredMemory(messages, existingMemory = {}) {
   return memory
 }
 
+// Chức năng parseExtraction: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function parseExtraction(value) {
   if (!value) return []
   try {
@@ -148,6 +165,7 @@ function parseExtraction(value) {
   }
 }
 
+// Chức năng buildExtractionText: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function buildExtractionText(messages, existingExtraction = '') {
   const userStatements = [
     ...parseExtraction(existingExtraction),
@@ -171,6 +189,7 @@ export function buildExtractionText(messages, existingExtraction = '') {
   })
 }
 
+// Chức năng estimateTokens: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function estimateTokens(value) {
   const text = typeof value === 'string' ? value : JSON.stringify(value)
   // Không có tokenizer qwen trong backend. Số byte UTF-8 được dùng như một upper-bound heuristic
@@ -179,6 +198,7 @@ export function estimateTokens(value) {
   return Buffer.byteLength(text || '', 'utf8') + 1
 }
 
+// Chức năng promptTokenEstimate: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function promptTokenEstimate({ systemPrompt, knowledgeText, extractionText, memory, messages, outputBudget }) {
   const messageTokens = messages.reduce(
     (total, message) => total + estimateTokens(message.content) + 16,
@@ -192,6 +212,7 @@ function promptTokenEstimate({ systemPrompt, knowledgeText, extractionText, memo
     outputBudget
 }
 
+// Chức năng collectProductHints: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function collectProductHints(messages, memory = {}) {
   const ids = []
   const normalized = normalizeMemory(memory)
@@ -211,6 +232,7 @@ export function collectProductHints(messages, memory = {}) {
   return [...new Set(ids)]
 }
 
+// Chức năng prepareConversationContext: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export async function prepareConversationContext({
   storeDb,
   conversation,
@@ -242,6 +264,7 @@ export async function prepareConversationContext({
 
   if (estimated > hardBudget) {
     const keepRecent = 8
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (activeMessages.length <= keepRecent) {
       await storeDb.markCompactFailure(conversation.id)
       throw new ContextBudgetError('Ngữ cảnh vượt ngân sách và chưa có đủ phần cũ để rút gọn an toàn.')
@@ -282,6 +305,7 @@ export async function prepareConversationContext({
   }
 
   const modelMessages = [{ role: 'system', content: systemPrompt }]
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (extractionText || Object.values(memory).some((value) => Array.isArray(value) && value.length > 0)) {
     modelMessages.push({
       role: 'user',

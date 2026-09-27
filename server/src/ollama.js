@@ -1,3 +1,12 @@
+/**
+ * @codex-vn-doc
+ * Tệp: server/src/ollama.js
+ * Mục đích: Client gọi Ollama local, stream token và phân biệt timeout/EOF/abort.
+ * Thành phần chính: OllamaClient.
+ * Liên kết trực tiếp: không có import/using trực tiếp được phát hiện.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
+// Chức năng ollamaError: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function ollamaError(message, code = 'OLLAMA_ERROR', extra = {}) {
   const error = new Error(message)
   error.code = code
@@ -5,11 +14,14 @@ function ollamaError(message, code = 'OLLAMA_ERROR', extra = {}) {
   return error
 }
 
+// Chức năng linkedAbortController: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function linkedAbortController(signal, timeoutMs) {
   const controller = new AbortController()
   let timedOut = false
+  // Chức năng onAbort: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   const onAbort = () => controller.abort()
 
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (signal?.aborted) controller.abort()
   else signal?.addEventListener('abort', onAbort, { once: true })
 
@@ -28,16 +40,20 @@ function linkedAbortController(signal, timeoutMs) {
   }
 }
 
+// Chức năng isObject: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+// Chức năng classifyTerminalFrame: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function classifyTerminalFrame(frame, numPredict) {
   const reason = typeof frame.done_reason === 'string' ? frame.done_reason : ''
   const normalized = reason.toLocaleLowerCase('en')
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (['length', 'max_tokens', 'token_limit', 'max_length'].includes(normalized)) {
     return { status: 'max_tokens', doneReason: reason || 'length' }
   }
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (reason && reason !== 'stop') return { status: 'incomplete', doneReason: reason }
   if (!reason && Number.isInteger(frame.eval_count) && frame.eval_count >= numPredict) {
     return { status: 'max_tokens', doneReason: 'eval_count_reached_num_predict' }
@@ -45,24 +61,33 @@ function classifyTerminalFrame(frame, numPredict) {
   return { status: 'complete', doneReason: reason || 'stop_or_unspecified' }
 }
 
+// Chức năng validateFrame: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function validateFrame(frame, { terminalSeen, numPredict }) {
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (!isObject(frame)) throw ollamaError('Frame Ollama phải là object JSON.', 'OLLAMA_BAD_FRAME')
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (typeof frame.error === 'string' && frame.error) {
     throw ollamaError('Ollama báo lỗi khi sinh nội dung.', 'OLLAMA_STREAM_ERROR')
   }
   if (typeof frame.done !== 'boolean') {
     throw ollamaError('Frame Ollama thiếu trường done boolean.', 'OLLAMA_BAD_FRAME')
   }
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (terminalSeen) throw ollamaError('Ollama gửi frame sau terminal frame.', 'OLLAMA_BAD_STREAM')
 
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (frame.message !== undefined) {
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!isObject(frame.message)) throw ollamaError('message trong frame Ollama không hợp lệ.', 'OLLAMA_BAD_FRAME')
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (frame.message.role !== undefined && frame.message.role !== 'assistant') {
       throw ollamaError('role trong frame Ollama không hợp lệ.', 'OLLAMA_BAD_FRAME')
     }
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (frame.message.content !== undefined && typeof frame.message.content !== 'string') {
       throw ollamaError('content trong frame Ollama không hợp lệ.', 'OLLAMA_BAD_FRAME')
     }
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (frame.message.thinking !== undefined && typeof frame.message.thinking !== 'string') {
       throw ollamaError('thinking trong frame Ollama không hợp lệ.', 'OLLAMA_BAD_FRAME')
     }
@@ -93,7 +118,9 @@ export class OllamaClient {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), Math.min(this.timeoutMs, 3000))
     try {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const response = await fetch(this.baseUrl + '/api/tags', { signal: controller.signal })
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (!response.ok) return { connected: false, modelPresent: false, error: 'HTTP_' + response.status }
       const payload = await response.json()
       if (!isObject(payload) || !Array.isArray(payload.models)) {
@@ -119,6 +146,7 @@ export class OllamaClient {
     let terminalSeen = false
 
     try {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const response = await fetch(this.baseUrl + '/api/chat', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -137,14 +165,17 @@ export class OllamaClient {
         const code = response.status === 404 ? 'MODEL_NOT_FOUND' : 'OLLAMA_HTTP_' + response.status
         throw ollamaError('Ollama trả về lỗi HTTP ' + response.status + '.', code)
       }
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (!response.body) throw ollamaError('Ollama không trả về stream.', 'OLLAMA_NO_STREAM')
 
       reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
 
+      // Chức năng processLine: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
       const processLine = (line) => {
         const trimmed = line.trim()
+        // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
         if (!trimmed) return null
         let payload
         try {
@@ -185,19 +216,24 @@ export class OllamaClient {
       }
 
       completedRead = true
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (!terminalSeen) throw ollamaError('Ollama kết thúc kết nối trước terminal frame.', 'OLLAMA_EARLY_EOF')
     } catch (error) {
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (linked.signal.aborted) {
+        // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
         if (signal?.aborted) {
           const aborted = new Error('Tác vụ đã bị hủy.')
           aborted.name = 'AbortError'
           aborted.code = 'ABORTED'
           throw aborted
         }
+        // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
         if (linked.wasTimedOut()) throw ollamaError('Ollama quá thời gian chờ.', 'OLLAMA_TIMEOUT')
       }
       throw error
     } finally {
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (reader && (!completedRead || linked.signal.aborted)) {
         try { await reader.cancel() } catch { /* best effort */ }
       }

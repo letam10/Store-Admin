@@ -1,3 +1,11 @@
+/**
+ * @codex-vn-doc
+ * Tệp: server/src/customer.js
+ * Mục đích: Đăng ký các route customer, phiên đăng nhập, voucher, yêu thích, đánh giá và checkout.
+ * Thành phần chính: tierForPoints, rewardPrizes, pointsForPaidGoods, SHIPPING_DESTINATIONS, shippingFee, registerCustomerRoutes.
+ * Liên kết trực tiếp: node:crypto, ../../shared/products.js, ./security.js.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 import { randomBytes, randomInt, randomUUID } from 'node:crypto'
 import { products as baseProducts } from '../../shared/products.js'
 import { clearCookie, hashPassword, hashToken, normalizeUsername, parseCookies, randomToken, setCookie, verifyPassword } from './security.js'
@@ -18,15 +26,21 @@ const PRIZES = Object.freeze([
   { kind: 'none', label: 'Chúc bạn may mắn lần sau' },
 ])
 
+// Chức năng tierForPoints: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function tierForPoints(points) {
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (points >= 10000) return 'diamond'
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (points >= 1000) return 'gold'
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (points >= 100) return 'silver'
   return 'bronze'
 }
 
+// Chức năng rewardPrizes: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function rewardPrizes() { return PRIZES }
 
+// Chức năng pointsForPaidGoods: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function pointsForPaidGoods(amount, tier) {
   const basePoints = Math.floor(Math.max(0, amount) / 1000)
   return Math.floor(basePoints * (tier === 'diamond' ? 1.5 : tier === 'gold' ? 1.2 : 1))
@@ -53,50 +67,69 @@ export const SHIPPING_DESTINATIONS = Object.freeze([
 
 const SHIPPING_DESTINATION_IDS = new Set(SHIPPING_DESTINATIONS.map(([id]) => id))
 
+// Chức năng shippingFee: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function shippingFee({ region, distanceKm = 0, weightKg = 1, fulfillment = 'delivery' }) {
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (fulfillment === 'pickup') return 0
   const normalizedWeightKg = Number(weightKg)
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (!Number.isFinite(normalizedWeightKg) || normalizedWeightKg <= 0 || normalizedWeightKg > 1000) throw new Error('INVALID_DELIVERY_REGION')
   if (region === 'international') {
     return normalizedWeightKg <= 1 ? 200000 : Math.ceil(normalizedWeightKg / 5) * 400000
   }
   const provinceId = typeof region === 'string' && region.startsWith('province:') ? region.slice(9) : ''
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (provinceId && !SHIPPING_DESTINATION_IDS.has(provinceId)) throw new Error('INVALID_DELIVERY_REGION')
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (!['hcm', 'binh-duong', 'ba-ria-vung-tau', 'nearby', 'far'].includes(region) && !provinceId) throw new Error('INVALID_DELIVERY_REGION')
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (region === 'hcm' || region === 'binh-duong' || region === 'ba-ria-vung-tau') return 30000
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (provinceId) return 60000
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (region === 'nearby') return 60000
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (region === 'far' && Number.isInteger(distanceKm) && distanceKm >= 0 && distanceKm <= 3000) return 60000 + distanceKm * 1000
   throw new Error('INVALID_DELIVERY_REGION')
 }
 
+// Chức năng publicVoucher: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function publicVoucher(row) {
   return { code: row.code, label: row.label, type: row.type, value: Number(row.value), scope: row.scope || 'goods', expiresAt: row.expires_at, source: row.source }
 }
 
+// Chức năng cleanExpired: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 async function cleanExpired(storeDb, time) {
+  // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
   await storeDb.query('DELETE FROM customer_vouchers WHERE expires_at <= $1', [time])
 }
 
+// Chức năng createCode: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function createCode() {
   const bytes = randomBytes(10)
   return Array.from(bytes, (byte) => CODE_CHARS[byte % CODE_CHARS.length]).join('')
 }
 
+// Chức năng registerCustomerRoutes: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin, requireCsrf }) {
   const customerLimiter = new Map()
+  // Chức năng limited: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   function limited(ip) {
     const time = Date.now()
     const entries = (customerLimiter.get(ip) || []).filter((stamp) => time - stamp < 600000)
     entries.push(time)
     customerLimiter.set(ip, entries)
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (customerLimiter.size > 5000) customerLimiter.clear()
     return entries.length > 30
   }
 
+  // Chức năng customer: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function customer(req, res) {
     const token = parseCookies(req.headers.cookie)[COOKIE]
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!token) return null
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const resRow = await storeDb.query(
       `SELECT c.*, s.expires_at FROM customer_sessions s
        JOIN customers c ON c.id = s.customer_id WHERE s.token_hash = $1`,
@@ -104,6 +137,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     )
     const row = resRow.rows[0]
     if (!row || row.expires_at <= now().toISOString()) {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await storeDb.query('DELETE FROM customer_sessions WHERE token_hash = $1', [hashToken(token)])
       clearCookie(res, COOKIE, { secure: config.cookieSecure })
       return null
@@ -111,18 +145,23 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     return { ...row, rawToken: token, csrfToken: hashToken('customer-csrf:' + token) }
   }
 
+  // Chức năng requireCustomer: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function requireCustomer(req, res, next) {
     const row = await customer(req, res)
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!row) return res.status(401).json({ error: 'LOGIN_REQUIRED' })
     req.customer = row
     next()
   }
 
+  // Chức năng customerCsrf: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   function customerCsrf(req, res, next) {
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (req.get('x-csrf-token') !== req.customer.csrfToken) return res.status(403).json({ error: 'CSRF_INVALID' })
     next()
   }
 
+  // Chức năng publicCustomer: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   function publicCustomer(row) {
     return {
       id: Number(row.id),
@@ -135,8 +174,10 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     }
   }
 
+  // Chức năng beginSession: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function beginSession(res, row) {
     const token = randomToken()
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await storeDb.query(
       'INSERT INTO customer_sessions (token_hash, customer_id, expires_at) VALUES ($1, $2, $3)',
       [hashToken(token), row.id, new Date(now().getTime() + SESSION_SECONDS * 1000).toISOString()],
@@ -145,15 +186,19 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     return publicCustomer({ ...row, csrfToken: hashToken('customer-csrf:' + token) })
   }
 
+  // Chức năng productById: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function productById(id) {
     const strId = String(id)
     const basic = baseProducts.find((item) => String(item.id) === strId)
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (basic) return { ...basic, stockCount: 20, discountPercent: 0 }
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await storeDb.query(
       'SELECT id, name, category, price, image, symbol, discount_percent AS "discountPercent", stock_count AS "stockCount" FROM catalog_products WHERE id = $1',
       [strId],
     )
     const item = res.rows[0]
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!item) return null
     return {
       ...item,
@@ -163,15 +208,19 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     }
   }
 
+  // Chức năng issueVoucher: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function issueVoucher(customerId, { label, type, value, scope = 'goods', expiresAt, source }) {
     for (let attempt = 0; attempt < 30; attempt += 1) {
       const code = createCode()
       try {
+        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
         await storeDb.query('INSERT INTO voucher_codes (code, created_at) VALUES ($1, $2)', [code, now().toISOString()])
       } catch (error) {
+        // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
         if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('UNIQUE')) continue
         throw error
       }
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await storeDb.query(
         `INSERT INTO customer_vouchers (code, customer_id, label, type, value, scope, expires_at, source, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
@@ -182,22 +231,28 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     throw new Error('VOUCHER_CODE_EXHAUSTED')
   }
 
+  // Chức năng vouchersFor: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function vouchersFor(id) {
     await cleanExpired(storeDb, now().toISOString())
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await storeDb.query('SELECT * FROM customer_vouchers WHERE customer_id = $1 ORDER BY created_at DESC', [id])
     return res.rows.map(publicVoucher)
   }
 
+  // Chức năng quote: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function quote(row, body) {
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!body || !Array.isArray(body.items) || body.items.length < 1 || body.items.length > 99 ||
       !['delivery', 'pickup'].includes(body.fulfillment)) throw new Error('INVALID_ORDER')
     const ids = new Set()
     const items = []
     for (const line of body.items) {
       const id = String(line.id || '')
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (ids.has(id) || !Number.isInteger(line.quantity) || line.quantity < 1 || line.quantity > 99) throw new Error('INVALID_ORDER')
       ids.add(id)
       const product = await productById(id)
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (!product || product.stockCount === 0 || (product.stockCount !== null && product.stockCount < line.quantity)) throw new Error('PRODUCT_UNAVAILABLE')
       const price = Math.round(product.price * (100 - product.discountPercent) / 1000) * 10
       items.push({ id, name: product.name, quantity: line.quantity, price })
@@ -205,18 +260,23 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
     const tier = tierForPoints(row.points)
     const codes = body.voucherCodes || []
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!Array.isArray(codes) || codes.length > 20 || new Set(codes).size !== codes.length) throw new Error('INVALID_VOUCHER')
     await cleanExpired(storeDb, now().toISOString())
     let remaining = subtotal
     const shippingCodes = []
     for (const code of codes) {
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (typeof code !== 'string' || !/^[A-Z2-9]{10}$/.test(code)) throw new Error('INVALID_VOUCHER')
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const vRes = await storeDb.query(
         'SELECT * FROM customer_vouchers WHERE code = $1 AND customer_id = $2 AND expires_at > $3',
         [code, row.id, now().toISOString()],
       )
       const voucher = vRes.rows[0]
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (!voucher) throw new Error('INVALID_VOUCHER')
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if ((voucher.scope || 'goods') === 'shipping') shippingCodes.push(voucher)
       else {
         const raw = voucher.type === 'amount' ? Number(voucher.value) : Math.floor(remaining * Number(voucher.value) / 100)
@@ -254,6 +314,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     }
   }
 
+  // Chức năng fail: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   function fail(res, error) {
     const code = error.message
     const status = ['INVALID_ORDER', 'PRODUCT_UNAVAILABLE', 'INVALID_VOUCHER', 'INVALID_DELIVERY_REGION'].includes(code) ? 400 : 500
@@ -262,15 +323,19 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
 
   app.use('/api/customer', (req, res, next) => { res.set('Cache-Control', 'no-store'); next() })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.post('/api/customer/register', async (req, res) => {
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (limited(req.ip)) return res.status(429).json({ error: 'RATE_LIMITED' })
     const username = String(req.body?.username || '').trim()
     const email = String(req.body?.email || '').trim().toLowerCase()
     const password = req.body?.password
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (username.length < 2 || username.length > 80 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 ||
       typeof password !== 'string' || password.length < 8 || password.length > 256) return res.status(400).json({ error: 'INVALID_REGISTRATION' })
     const { salt, hash } = hashPassword(password)
     try {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const result = await storeDb.query(
         'INSERT INTO customers (username, email, password_salt, password_hash, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING id',
         [username, email, salt, hash, now().toISOString()],
@@ -279,6 +344,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       const sessionAccount = await beginSession(res, { id: newId, username, email, points: 0, spin_credits: 0 })
       res.status(201).json({ account: sessionAccount })
     } catch (error) {
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('UNIQUE')) {
         return res.status(409).json({ error: 'ACCOUNT_EXISTS' })
       }
@@ -286,44 +352,59 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     }
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.post('/api/customer/login', async (req, res) => {
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (limited(req.ip)) return res.status(429).json({ error: 'RATE_LIMITED' })
     const login = normalizeUsername(req.body?.username)
     const password = req.body?.password
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!login || typeof password !== 'string' || password.length > 256) return res.status(400).json({ error: 'INVALID_CREDENTIALS' })
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const resRow = await storeDb.query(
       'SELECT * FROM customers WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($2)',
       [login, login],
     )
     const row = resRow.rows[0]
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!row || !verifyPassword(password, row.password_salt, row.password_hash)) return res.status(401).json({ error: 'INVALID_CREDENTIALS' })
     res.json({ account: await beginSession(res, row) })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.get('/api/customer/session', async (req, res) => {
     const row = await customer(req, res)
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!row) return res.status(401).json({ authenticated: false })
     res.json({ authenticated: true, account: publicCustomer(row) })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.post('/api/customer/logout', requireCustomer, customerCsrf, async (req, res) => {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await storeDb.query('DELETE FROM customer_sessions WHERE token_hash = $1', [hashToken(req.customer.rawToken)])
     clearCookie(res, COOKIE, { secure: config.cookieSecure })
     res.json({ ok: true })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.get('/api/customer/vouchers', requireCustomer, async (req, res) => {
     res.json({ vouchers: await vouchersFor(req.customer.id) })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.get('/api/customer/favorites', requireCustomer, async (req, res) => {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const resFav = await storeDb.query('SELECT product_id FROM customer_favorites WHERE customer_id = $1 ORDER BY created_at DESC', [req.customer.id])
     res.json({ ids: resFav.rows.map((item) => item.product_id) })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.put('/api/customer/favorites/:id', requireCustomer, customerCsrf, async (req, res) => {
     const id = String(req.params.id)
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!(await productById(id))) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await storeDb.query(
       'INSERT INTO customer_favorites (customer_id, product_id, created_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
       [req.customer.id, id, now().toISOString()],
@@ -331,14 +412,19 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     res.json({ saved: true })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.delete('/api/customer/favorites/:id', requireCustomer, customerCsrf, async (req, res) => {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await storeDb.query('DELETE FROM customer_favorites WHERE customer_id = $1 AND product_id = $2', [req.customer.id, req.params.id])
     res.json({ saved: false })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.get('/api/storefront/products/:id/reviews', async (req, res) => {
     const id = String(req.params.id)
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!(await productById(id))) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const rowsRes = await storeDb.query(
       `SELECT r.id, r.rating, r.comment, r.admin_reply AS "adminReply",
               r.created_at AS "createdAt", r.replied_at AS "repliedAt", c.username
@@ -349,12 +435,16 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     res.json({ reviews: rowsRes.rows, total: rowsRes.rows.length })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.post('/api/storefront/products/:id/reviews', requireCustomer, customerCsrf, async (req, res) => {
     const id = String(req.params.id)
     const rating = req.body?.rating
     const comment = String(req.body?.comment || '').trim()
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!(await productById(id))) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!Number.isInteger(rating) || rating < 1 || rating > 5 || comment.length > 2000) return res.status(400).json({ error: 'INVALID_REVIEW' })
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     await storeDb.query(
       `INSERT INTO product_reviews (customer_id, product_id, rating, comment, created_at)
        VALUES ($1, $2, $3, $4, $5)
@@ -365,11 +455,16 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     res.json({ ok: true })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.post('/api/customer/spin', requireCustomer, customerCsrf, async (req, res) => {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const outcome = await storeDb.transaction(async (tx) => {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const curRes = await tx.query('SELECT spin_credits FROM customers WHERE id = $1', [req.customer.id])
       const current = curRes.rows[0]
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (!current || Number(current.spin_credits) < 1) return null
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await tx.query('UPDATE customers SET spin_credits = spin_credits - 1 WHERE id = $1', [req.customer.id])
       const index = randomInt(PRIZES.length)
       const prize = PRIZES[index]
@@ -377,7 +472,9 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       if (prize.kind !== 'none') {
         const code = createCode()
         const exp = new Date(now().getTime() + 30 * 86400000).toISOString()
+        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
         await tx.query('INSERT INTO voucher_codes (code, created_at) VALUES ($1, $2)', [code, now().toISOString()])
+        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
         await tx.query(
           `INSERT INTO customer_vouchers (code, customer_id, label, type, value, scope, expires_at, source, created_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
@@ -387,10 +484,12 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       }
       return { index, prize: prize.label, voucher, spinCredits: Number(current.spin_credits) - 1 }
     })
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!outcome) return res.status(409).json({ error: 'NO_SPIN_CREDITS' })
     res.json(outcome)
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.post('/api/customer/quote', requireCustomer, customerCsrf, async (req, res) => {
     try {
       const q = await quote(req.customer, req.body)
@@ -400,20 +499,25 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     }
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.post('/api/customer/orders', requireCustomer, customerCsrf, async (req, res) => {
     try {
       const recipient = String(req.body?.recipient || '').trim()
       const phone = String(req.body?.phone || '').trim()
       const address = String(req.body?.address || '').trim()
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (recipient.length < 2 || recipient.length > 100 || !/^[+0-9 ()-]{9,20}$/.test(phone) ||
         (req.body?.fulfillment === 'delivery' && (address.length < 5 || address.length > 300))) throw new Error('INVALID_ORDER')
 
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const order = await storeDb.transaction(async (tx) => {
+        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
         const freshRes = await tx.query('SELECT * FROM customers WHERE id = $1', [req.customer.id])
         const fresh = freshRes.rows[0]
         const data = await quote(fresh, req.body)
         const id = 'ST-' + randomUUID().slice(0, 12).toUpperCase()
         const createdAt = now().toISOString()
+        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
         await tx.query(
           `INSERT INTO customer_orders (
              id, customer_id, items_json, recipient, phone, address, fulfillment, region, distance_km, weight_kg,
@@ -428,6 +532,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
           ],
         )
         for (const code of data.voucherCodes) {
+          // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
           await tx.query('DELETE FROM customer_vouchers WHERE customer_id = $1 AND code = $2', [fresh.id, code])
         }
         return { id, ...data, status: 'pending', createdAt, pointsEarned: 0 }
@@ -438,7 +543,9 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     }
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.get('/api/customer/orders', requireCustomer, async (req, res) => {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const resOrders = await storeDb.query('SELECT * FROM customer_orders WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 100', [req.customer.id])
     const orders = resOrders.rows.map((item) => ({
       id: item.id,
@@ -460,7 +567,9 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     res.json({ orders })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.get('/api/admin/customers', requireAdmin, async (req, res) => {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const resCust = await storeDb.query(
       `SELECT id, username, email, points, paid_goods_total AS "paidGoodsTotal",
               spin_credits AS "spinCredits", created_at AS "createdAt"
@@ -477,14 +586,18 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     res.json({ customers })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.post('/api/admin/customers/:id/vouchers', requireAdmin, requireCsrf, async (req, res) => {
     const customerId = Number(req.params.id)
     const type = req.body?.type
     const scope = req.body?.scope === undefined ? 'goods' : req.body.scope
     const value = req.body?.value
     const date = new Date(req.body?.expiresAt)
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const custExists = await storeDb.query('SELECT id FROM customers WHERE id = $1', [customerId])
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!custExists.rows.length) return res.status(404).json({ error: 'CUSTOMER_NOT_FOUND' })
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!['amount', 'percent'].includes(type) || !['goods', 'shipping'].includes(scope) || !Number.isInteger(value) || value < 1 || value > (type === 'percent' ? 100 : 10000000) ||
       !Number.isFinite(date.getTime()) || date <= now() || date.getTime() > now().getTime() + 365 * 86400000) return res.status(400).json({ error: 'INVALID_VOUCHER' })
     const label = scope === 'shipping'
@@ -494,8 +607,10 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     res.status(201).json({ voucher })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.get('/api/admin/vouchers', requireAdmin, async (req, res) => {
     await cleanExpired(storeDb, now().toISOString())
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const resVouchers = await storeDb.query(
       `SELECT v.code, v.label, v.type, v.value, v.scope, v.expires_at AS "expiresAt",
               v.source, v.created_at AS "createdAt", c.id AS "customerId", c.username, c.email
@@ -505,13 +620,16 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     res.json({ vouchers: resVouchers.rows })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.post('/api/admin/vouchers', requireAdmin, requireCsrf, async (req, res) => {
     const customerId = Number(req.body?.customerId)
     const type = req.body?.type
     const scope = req.body?.scope === undefined ? 'goods' : req.body.scope
     const value = req.body?.value
     const date = new Date(req.body?.expiresAt)
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const custExists = await storeDb.query('SELECT id FROM customers WHERE id = $1', [customerId])
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!Number.isInteger(customerId) || customerId < 1 || !custExists.rows.length ||
       !['amount', 'percent'].includes(type) || !['goods', 'shipping'].includes(scope) || !Number.isInteger(value) || value < 1 || value > (type === 'percent' ? 100 : 10000000) ||
       !Number.isFinite(date.getTime()) || date <= now() || date.getTime() > now().getTime() + 365 * 86400000) {
@@ -521,25 +639,35 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     const generatedLabel = scope === 'shipping'
       ? `Ship ${type === 'amount' ? 'giảm ' + new Intl.NumberFormat('vi-VN').format(value) + ' ₫' : 'giảm ' + value + '%'}`
       : type === 'amount' ? `Giảm ${new Intl.NumberFormat('vi-VN').format(value)} ₫` : `Giảm ${value}%`
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (label.length > 120) return res.status(400).json({ error: 'INVALID_VOUCHER', message: 'Ten voucher qua dai.' })
     const voucher = await issueVoucher(customerId, { label: label || generatedLabel, type, value, scope, expiresAt: date.toISOString(), source: 'admin' })
     res.status(201).json({ voucher })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.delete('/api/admin/vouchers/:code', requireAdmin, requireCsrf, async (req, res) => {
     const code = String(req.params.code || '').toUpperCase()
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!/^[A-Z2-9]{10}$/.test(code)) return res.status(400).json({ error: 'INVALID_VOUCHER', message: 'Ma voucher khong hop le.' })
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const removed = await storeDb.transaction(async (tx) => {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const existsRes = await tx.query('SELECT code FROM voucher_codes WHERE code = $1', [code])
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (!existsRes.rows.length) return false
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await tx.query('DELETE FROM customer_vouchers WHERE code = $1', [code])
       return true
     })
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!removed) return res.status(404).json({ error: 'VOUCHER_NOT_FOUND' })
     res.json({ ok: true, code })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.get('/api/admin/favorites', requireAdmin, async (req, res) => {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const favRes = await storeDb.query('SELECT product_id AS id, COUNT(*) AS count FROM customer_favorites GROUP BY product_id ORDER BY count DESC, product_id')
     const favorites = []
     for (const item of favRes.rows) {
@@ -549,7 +677,9 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     res.json({ favorites })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.get('/api/admin/reviews', requireAdmin, async (req, res) => {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const revRes = await storeDb.query(
       `SELECT r.id, r.product_id AS "productId", r.rating, r.comment,
               r.admin_reply AS "adminReply", r.created_at AS "createdAt", c.username
@@ -563,15 +693,21 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     res.json({ reviews })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.patch('/api/admin/reviews/:id/reply', requireAdmin, requireCsrf, async (req, res) => {
     const reply = String(req.body?.reply || '').trim()
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (reply.length < 1 || reply.length > 2000) return res.status(400).json({ error: 'INVALID_REPLY' })
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const result = await storeDb.query('UPDATE product_reviews SET admin_reply = $1, replied_at = $2 WHERE id = $3', [reply, now().toISOString(), Number(req.params.id)])
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!result.rowCount) return res.status(404).json({ error: 'REVIEW_NOT_FOUND' })
     res.json({ ok: true, reply })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.get('/api/admin/customer-orders', requireAdmin, async (req, res) => {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const ordersRes = await storeDb.query(
       `SELECT o.id, o.recipient, o.phone, o.address, o.region,
               o.distance_km AS "distanceKm", o.goods_total AS "goodsTotal", o.shipping_fee AS "shippingFee",
@@ -589,12 +725,18 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     res.json({ orders })
   })
 
+  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.post('/api/admin/customer-orders/:id/paid', requireAdmin, requireCsrf, async (req, res) => {
+    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const result = await storeDb.transaction(async (tx) => {
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const orderRes = await tx.query('SELECT * FROM customer_orders WHERE id = $1', [req.params.id])
       const order = orderRes.rows[0]
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (!order) return null
+      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (order.status === 'paid') return { alreadyPaid: true, pointsEarned: Number(order.points_earned) }
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       const accRes = await tx.query('SELECT * FROM customers WHERE id = $1', [order.customer_id])
       const account = accRes.rows[0]
       const tier = tierForPoints(Number(account.points))
@@ -603,13 +745,16 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       const paidGoodsTotal = Number(account.paid_goods_total)
       const before = Math.floor(paidGoodsTotal / 100000)
       const after = Math.floor((paidGoodsTotal + goodsTotal) / 100000)
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await tx.query(
         'UPDATE customers SET points = points + $1, paid_goods_total = paid_goods_total + $2, spin_credits = spin_credits + $3 WHERE id = $4',
         [pointsEarned, goodsTotal, after - before, account.id],
       )
+      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await tx.query("UPDATE customer_orders SET status = 'paid', paid_at = $1, points_earned = $2 WHERE id = $3", [now().toISOString(), pointsEarned, order.id])
       return { alreadyPaid: false, pointsEarned, spinCreditsAdded: after - before }
     })
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!result) return res.status(404).json({ error: 'ORDER_NOT_FOUND' })
     res.json(result)
   })

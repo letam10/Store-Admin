@@ -1,14 +1,24 @@
+/**
+ * @codex-vn-doc
+ * Tệp: server/test/knowledge-db.test.js
+ * Mục đích: Tệp kiểm thử tự động cho các luồng chính và tình huống biên của module này.
+ * Thành phần chính: các hàm/lớp và xử lý nội bộ trong tệp.
+ * Liên kết trực tiếp: node:assert/strict, node:test, ../src/db.js, ../src/knowledge.js.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { StoreDb } from '../src/db.js'
 import { buildSupportKnowledge } from '../src/knowledge.js'
 
+// Kiểm thử edge case: follow-up product lookup uses prior entity hint and normalized đ/stop words.
 test('follow-up product lookup uses prior entity hint and normalized đ/stop words', () => {
   const result = buildSupportKnowledge('Cái đó giá bao nhiêu?', { productHints: ['3'] })
   assert.equal(result.matchedProducts.length, 1)
   assert.equal(result.matchedProducts[0].name, 'Đồng hồ Minimal')
 })
 
+// Kiểm thử edge case: fresh database does not seed demo orders unless explicitly enabled and dataMode is exact.
 test('fresh database does not seed demo orders unless explicitly enabled and dataMode is exact', async () => {
   const db = new StoreDb(':memory:')
   await db.ready
@@ -25,6 +35,7 @@ test('fresh database does not seed demo orders unless explicitly enabled and dat
   await demo.close()
 })
 
+// Kiểm thử edge case: opening another database connection cannot recover live backend turns.
 test('opening another database connection cannot recover live backend turns', async () => {
   const first = new StoreDb(':memory:')
   await first.ready

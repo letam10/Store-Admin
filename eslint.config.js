@@ -1,3 +1,11 @@
+/**
+ * @codex-vn-doc
+ * Tệp: eslint.config.js
+ * Mục đích: Cấu hình ESLint áp dụng cho mã nguồn frontend.
+ * Thành phần chính: các hàm/lớp và xử lý nội bộ trong tệp.
+ * Liên kết trực tiếp: @eslint/js, globals, eslint-plugin-react-hooks, eslint-plugin-react-refresh, eslint/config.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'

@@ -1,3 +1,11 @@
+/**
+ * @codex-vn-doc
+ * Tệp: server/test/app.test.js
+ * Mục đích: Tệp kiểm thử tự động cho các luồng chính và tình huống biên của module này.
+ * Thành phần chính: các hàm/lớp và xử lý nội bộ trong tệp.
+ * Liên kết trực tiếp: node:assert/strict, node:test, ../src/app.js, ../src/db.js, ../src/queue.js, ../src/security.js.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createApp } from '../src/app.js'
@@ -5,6 +13,7 @@ import { StoreDb } from '../src/db.js'
 import { GenerationQueue } from '../src/queue.js'
 import { hashPassword, hashToken } from '../src/security.js'
 
+// Vai trò lớp MockOllama: gom các trạng thái/hành vi liên quan trong cùng một đối tượng.
 class MockOllama {
   constructor(responses = []) {
     this.calls = []
@@ -15,34 +24,42 @@ class MockOllama {
     this.calls.push(options)
     const response = this.responses.length ? this.responses.shift() : { text: options.think ? 'Nhận xét định tính.' : 'Xin chào.' }
     if (response.wait) await response.wait
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (response.error) throw response.error
     if (response.text) yield { type: 'delta', content: response.text }
     yield { type: 'terminal', status: response.status || 'complete', doneReason: response.doneReason || 'stop' }
   }
 }
 
+// Chức năng cookiePair: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function cookiePair(response) {
   return response.headers.get('set-cookie')?.split(';')[0] || ''
 }
 
+// Chức năng ownerFromSupportCookie: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function ownerFromSupportCookie(cookie) {
   const raw = decodeURIComponent(cookie.split('=')[1])
   return 'support:1:' + hashToken(raw)
 }
 
 let currentSupportAuth = null
+// Chức năng fetchSupport: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function fetchSupport(url, options = {}) {
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (!currentSupportAuth) throw new Error('Support test account is missing')
   const headers = { ...(options.headers || {}) }
   headers.cookie = [currentSupportAuth.cookie, headers.cookie].filter(Boolean).join('; ')
+  // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (options.method === 'POST') headers['x-csrf-token'] = currentSupportAuth.csrfToken
   return fetch(url, { ...options, headers })
 }
 
+// Chức năng parseEvents: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function parseEvents(text) {
   return text.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line))
 }
 
+// Chức năng withServer: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 async function withServer(run, { ollama = new MockOllama(), queue, seedDemoData = true } = {}) {
   const storeDb = new StoreDb(':memory:', { seedDemoData })
   await storeDb.ready
@@ -66,6 +83,7 @@ async function withServer(run, { ollama = new MockOllama(), queue, seedDemoData 
   }
 }
 
+// Chức năng createAdminSession: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 async function createAdminSession(baseUrl, storeDb, username = 'owner') {
   const credentials = hashPassword('correct-horse-battery-staple')
   await storeDb.createAdmin({ username, passwordSalt: credentials.salt, passwordHash: credentials.hash })
@@ -77,6 +95,7 @@ async function createAdminSession(baseUrl, storeDb, username = 'owner') {
   return { cookie: cookiePair(login), body }
 }
 
+// Kiểm thử edge case: support forces think=false and client cannot choose privileged fields.
 test('support forces think=false and client cannot choose privileged fields', async () => {
   await withServer(async ({ baseUrl, ollama }) => {
     const invalid = await fetchSupport(baseUrl + '/api/support/chat', {
@@ -94,6 +113,7 @@ test('support forces think=false and client cannot choose privileged fields', as
   })
 })
 
+// Kiểm thử edge case: missing policy is backend deterministic and malicious model is never called.
 test('missing policy is backend deterministic and malicious model is never called', async () => {
   const ollama = new MockOllama([{ text: 'Đổi miễn phí và hoàn tiền 100%.' }])
   await withServer(async ({ baseUrl }) => {
@@ -107,6 +127,7 @@ test('missing policy is backend deterministic and malicious model is never calle
   }, { ollama })
 })
 
+// Kiểm thử edge case: wrong product price from model is blocked while backend price stays verified.
 test('wrong product price from model is blocked while backend price stays verified', async () => {
   const ollama = new MockOllama([{ text: 'Tai nghe này chỉ 1 đồng, rất đáng mua.' }])
   await withServer(async ({ baseUrl }) => {
@@ -123,6 +144,7 @@ test('wrong product price from model is blocked while backend price stays verifi
   }, { ollama })
 })
 
+// Kiểm thử edge case: admin report malicious numbers/time are blocked and report is tied to resolved range.
 test('admin report malicious numbers/time are blocked and report is tied to resolved range', async () => {
   const ollama = new MockOllama([{ text: 'Doanh thu tháng trước là 999999 VND.' }])
   await withServer(async ({ baseUrl, storeDb }) => {
@@ -142,6 +164,7 @@ test('admin report malicious numbers/time are blocked and report is tied to reso
   }, { ollama })
 })
 
+// Kiểm thử edge case: ambiguous report asks for range instead of silently choosing one.
 test('ambiguous report asks for range instead of silently choosing one', async () => {
   const ollama = new MockOllama([{ text: 'should not run' }])
   await withServer(async ({ baseUrl, storeDb }) => {
@@ -156,6 +179,7 @@ test('ambiguous report asks for range instead of silently choosing one', async (
   }, { ollama })
 })
 
+// Kiểm thử edge case: same requestId replays completed turn without duplicate generation or user message.
 test('same requestId replays completed turn without duplicate generation or user message', async () => {
   const ollama = new MockOllama([{ text: 'Một câu trả lời.' }])
   await withServer(async ({ baseUrl, storeDb }) => {
@@ -178,6 +202,7 @@ test('same requestId replays completed turn without duplicate generation or user
   }, { ollama })
 })
 
+// Kiểm thử edge case: same conversation rejects concurrent second turn.
 test('same conversation rejects concurrent second turn', async () => {
   let releaseModel
   const wait = new Promise((resolve) => { releaseModel = resolve })
@@ -212,6 +237,7 @@ test('same conversation rejects concurrent second turn', async () => {
   }, { ollama })
 })
 
+// Kiểm thử edge case: queue full and abort while queued do not create turns, next request can proceed.
 test('queue full and abort while queued do not create turns, next request can proceed', async () => {
   let releaseModel
   const wait = new Promise((resolve) => { releaseModel = resolve })
@@ -256,12 +282,12 @@ test('queue full and abort while queued do not create turns, next request can pr
   }, { ollama, queue })
 })
 
+// Kiểm thử edge case: admin CSRF, expiration, no-store and whitespace-normalized login limits.
 test('admin CSRF, expiration, no-store and whitespace-normalized login limits', async () => {
   await withServer(async ({ baseUrl, storeDb }) => {
     const { cookie, body } = await createAdminSession(baseUrl, storeDb)
     const settings = await fetch(baseUrl + '/api/admin/settings', { headers: { cookie } })
     assert.match(settings.headers.get('cache-control'), /no-store/)
-
     const noCsrf = await fetch(baseUrl + '/api/admin/logout', { method: 'POST', headers: { cookie } })
     assert.equal(noCsrf.status, 403)
     const badCsrf = await fetch(baseUrl + '/api/admin/logout', { method: 'POST', headers: { cookie, 'x-csrf-token': 'bad' } })
@@ -287,6 +313,7 @@ test('admin CSRF, expiration, no-store and whitespace-normalized login limits', 
   })
 })
 
+// Kiểm thử edge case: model prose and extra JSON fields cannot publish invented business claims.
 test('model prose and extra JSON fields cannot publish invented business claims', async () => {
   const malicious = [
     'Doanh thu đạt một tỷ đồng, tăng gấp đôi so với quý trước.',
@@ -307,6 +334,7 @@ test('model prose and extra JSON fields cannot publish invented business claims'
   }
 })
 
+// Kiểm thử edge case: verified product metadata survives history reload without duplicate assistant.
 test('verified product metadata survives history reload without duplicate assistant', async () => {
   await withServer(async ({ baseUrl, ollama }) => {
     const response = await fetchSupport(baseUrl + '/api/support/chat', {
@@ -325,6 +353,7 @@ test('verified product metadata survives history reload without duplicate assist
   }, { ollama: new MockOllama([{ text: '{"responseKey":"product_summary"}' }]) })
 })
 
+// Kiểm thử edge case: failed database completion never publishes done or business content.
 test('failed database completion never publishes done or business content', async () => {
   await withServer(async ({ baseUrl, storeDb }) => {
     storeDb.completeTurn = async () => false
@@ -338,6 +367,7 @@ test('failed database completion never publishes done or business content', asyn
   })
 })
 
+// Kiểm thử edge case: admin report history survives reload and contract rejects word-only invented numbers.
 test('admin report history survives reload and contract rejects word-only invented numbers', async () => {
   await withServer(async ({ baseUrl, storeDb }) => {
     const { cookie, body } = await createAdminSession(baseUrl, storeDb)
@@ -355,6 +385,7 @@ test('admin report history survives reload and contract rejects word-only invent
   }, { ollama: new MockOllama([{ text: 'Doanh thu một tỷ đồng và tăng gấp đôi so với quý trước.' }]) })
 })
 
+// Kiểm thử edge case: failed turns restore retry metadata and cannot retry behind a newer question.
 test('failed turns restore retry metadata and cannot retry behind a newer question', async () => {
   const ollama = new MockOllama([{ error: new Error('offline') }, { text: '{"responseKey":"greeting"}' }])
   await withServer(async ({ baseUrl }) => {
@@ -384,6 +415,7 @@ test('failed turns restore retry metadata and cannot retry behind a newer questi
   }, { ollama })
 })
 
+// Kiểm thử edge case: admin offers feed public catalog and product views without exposing admin writes.
 test('admin offers feed public catalog and product views without exposing admin writes', async () => {
   await withServer(async ({ baseUrl, storeDb }) => {
     const id = 'demo-11111111-1111-1111-1111-111111111111'
@@ -411,6 +443,7 @@ test('admin offers feed public catalog and product views without exposing admin 
   })
 })
 
+// Kiểm thử edge case: admin top-view report is private and ranks viewed products.
 test('admin top-view report is private and ranks viewed products', async () => {
   await withServer(async ({ baseUrl, storeDb }) => {
     const unauthenticated = await fetch(baseUrl + '/api/admin/product-views')

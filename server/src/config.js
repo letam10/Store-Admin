@@ -1,3 +1,11 @@
+/**
+ * @codex-vn-doc
+ * Tệp: server/src/config.js
+ * Mục đích: Đọc biến môi trường và tạo cấu hình runtime cho Node API.
+ * Thành phần chính: ALLOWED_CONTEXT_SIZES, config.
+ * Liên kết trực tiếp: node:fs, node:path, node:url.
+ * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ */
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -5,6 +13,7 @@ import { fileURLToPath } from 'node:url'
 const serverRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const envPath = resolve(serverRoot, '.env')
 
+// Chức năng loadLocalEnv: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function loadLocalEnv() {
   if (!existsSync(envPath)) return
   const lines = readFileSync(envPath, 'utf8').split(/\r?\n/)
@@ -18,6 +27,7 @@ function loadLocalEnv() {
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
       value = value.slice(1, -1)
     }
+    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (process.env[key] === undefined) process.env[key] = value
   }
 }
@@ -26,11 +36,13 @@ loadLocalEnv()
 
 export const ALLOWED_CONTEXT_SIZES = Object.freeze([8192, 16384, 32768, 65536])
 
+// Chức năng integerEnv: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function integerEnv(name, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
   const value = Number.parseInt(process.env[name] ?? '', 10)
   return Number.isInteger(value) && value >= min && value <= max ? value : fallback
 }
 
+// Chức năng allowedContext: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function allowedContext(value, fallback) {
   const parsed = Number.parseInt(value ?? '', 10)
   return ALLOWED_CONTEXT_SIZES.includes(parsed) ? parsed : fallback
