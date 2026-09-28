@@ -566,7 +566,7 @@ export class StoreDb {
     if (details) return this.listCatalogProducts()
     // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query(
-      'SELECT p.id, p.discount_percent, p.stock_count, COALESCE(v.view_count, 0) AS view_count FROM catalog_products p LEFT JOIN product_views v ON v.product_id = p.id',
+      'SELECT p.id, p.discount_percent, p.stock_count, COALESCE(v.view_count, 0) AS view_count, COALESCE(f.favorite_count, 0) AS favorite_count FROM catalog_products p LEFT JOIN product_views v ON v.product_id = p.id LEFT JOIN (SELECT product_id, COUNT(*) AS favorite_count FROM customer_favorites GROUP BY product_id) f ON f.product_id = p.id',
     )
     // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const featuredRes = await this.query(
@@ -575,12 +575,12 @@ export class StoreDb {
     const result = new Map(
       res.rows.map((row) => [
         String(row.id),
-        { id: row.id, discountPercent: Number(row.discount_percent), stockCount: Number(row.stock_count), viewCount: Number(row.view_count || 0) },
+        { id: row.id, discountPercent: Number(row.discount_percent), stockCount: Number(row.stock_count), viewCount: Number(row.view_count || 0), favoriteCount: Number(row.favorite_count || 0) },
       ]),
     )
     for (const row of featuredRes.rows) {
       if (!result.has(String(row.id))) {
-        result.set(String(row.id), { id: row.id, discountPercent: 0, stockCount: 20, viewCount: Number(row.view_count || 0) })
+        result.set(String(row.id), { id: row.id, discountPercent: 0, stockCount: 20, viewCount: Number(row.view_count || 0), favoriteCount: 0 })
       }
     }
     return [...result.values()]

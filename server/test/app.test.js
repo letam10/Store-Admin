@@ -436,7 +436,7 @@ test('admin offers feed public catalog and product views without exposing admin 
     const viewed = await fetch(baseUrl + '/api/storefront/products/' + id + '/view', { method: 'POST' })
     assert.equal((await viewed.json()).viewCount, 1)
     const publicCatalog = await (await fetch(baseUrl + '/api/storefront/catalog')).json()
-    assert.deepEqual(publicCatalog.products.find((item) => item.id === id), { id, discountPercent: 20, stockCount: 0, viewCount: 1 })
+    assert.deepEqual(publicCatalog.products.find((item) => item.id === id), { id, discountPercent: 20, stockCount: 0, viewCount: 1, favoriteCount: 0 })
     assert.equal((await fetch(baseUrl + '/api/storefront/products/unknown/view', { method: 'POST' })).status, 404)
     const adminCatalog = await (await fetch(baseUrl + '/api/admin/products', { headers: { cookie } })).json()
     assert.equal(adminCatalog.products.find((item) => item.id === id).discountPercent, 20)
