@@ -815,6 +815,7 @@ export function createApp(overrides = {}) {
         sourceUrl: 'local://shared-demo', sourcePriceCents: product.price,
         sourceCurrency: 'VND', importedAt: null, discountPercent: 0, stockCount: 20,
         viewCount: await storeDb.getProductViewCount(String(product.id)),
+        favoriteCount: await storeDb.getProductFavoriteCount(String(product.id)),
       })
     }
     const products = [...new Map([...base, ...catalog].map((product) => [String(product.id), product])).values()]

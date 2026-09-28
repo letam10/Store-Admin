@@ -536,7 +536,7 @@ export class StoreDb {
   async listCatalogProducts() {
     // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query(
-      'SELECT p.*, COALESCE(v.view_count, 0) AS view_count FROM catalog_products p LEFT JOIN product_views v ON v.product_id = p.id ORDER BY p.category, p.name',
+      'SELECT p.*, COALESCE(v.view_count, 0) AS view_count, COALESCE(f.favorite_count, 0) AS favorite_count FROM catalog_products p LEFT JOIN product_views v ON v.product_id = p.id LEFT JOIN (SELECT product_id, COUNT(*) AS favorite_count FROM customer_favorites GROUP BY product_id) f ON f.product_id = p.id ORDER BY p.category, p.name',
     )
     return res.rows.map((row) => ({
       id: row.id,
@@ -558,6 +558,7 @@ export class StoreDb {
       discountPercent: Number(row.discount_percent),
       stockCount: Number(row.stock_count),
       viewCount: Number(row.view_count || 0),
+      favoriteCount: Number(row.favorite_count || 0),
     }))
   }
 
@@ -770,6 +771,12 @@ export class StoreDb {
     // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const res = await this.query('SELECT view_count FROM product_views WHERE product_id = $1', [String(id)])
     return Number(res.rows[0]?.view_count || 0)
+  }
+
+  async getProductFavoriteCount(id) {
+    // Lệnh tích hợp: đếm lượt yêu thích công khai để Store xếp hạng độ yêu thích.
+    const res = await this.query('SELECT COUNT(*) AS count FROM customer_favorites WHERE product_id = $1', [String(id)])
+    return Number(res.rows[0]?.count || 0)
   }
 
   async totalProductViews() {
