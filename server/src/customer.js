@@ -122,7 +122,7 @@ function createCode() {
 }
 
 // Chức năng registerCustomerRoutes: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
-export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin, requireCsrf }) {
+export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin, requireCsrf, eventBroadcaster }) {
   const customerLimiter = new Map()
   // Chức năng limited: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   function limited(ip) {
@@ -457,6 +457,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
          rating = EXCLUDED.rating, comment = EXCLUDED.comment, admin_reply = '', replied_at = NULL, created_at = EXCLUDED.created_at`,
       [req.customer.id, id, rating, comment, now().toISOString()],
     )
+    eventBroadcaster?.emit('review:created', { productId: id, rating, customer: req.customer.username, comment })
     res.json({ ok: true })
   })
 
@@ -543,6 +544,15 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
         }
         return { id, ...data, status: 'pending', createdAt, pointsEarned: 0 }
       })
+      eventBroadcaster?.emit('order:created', {
+        orderId: order.id,
+        total: order.total,
+        goodsTotal: order.goodsTotal,
+        customer: req.customer.username,
+        recipient: req.body?.recipient,
+        fulfillment: order.fulfillment,
+        createdAt: order.createdAt,
+      })
       res.status(201).json({ order })
     } catch (error) {
       fail(res, error)
@@ -571,6 +581,97 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       createdAt: item.created_at,
     }))
     res.json({ orders })
+  })
+
+  // Chức năng processOrderPayment: xử lý thanh toán đơn hàng, tính điểm và lượt quay.
+  async function processOrderPayment(orderId) {
+    return storeDb.transaction(async (tx) => {
+      const orderRes = await tx.query('SELECT * FROM customer_orders WHERE id = $1', [orderId])
+      const order = orderRes.rows[0]
+      if (!order) return null
+      if (order.status === 'paid') return { alreadyPaid: true, pointsEarned: Number(order.points_earned), order }
+      const accRes = await tx.query('SELECT * FROM customers WHERE id = $1', [order.customer_id])
+      const account = accRes.rows[0]
+      const tier = tierForPoints(Number(account.points))
+      const goodsTotal = Number(order.goods_total)
+      const pointsEarned = pointsForPaidGoods(goodsTotal, tier)
+      const paidGoodsTotal = Number(account.paid_goods_total)
+      const before = Math.floor(paidGoodsTotal / 100000)
+      const after = Math.floor((paidGoodsTotal + goodsTotal) / 100000)
+      await tx.query(
+        'UPDATE customers SET points = points + $1, paid_goods_total = paid_goods_total + $2, spin_credits = spin_credits + $3 WHERE id = $4',
+        [pointsEarned, goodsTotal, after - before, account.id],
+      )
+      await tx.query("UPDATE customer_orders SET status = 'paid', paid_at = $1, points_earned = $2 WHERE id = $3", [now().toISOString(), pointsEarned, order.id])
+      return { alreadyPaid: false, pointsEarned, spinCreditsAdded: after - before, order }
+    })
+  }
+
+  // Route API: lấy thông tin thanh toán VietQR cho đơn hàng
+  app.get('/api/customer/orders/:id/payment-info', requireCustomer, async (req, res) => {
+    const orderRes = await storeDb.query('SELECT * FROM customer_orders WHERE id = $1 AND customer_id = $2', [req.params.id, req.customer.id])
+    const order = orderRes.rows[0]
+    if (!order) return res.status(404).json({ error: 'ORDER_NOT_FOUND' })
+    const amount = Number(order.total)
+    const transferContent = `ST ${order.id}`
+    const qrCodeUrl = `https://img.vietqr.io/image/MB-0388888999-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(transferContent)}&accountName=STORE%20VIETNAM`
+    res.json({
+      orderId: order.id,
+      amount,
+      currency: 'VND',
+      status: order.status,
+      bankName: 'MB Bank (Ngân hàng Quân Đội)',
+      accountNumber: '0388888999',
+      accountName: 'STORE VIETNAM',
+      transferContent,
+      qrCodeUrl,
+      instructions: 'Quét mã QR bằng ứng dụng ngân hàng hoặc chuyển khoản đúng nội dung để hệ thống tự động ghi nhận thanh toán.',
+    })
+  })
+
+  // Route API: mô phỏng thanh toán trực tuyến tức thì cho khách hàng (demo VietQR)
+  app.post('/api/customer/orders/:id/simulate-pay', requireCustomer, customerCsrf, async (req, res) => {
+    const orderRes = await storeDb.query('SELECT * FROM customer_orders WHERE id = $1 AND customer_id = $2', [req.params.id, req.customer.id])
+    if (!orderRes.rows.length) return res.status(404).json({ error: 'ORDER_NOT_FOUND' })
+    const result = await processOrderPayment(req.params.id)
+    if (!result) return res.status(404).json({ error: 'ORDER_NOT_FOUND' })
+    if (!result.alreadyPaid) {
+      eventBroadcaster?.emit('order:paid', {
+        orderId: req.params.id,
+        pointsEarned: result.pointsEarned,
+        total: Number(result.order?.total || 0),
+        customer: req.customer.username,
+        spinCreditsAdded: result.spinCreditsAdded,
+      })
+    }
+    res.json({ success: true, orderId: req.params.id, ...result })
+  })
+
+  // Route API: Webhook nhận thông báo thanh toán tự động từ Cổng thanh toán / Ngân hàng
+  app.post('/api/customer/payments/webhook', async (req, res) => {
+    const body = req.body || {}
+    const orderId = String(body.orderId || body.order_id || '').trim()
+    const amount = Number(body.amount)
+    if (!orderId || !/^[A-Za-z0-9_-]{3,60}$/.test(orderId)) {
+      return res.status(400).json({ error: 'INVALID_ORDER_ID' })
+    }
+    const orderRes = await storeDb.query('SELECT * FROM customer_orders WHERE id = $1', [orderId])
+    const order = orderRes.rows[0]
+    if (!order) return res.status(404).json({ error: 'ORDER_NOT_FOUND' })
+    if (order.status === 'paid') return res.json({ success: true, message: 'ORDER_ALREADY_PAID', orderId })
+    if (Number.isFinite(amount) && amount < Number(order.total)) {
+      return res.status(400).json({ error: 'INSUFFICIENT_AMOUNT', required: Number(order.total), received: amount })
+    }
+    const result = await processOrderPayment(orderId)
+    if (!result) return res.status(500).json({ error: 'PAYMENT_PROCESSING_FAILED' })
+    eventBroadcaster?.emit('order:paid', {
+      orderId,
+      pointsEarned: result.pointsEarned,
+      total: Number(order.total),
+      transactionCode: body.transactionCode || body.transaction_code || 'WEBHOOK',
+      spinCreditsAdded: result.spinCreditsAdded,
+    })
+    res.json({ success: true, orderId, ...result })
   })
 
   // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
@@ -746,36 +847,17 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
 
   // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.post('/api/admin/customer-orders/:id/paid', requireAdmin, requireCsrf, async (req, res) => {
-    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-    const result = await storeDb.transaction(async (tx) => {
-      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-      const orderRes = await tx.query('SELECT * FROM customer_orders WHERE id = $1', [req.params.id])
-      const order = orderRes.rows[0]
-      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-      if (!order) return null
-      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-      if (order.status === 'paid') return { alreadyPaid: true, pointsEarned: Number(order.points_earned) }
-      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-      const accRes = await tx.query('SELECT * FROM customers WHERE id = $1', [order.customer_id])
-      const account = accRes.rows[0]
-      const tier = tierForPoints(Number(account.points))
-      const goodsTotal = Number(order.goods_total)
-      const pointsEarned = pointsForPaidGoods(goodsTotal, tier)
-      const paidGoodsTotal = Number(account.paid_goods_total)
-      const before = Math.floor(paidGoodsTotal / 100000)
-      const after = Math.floor((paidGoodsTotal + goodsTotal) / 100000)
-      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-      await tx.query(
-        'UPDATE customers SET points = points + $1, paid_goods_total = paid_goods_total + $2, spin_credits = spin_credits + $3 WHERE id = $4',
-        [pointsEarned, goodsTotal, after - before, account.id],
-      )
-      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-      await tx.query("UPDATE customer_orders SET status = 'paid', paid_at = $1, points_earned = $2 WHERE id = $3", [now().toISOString(), pointsEarned, order.id])
-      return { alreadyPaid: false, pointsEarned, spinCreditsAdded: after - before }
-    })
-    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
+    const result = await processOrderPayment(req.params.id)
     if (!result) return res.status(404).json({ error: 'ORDER_NOT_FOUND' })
-    res.json(result)
+    if (!result.alreadyPaid) {
+      eventBroadcaster?.emit('order:paid', {
+        orderId: req.params.id,
+        pointsEarned: result.pointsEarned,
+        total: Number(result.order?.total || 0),
+        spinCreditsAdded: result.spinCreditsAdded,
+      })
+    }
+    res.json({ alreadyPaid: result.alreadyPaid, pointsEarned: result.pointsEarned, spinCreditsAdded: result.spinCreditsAdded })
   })
 
   return { requireCustomer, customerCsrf }
