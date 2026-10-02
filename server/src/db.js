@@ -9,6 +9,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import pg from 'pg'
 import { PGlite } from '@electric-sql/pglite'
 
@@ -36,6 +37,7 @@ export class StoreDb {
   constructor(target, { seedDemoData = false } = {}) {
     this.seedDemoData = seedDemoData
     this.backendOwner = null
+    this.transactionContext = new AsyncLocalStorage()
     this.isPglite = false
     this.target = target
     this._isInitializing = true
@@ -84,7 +86,8 @@ export class StoreDb {
     if (!this._isInitializing) {
       await this.ready
     }
-    return this.#rawQuery(sqlText, params)
+    const transaction = this.transactionContext.getStore()
+    return transaction ? transaction.query(sqlText, params) : this.#rawQuery(sqlText, params)
   }
 
   // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
@@ -92,27 +95,22 @@ export class StoreDb {
     if (!this._isInitializing) {
       await this.ready
     }
+    const active = this.transactionContext.getStore()
+    if (active) return fn(active)
     if (this.isPglite) {
-      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-      await this.pglite.query('BEGIN')
-      try {
+      // Hàng đợi gốc ngăn các request dùng chung một BEGIN/COMMIT.
+      return this.pglite.transaction(async (transaction) => {
         const clientWrapper = {
           // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
           query: async (text, params = []) => {
             // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-            const res = await this.pglite.query(text, params)
+            const res = await transaction.query(text, params)
             return { rows: res.rows || [], rowCount: res.affectedRows ?? res.rows?.length ?? 0 }
           },
         }
-        const result = await fn(clientWrapper)
-        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-        await this.pglite.query('COMMIT')
-        return result
-      } catch (err) {
-        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-        await this.pglite.query('ROLLBACK')
-        throw err
-      }
+        // Các helper gọi query vẫn nằm trong cùng giao dịch để rollback đầy đủ.
+        return this.transactionContext.run(clientWrapper, () => fn(clientWrapper))
+      })
     }
     const client = await this.pool.connect()
     try {
@@ -122,7 +120,7 @@ export class StoreDb {
         // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
         query: async (text, params = []) => client.query(text, params),
       }
-      const result = await fn(clientWrapper)
+      const result = await this.transactionContext.run(clientWrapper, () => fn(clientWrapper))
       // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await client.query('COMMIT')
       return result

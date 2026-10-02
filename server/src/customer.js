@@ -38,7 +38,18 @@ export function tierForPoints(points) {
 }
 
 // Chức năng rewardPrizes: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
-export function rewardPrizes() { return PRIZES }
+const SHIPPING_PRIZES = Object.freeze(PRIZES.map(prize => prize.kind === 'none' ? prize : {
+  kind: 'percent', value: prize.kind === 'amount' ? 50 : 100,
+  label: prize.kind === 'amount' ? 'Voucher giảm 50% phí ship' : 'Voucher miễn phí ship',
+}))
+
+export function rewardPrizes(wheel = 'goods') { return wheel === 'shipping' ? SHIPPING_PRIZES : PRIZES }
+
+function voucherLabel(scope, type, value) {
+  if (scope === 'shipping' && type === 'percent' && value === 100) return 'Miễn phí ship'
+  const discount = type === 'amount' ? new Intl.NumberFormat('vi-VN').format(value) + ' ₫' : value + '%'
+  return (scope === 'shipping' ? 'Giảm phí ship ' : 'Giảm ') + discount
+}
 
 // Chức năng pointsForPaidGoods: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function pointsForPaidGoods(amount, tier) {
@@ -212,14 +223,8 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
   async function issueVoucher(customerId, { label, type, value, scope = 'goods', expiresAt, source }) {
     for (let attempt = 0; attempt < 30; attempt += 1) {
       const code = createCode()
-      try {
-        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-        await storeDb.query('INSERT INTO voucher_codes (code, created_at) VALUES ($1, $2)', [code, now().toISOString()])
-      } catch (error) {
-        // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-        if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('UNIQUE')) continue
-        throw error
-      }
+      const reserved = await storeDb.query('INSERT INTO voucher_codes (code, created_at) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING code', [code, now().toISOString()])
+      if (!reserved.rows.length) continue
       // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
       await storeDb.query(
         `INSERT INTO customer_vouchers (code, customer_id, label, type, value, scope, expires_at, source, created_at)
@@ -457,17 +462,18 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
 
   // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.post('/api/customer/spin', requireCustomer, customerCsrf, async (req, res) => {
+    const wheel = req.body?.wheel ?? 'goods'
+    if (!['goods', 'shipping'].includes(wheel)) return res.status(400).json({ error: 'INVALID_WHEEL' })
+    const prizes = rewardPrizes(wheel)
     // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const outcome = await storeDb.transaction(async (tx) => {
       // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-      const curRes = await tx.query('SELECT spin_credits FROM customers WHERE id = $1', [req.customer.id])
+      const curRes = await tx.query('UPDATE customers SET spin_credits = spin_credits - 1 WHERE id = $1 AND spin_credits > 0 RETURNING spin_credits', [req.customer.id])
       const current = curRes.rows[0]
       // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-      if (!current || Number(current.spin_credits) < 1) return null
-      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-      await tx.query('UPDATE customers SET spin_credits = spin_credits - 1 WHERE id = $1', [req.customer.id])
-      const index = randomInt(PRIZES.length)
-      const prize = PRIZES[index]
+      if (!current) return null
+      const index = randomInt(prizes.length)
+      const prize = prizes[index]
       let voucher = null
       if (prize.kind !== 'none') {
         const code = createCode()
@@ -478,11 +484,11 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
         await tx.query(
           `INSERT INTO customer_vouchers (code, customer_id, label, type, value, scope, expires_at, source, created_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [code, req.customer.id, prize.label, prize.kind, prize.value, 'goods', exp, 'wheel', now().toISOString()],
+          [code, req.customer.id, prize.label, prize.kind, prize.value, wheel, exp, wheel === 'shipping' ? 'shipping-wheel' : 'wheel', now().toISOString()],
         )
-        voucher = { code, label: prize.label, type: prize.kind, value: prize.value, scope: 'goods', expiresAt: exp, source: 'wheel' }
+        voucher = { code, label: prize.label, type: prize.kind, value: prize.value, scope: wheel, expiresAt: exp, source: wheel === 'shipping' ? 'shipping-wheel' : 'wheel' }
       }
-      return { index, prize: prize.label, voucher, spinCredits: Number(current.spin_credits) - 1 }
+      return { wheel, index, prize: prize.label, voucher, spinCredits: Number(current.spin_credits) }
     })
     // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!outcome) return res.status(409).json({ error: 'NO_SPIN_CREDITS' })
@@ -600,9 +606,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!['amount', 'percent'].includes(type) || !['goods', 'shipping'].includes(scope) || !Number.isInteger(value) || value < 1 || value > (type === 'percent' ? 100 : 10000000) ||
       !Number.isFinite(date.getTime()) || date <= now() || date.getTime() > now().getTime() + 365 * 86400000) return res.status(400).json({ error: 'INVALID_VOUCHER' })
-    const label = scope === 'shipping'
-      ? `Ship ${type === 'amount' ? 'giảm ' + new Intl.NumberFormat('vi-VN').format(value) + ' ₫' : 'giảm ' + value + '%'}`
-      : type === 'amount' ? `Giảm ${new Intl.NumberFormat('vi-VN').format(value)} ₫` : `Giảm ${value}%`
+    const label = voucherLabel(scope, type, value)
     const voucher = await issueVoucher(customerId, { label, type, value, scope, expiresAt: date.toISOString(), source: 'admin' })
     res.status(201).json({ voucher })
   })
@@ -636,9 +640,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       return res.status(400).json({ error: 'INVALID_VOUCHER', message: 'Voucher khong hop le.' })
     }
     const label = String(req.body?.label || '').trim()
-    const generatedLabel = scope === 'shipping'
-      ? `Ship ${type === 'amount' ? 'giảm ' + new Intl.NumberFormat('vi-VN').format(value) + ' ₫' : 'giảm ' + value + '%'}`
-      : type === 'amount' ? `Giảm ${new Intl.NumberFormat('vi-VN').format(value)} ₫` : `Giảm ${value}%`
+    const generatedLabel = voucherLabel(scope, type, value)
     // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (label.length > 120) return res.status(400).json({ error: 'INVALID_VOUCHER', message: 'Ten voucher qua dai.' })
     const voucher = await issueVoucher(customerId, { label: label || generatedLabel, type, value, scope, expiresAt: date.toISOString(), source: 'admin' })
@@ -646,6 +648,23 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
   })
 
   // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
+  app.patch('/api/admin/vouchers/:code', requireAdmin, requireCsrf, async (req, res) => {
+    const code = String(req.params.code || '').toUpperCase()
+    const { type, value, scope } = req.body || {}
+    const expires = new Date(req.body?.expiresAt)
+    const label = String(req.body?.label || '').trim()
+    if (!/^[A-Z2-9]{10}$/.test(code) || !['amount', 'percent'].includes(type) || !['goods', 'shipping'].includes(scope) ||
+      !Number.isInteger(value) || value < 1 || value > (type === 'percent' ? 100 : 10000000) || label.length > 120 ||
+      !Number.isFinite(expires.getTime()) || expires <= now() || expires.getTime() > now().getTime() + 365 * 86400000) {
+      return res.status(400).json({ error: 'INVALID_VOUCHER' })
+    }
+    // Chỉ sửa voucher còn trong ví; mã và người sở hữu không đổi.
+    const updated = await storeDb.query(`UPDATE customer_vouchers SET label = $1, type = $2, value = $3, scope = $4, expires_at = $5
+      WHERE code = $6 RETURNING *`, [label || voucherLabel(scope, type, value), type, value, scope, expires.toISOString(), code])
+    if (!updated.rows.length) return res.status(404).json({ error: 'VOUCHER_NOT_FOUND' })
+    res.json({ voucher: publicVoucher(updated.rows[0]) })
+  })
+
   app.delete('/api/admin/vouchers/:code', requireAdmin, requireCsrf, async (req, res) => {
     const code = String(req.params.code || '').toUpperCase()
     // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
