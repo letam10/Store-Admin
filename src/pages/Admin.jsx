@@ -202,7 +202,9 @@ export default function Admin() {
             text: `🔔 Đơn mới: ${d.orderId} (${new Intl.NumberFormat('vi-VN').format(d.total)} ₫) từ ${d.customer || d.recipient}`,
             time: new Date().toLocaleTimeString('vi-VN'),
           }, ...curr].slice(0, 4))
-        } catch {}
+        } catch (_err) {
+          void _err
+        }
       })
       es.addEventListener('order:paid', (e) => {
         try {
@@ -213,7 +215,9 @@ export default function Admin() {
             text: `💰 Thanh toán thành công: ${d.orderId} (+${d.pointsEarned} điểm)`,
             time: new Date().toLocaleTimeString('vi-VN'),
           }, ...curr].slice(0, 4))
-        } catch {}
+        } catch (_err) {
+          void _err
+        }
       })
       es.addEventListener('review:created', (e) => {
         try {
@@ -224,9 +228,13 @@ export default function Admin() {
             text: `⭐ Đánh giá ${d.rating}★ từ ${d.customer} cho sản phẩm ${d.productId}`,
             time: new Date().toLocaleTimeString('vi-VN'),
           }, ...curr].slice(0, 4))
-        } catch {}
+        } catch (_err) {
+          void _err
+        }
       })
-    } catch {}
+    } catch (_err) {
+      void _err
+    }
     return () => { es?.close() }
   }, [session?.authenticated])
 
