@@ -11,6 +11,7 @@ import { apiJson } from '../api/chat'
 import { normalizeSearch } from '../storefront/state'
 import { AdminCustomers, AdminFavorites, AdminOrders, AdminReviews, AdminVouchers } from './AdminCommerce'
 import './AdminModules.css'
+import { AdminAfterSales, AdminPaymentSettings } from './AdminOrderWorkflow'
 
 const statusOptions = ['Đang dùng', 'Nháp', 'Đang xử lý', 'Chờ duyệt', 'Đã xong', 'Đã duyệt', 'Tạm dừng']
 
@@ -218,6 +219,8 @@ export default function AdminModule({ module, csrfToken, onNavigate, language = 
   if (module === 'customer-orders') return <AdminOrders csrfToken={csrfToken} />
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (module === 'rewards-wheel') return <AdminVouchers csrfToken={csrfToken} />
+  if (module === 'returns') return <AdminAfterSales csrfToken={csrfToken} />
+  if (module === 'settings') return <><AdminPaymentSettings csrfToken={csrfToken} /><CrudModule module={module} csrfToken={csrfToken} /></>
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (crudSchemas[module]) return <CrudModule module={module} csrfToken={csrfToken} />
   return <section className="admin-module-card"><h2>Module chưa có dữ liệu</h2><p>Module này đang chờ cấu hình backend.</p></section>

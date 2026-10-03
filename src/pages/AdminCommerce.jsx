@@ -6,8 +6,9 @@
  * Liên kết trực tiếp: react, ../api/chat.
  * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
+import { AdminOrders as OrderManager } from './AdminOrderWorkflow'
 import './AdminCommerce.css'
 
 const money = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' })
@@ -51,7 +52,7 @@ export function AdminCustomers() {
   const activeSpinCredits = customers.reduce((sum, item) => sum + Number(item.spinCredits || 0), 0)
   return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">KHÁCH HÀNG THỰC</p><h2>Điểm và hạng thành viên</h2><p>Sắp xếp theo điểm giảm dần. Điểm chỉ cộng khi đơn được ghi nhận thanh toán.</p></div><span className="admin-preview-badge">{data?.customers.length || 0} khách</span></div>
     <div className="admin-commerce-summary"><div><small>Tổng khách</small><b>{customers.length}</b><span>Đang theo dõi</span></div><div><small>Tổng điểm</small><b>{totalPoints.toLocaleString('vi-VN')}</b><span>Điểm tích lũy</span></div><div><small>Người dẫn đầu</small><b>{topCustomer?.username || '—'}</b><span>{topCustomer ? topCustomer.points.toLocaleString('vi-VN') + ' điểm' : 'Chưa có dữ liệu'}</span></div><div><small>Lượt quay còn lại</small><b>{activeSpinCredits}</b><span>Toàn hệ thống</span></div></div>
-    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
+
     <div className="admin-module-toolbar"><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm tên hoặc email" /><label>Điểm tối thiểu <input type="number" min="0" value={minPoints} onChange={(event) => setMinPoints(event.target.value)} /></label></div>
     {error && <p role="alert">{error}</p>}{!data && !error && <p>Đang tải…</p>}
      {data && <div className="admin-table-wrap"><table><thead><tr><th>Khách</th><th>Điểm</th><th>Hạng</th><th>Tiền hàng đã thanh toán</th><th>Lượt quay</th></tr></thead><tbody>{rows.map((item) => <tr key={item.id} className="admin-clickable-row" onClick={() => setSelected(item)}><td><button className="admin-link-button" type="button" onClick={() => setSelected(item)}>{item.username}</button><small>{item.email}</small></td><td><b>{item.points.toLocaleString('vi-VN')}</b></td><td>{item.tier}</td><td>{money.format(item.paidGoodsTotal)}</td><td>{item.spinCredits}</td></tr>)}</tbody></table></div>}
@@ -61,53 +62,80 @@ export function AdminCustomers() {
 
 // Chức năng AdminVouchers: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function AdminVouchers({ csrfToken }) {
-  const { data, error, reload: reloadCustomers } = useReport('/api/admin/customers')
-  const { data: voucherData, error: voucherError, reload: reloadVouchers } = useReport('/api/admin/vouchers')
+  const { data, error } = useReport('/api/admin/customers')
+  const { data: voucherData, error: voucherError, reload } = useReport('/api/admin/vouchers')
+  const dateInput = (value) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value))
   const [customerId, setCustomerId] = useState('')
   const [scope, setScope] = useState('goods')
   const [type, setType] = useState('amount')
   const [value, setValue] = useState(100000)
-  const [days, setDays] = useState(30)
-  const [created, setCreated] = useState(null)
+  const [today] = useState(() => dateInput(Date.now()))
+  const [expiresOn, setExpiresOn] = useState(() => dateInput(Date.now() + 30 * 86400000))
+  const [editing, setEditing] = useState(null)
+  const [pendingDelete, setPendingDelete] = useState(null)
+  const mutationGate = useRef(false)
+  const [filter, setFilter] = useState('all')
+  const [notice, setNotice] = useState('')
   const [submitError, setSubmitError] = useState('')
   const [busy, setBusy] = useState(false)
-  // Chức năng submit: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
+  const vouchers = voucherData?.vouchers || []
+  const visible = vouchers.filter(voucher => filter === 'all' || voucher.scope === filter)
+
+  function edit(voucher) {
+    setPendingDelete(null)
+    setEditing(voucher.code); setCustomerId(String(voucher.customerId))
+    setScope(voucher.scope || 'goods')
+    setType(voucher.scope === 'shipping' && voucher.type === 'percent' && Number(voucher.value) === 100 ? 'free' : voucher.type)
+    setValue(Number(voucher.value)); setExpiresOn(dateInput(voucher.expiresAt))
+    setNotice(''); setSubmitError('')
+    document.getElementById('voucher-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   async function submit(event) {
-    event.preventDefault(); setBusy(true); setSubmitError(''); setCreated(null)
+    event.preventDefault(); if (mutationGate.current) return
+    mutationGate.current = true; setBusy(true); setSubmitError(''); setNotice('')
     try {
-      const numericValue = Number(value)
-      const numericDays = Number(days)
-      const maxValue = type === 'amount' ? 10000000 : 100
-      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-      if (!Number.isInteger(numericValue) || numericValue < 1 || numericValue > maxValue) throw Object.assign(new Error(''), { code: 'INVALID_VOUCHER' })
-      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-      if (!Number.isInteger(numericDays) || numericDays < 1 || numericDays > 365) throw Object.assign(new Error(''), { code: 'INVALID_VOUCHER' })
-      const expiresAt = new Date(Date.now() + Number(days) * 86400000).toISOString()
-      const payload = await apiJson('/api/admin/vouchers', { method: 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ customerId: Number(customerId), type, scope, value: numericValue, expiresAt }) })
-      setCreated(payload.voucher); reloadCustomers(); reloadVouchers()
-    } catch (failure) { setSubmitError(adminErrorMessage(failure, 'Khong tao duoc voucher.')) }
-    finally { setBusy(false) }
+      const voucherType = type === 'free' ? 'percent' : type
+      const numericValue = type === 'free' ? 100 : Number(value)
+      if (!Number.isInteger(numericValue) || numericValue < 1 || numericValue > (voucherType === 'amount' ? 10000000 : 100)) throw new Error('Giá trị voucher không hợp lệ.')
+      const body = { customerId: Number(customerId), type: voucherType, scope, value: numericValue, expiresAt: new Date(expiresOn + 'T23:59:59+07:00').toISOString() }
+      const payload = await apiJson('/api/admin/vouchers' + (editing ? '/' + encodeURIComponent(editing) : ''), {
+        method: editing ? 'PATCH' : 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(body),
+      })
+      setNotice((editing ? 'Đã cập nhật ' : 'Đã cấp ') + payload.voucher.label + ' · ' + payload.voucher.code)
+      setEditing(null); setCustomerId(''); await reload()
+    } catch (failure) { setSubmitError(adminErrorMessage(failure, 'Không lưu được voucher.')) }
+    finally { mutationGate.current = false; setBusy(false) }
   }
-  // Chức năng remove: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
+
   async function remove(voucher) {
-    // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-    if (!window.confirm('Xoa voucher ' + voucher.code + '?')) return
-    try { await apiJson('/api/admin/vouchers/' + encodeURIComponent(voucher.code), { method: 'DELETE', headers: { 'x-csrf-token': csrfToken } }); reloadVouchers() }
-    // Nhánh lỗi: chuyển ngoại lệ thành phản hồi an toàn và giữ trạng thái nhất quán.
-    catch (failure) { setSubmitError(adminErrorMessage(failure, 'Khong xoa duoc voucher.')) }
+    if (mutationGate.current) return
+    mutationGate.current = true; setBusy(true); setSubmitError('')
+    try {
+      await apiJson('/api/admin/vouchers/' + encodeURIComponent(voucher.code), { method: 'DELETE', headers: { 'x-csrf-token': csrfToken } })
+      if (editing === voucher.code) { setEditing(null); setCustomerId('') }
+      setNotice('Đã xóa voucher ' + voucher.code); setPendingDelete(null); await reload()
+    } catch (failure) { setSubmitError(adminErrorMessage(failure, 'Không xóa được voucher.')) }
+    finally { mutationGate.current = false; setBusy(false) }
   }
-  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">VOUCHER STORE</p><h2>Voucher</h2><p>Thêm voucher mới cho khách hàng. Mã 10 ký tự được tạo duy nhất trên máy chủ và không thể sửa.</p></div><span className="admin-preview-badge">{voucherData?.vouchers?.length || 0} voucher</span></div><div className="reward-policy-grid"><div><span className="reward-policy-icon">60%</span><b>Lần sau may mắn</b><small>Tỷ lệ hệ thống · không hiển thị cho khách</small></div><div><span className="reward-policy-icon">30%</span><b>Voucher 100K</b><small>Phần thưởng quay may mắn</small></div><div><span className="reward-policy-icon">10%</span><b>Voucher giảm 20%</b><small>Phần thưởng quay may mắn</small></div></div>
+
+  return <section className="admin-module-card voucher-management">
+    <div className="admin-module-head"><div><p className="admin-eyebrow">ƯU ĐÃI KHÁCH HÀNG</p><h2>Voucher hàng hóa & phí ship</h2><p>Thêm, sửa hoặc thu hồi voucher chưa dùng. Mã và người sở hữu được giữ nguyên khi sửa.</p></div><span className="admin-preview-badge">{vouchers.length} voucher</span></div>
+    <div className="reward-policy-grid"><div><span className="reward-policy-icon">60%</span><b>Lần sau may mắn</b><small>Cả hai vòng dùng chung lượt</small></div><div><span className="reward-policy-icon">30%</span><b>100K / giảm 50% ship</b><small>Theo vòng khách lựa chọn</small></div><div><span className="reward-policy-icon">10%</span><b>Giảm 20% / miễn ship</b><small>Theo vòng khách lựa chọn</small></div></div>
     {error && <p role="alert">{error}</p>}
-    <form className="admin-commerce-form" onSubmit={submit}>
-      <label>Khách hàng<select required value={customerId} onChange={(event) => setCustomerId(event.target.value)}><option value="">Chọn khách</option>{data?.customers.map((item) => <option key={item.id} value={item.id}>{item.username} · {item.points} điểm</option>)}</select></label>
-      <label>Áp dụng cho<select value={scope} onChange={(event) => setScope(event.target.value)}><option value="goods">Hàng hóa</option><option value="shipping">Phí vận chuyển</option></select></label>
-      <label>Loại<select value={type} onChange={(event) => { setType(event.target.value); setValue(event.target.value === 'amount' ? 100000 : 20) }}><option value="amount">Giảm số tiền</option><option value="percent">Giảm phần trăm</option></select></label>
-      <label>Giá trị<input type="number" min="1" max={type === 'amount' ? '10000000' : '100'} step="1" value={value} onChange={(event) => setValue(event.target.value)} onBlur={() => setValue((current) => Math.min(type === 'amount' ? 10000000 : 100, Math.max(1, Number(current) || 1)))} required /></label>
-      <label>Hạn dùng sau (ngày)<input type="number" min="1" max="365" step="1" value={days} onChange={(event) => setDays(event.target.value)} required /></label>
-      <button type="submit" disabled={busy || !customerId}>{busy ? 'Đang cấp…' : 'Cấp voucher'}</button>
+    <div className="voucher-editor-head"><h3>{editing ? 'Sửa voucher ' + editing : 'Cấp voucher mới'}</h3><div><button type="button" disabled={busy} onClick={() => { setScope('shipping'); setType('percent'); setValue(50) }}>Giảm 50% ship</button><button type="button" disabled={busy} onClick={() => { setScope('shipping'); setType('free'); setValue(100) }}>Miễn phí ship</button></div></div>
+    <form id="voucher-editor" className="admin-commerce-form" onSubmit={submit}>
+      <label>Khách hàng<select required disabled={Boolean(editing) || busy} value={customerId} onChange={event => setCustomerId(event.target.value)}><option value="">Chọn khách</option>{data?.customers.map(item => <option key={item.id} value={item.id}>{item.username}</option>)}</select></label>
+      <label>Áp dụng cho<select disabled={busy} value={scope} onChange={event => { setScope(event.target.value); if (type === 'free') { setType('percent'); setValue(20) } }}><option value="goods">Hàng hóa</option><option value="shipping">Phí vận chuyển</option></select></label>
+      <label>Loại ưu đãi<select disabled={busy} value={type} onChange={event => { setType(event.target.value); setValue(event.target.value === 'amount' ? 30000 : event.target.value === 'free' ? 100 : 50) }}><option value="amount">Giảm số tiền</option><option value="percent">Giảm phần trăm</option>{scope === 'shipping' && <option value="free">Miễn phí ship</option>}</select></label>
+      {type !== 'free' && <label>Giá trị {type === 'percent' ? '(%)' : '(₫)'}<input disabled={busy} type="number" min="1" max={type === 'amount' ? '10000000' : '100'} step="1" value={value} onChange={event => setValue(event.target.value)} required /></label>}
+      <label>Hạn sử dụng<input disabled={busy} type="date" value={expiresOn} min={today} onChange={event => setExpiresOn(event.target.value)} required /></label>
+      <div className="voucher-editor-actions"><button type="submit" disabled={busy || !customerId}>{busy ? 'Đang lưu…' : editing ? 'Lưu thay đổi' : 'Cấp voucher'}</button>{editing && <button type="button" disabled={busy} onClick={() => { setEditing(null); setCustomerId('') }}>Hủy sửa</button>}</div>
     </form>
-    {submitError && <p role="alert">{submitError}</p>}{created && <p role="status">Đã cấp {created.label} · mã <code>{created.code}</code> · hết hạn {new Date(created.expiresAt).toLocaleDateString('vi-VN')}</p>}
-    <div className="admin-voucher-list"><h3>Voucher đã tạo</h3>{voucherError && <p role="alert">{adminErrorMessage({ message: voucherError }, 'Khong tai duoc voucher.')}</p>}{voucherData?.vouchers?.length ? voucherData.vouchers.map((voucher) => <article key={voucher.code}><div><b>{voucher.label}</b><small>{voucher.username || '—'} · {voucher.type === 'amount' ? new Intl.NumberFormat('vi-VN').format(voucher.value) + ' ₫' : voucher.value + '%'}</small></div><code>{voucher.code}</code><span>Hết hạn {new Date(voucher.expiresAt).toLocaleDateString('vi-VN')}</span><button type="button" className="table-action table-action--danger" onClick={() => remove(voucher)}>Xóa</button></article>) : <p className="admin-empty">Chưa có voucher.</p>}</div>
+    {submitError && <p role="alert">{submitError}</p>}{notice && <p role="status">{notice}</p>}
+    {pendingDelete && <div className="admin-detail-panel" role="group" aria-label="Xác nhận xóa voucher"><p>Xóa voucher <b>{pendingDelete.code}</b> của {pendingDelete.username}?</p><div className="voucher-editor-actions"><button type="button" disabled={busy} onClick={() => remove(pendingDelete)}>Xác nhận xóa</button><button type="button" disabled={busy} onClick={() => setPendingDelete(null)}>Giữ voucher</button></div></div>}
+    <div className="admin-voucher-filters" aria-label="Lọc voucher">{[['all','Tất cả'],['goods','Hàng hóa'],['shipping','Giảm / miễn ship']].map(([key,label]) => <button key={key} type="button" className={filter === key ? 'is-active' : ''} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}<span>{vouchers.filter(voucher => key === 'all' || voucher.scope === key).length}</span></button>)}</div>
+    <div className="admin-voucher-list">{voucherError && <p role="alert">{voucherError}</p>}{visible.length ? visible.map(voucher => <article key={voucher.code}><div><b>{voucher.label}</b><small>{voucher.username || '—'} · {voucher.scope === 'shipping' ? 'Vận chuyển' : 'Hàng hóa'}</small></div><code>{voucher.code}</code><span>Hạn {dateInput(voucher.expiresAt)}</span><div className="voucher-editor-actions"><button disabled={busy} type="button" className="table-action" aria-label={'Sửa voucher ' + voucher.code} onClick={() => edit(voucher)}>Sửa</button><button disabled={busy} type="button" className="table-action table-action--danger" aria-label={'Xóa voucher ' + voucher.code} onClick={() => setPendingDelete(voucher)}>Xóa</button></div></article>) : <p className="admin-empty">Chưa có voucher trong nhóm này.</p>}</div>
   </section>
 }
 
@@ -146,24 +174,4 @@ export function AdminReviews({ csrfToken }) {
 }
 
 // Chức năng AdminOrders: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
-export function AdminOrders({ csrfToken }) {
-  const { data, error, reload } = useReport('/api/admin/customer-orders')
-  const [actionError, setActionError] = useState('')
-  const orders = data?.orders || []
-  const pendingOrders = orders.filter((item) => item.status === 'pending').length
-  const paidOrders = orders.filter((item) => item.status === 'paid').length
-  const orderValue = orders.reduce((sum, item) => sum + Number(item.total || 0), 0)
-  // Chức năng markPaid: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
-  async function markPaid(id) {
-    setActionError('')
-    try {
-      await apiJson('/api/admin/customer-orders/' + id + '/paid', { method: 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({}) })
-      reload()
-    } catch (failure) { setActionError(failure.message) }
-  }
-  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">ĐƠN KHÁCH HÀNG</p><h2>Ghi nhận thanh toán</h2><p>Chỉ bấm sau khi đã xác nhận tiền thực nhận. Điểm và lượt quay sẽ được cộng đúng một lần.</p></div></div><div className="admin-commerce-summary"><div><small>Tổng đơn</small><b>{orders.length}</b><span>Toàn bộ đơn hàng</span></div><div><small>Chờ thanh toán</small><b>{pendingOrders}</b><span>Cần xác nhận</span></div><div><small>Đã thanh toán</small><b>{paidOrders}</b><span>Đã ghi nhận</span></div><div><small>Giá trị đơn</small><b>{money.format(orderValue)}</b><span>Trước hoàn tiền</span></div></div>
-    {error && <p role="alert">{error}</p>}{actionError && <p role="alert">{actionError}</p>}
-    {!data && !error && <p>Đang tải…</p>}
-    {data && <div className="admin-table-wrap"><table><thead><tr><th>Đơn</th><th>Khách / giao nhận</th><th>Tiền hàng sau giảm</th><th>Phí giao</th><th>Tổng</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>{data.orders.map((item) => <tr key={item.id}><td>{item.id}</td><td>{item.username}<small>{item.recipient} · {item.phone}</small><small>{item.address || 'Nhận tại cửa hàng'} · {item.region}{item.region === 'far' ? ' · ' + item.distanceKm + ' km' : ''}</small></td><td>{money.format(item.goodsTotal)}</td><td>{money.format(item.shippingFee)}</td><td>{money.format(item.total)}</td><td>{item.status === 'paid' ? 'Đã thanh toán · +' + item.pointsEarned + ' điểm' : 'Chờ thanh toán'}</td><td>{item.status === 'pending' && <button type="button" onClick={() => markPaid(item.id)}>Ghi nhận đã thanh toán</button>}</td></tr>)}</tbody></table>{data.orders.length === 0 && <p>Chưa có đơn.</p>}</div>}
-  </section>
-}
+export function AdminOrders({ csrfToken }) { return <OrderManager csrfToken={csrfToken} /> }
