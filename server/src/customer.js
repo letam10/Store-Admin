@@ -1,3 +1,4 @@
+import { registerStorefrontContact } from './storefrontContact.js'
 /**
  * @codex-vn-doc
  * Tệp: server/src/customer.js
@@ -778,5 +779,6 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     res.json(result)
   })
 
-  return { requireCustomer, customerCsrf }
+    registerStorefrontContact(app, { storeDb })
+return { requireCustomer, customerCsrf }
 }

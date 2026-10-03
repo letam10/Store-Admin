@@ -47,7 +47,7 @@ const ADMIN_RECORD_SCHEMAS = Object.freeze({
   'order-types': Object.freeze({ fields: ['priority', 'sla', 'note'] }),
   staff: Object.freeze({ fields: ['role', 'shift', 'login'] }),
   overtime: Object.freeze({ fields: ['kind', 'value', 'note'] }),
-  support: Object.freeze({ fields: ['customer', 'topic', 'assignee'] }),
+  support: Object.freeze({ fields: ['customer', 'topic', 'assignee', 'email', 'message'] }),
   returns: Object.freeze({ fields: ['customer', 'order', 'reason', 'assignee'] }),
   settings: Object.freeze({ fields: ['key', 'value', 'description'] }),
 })
@@ -58,8 +58,8 @@ function validateRecordData(module, data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return false
   const fields = ADMIN_RECORD_SCHEMAS[module]?.fields || []
   if (Object.keys(data).some((key) => !fields.includes(key))) return false
-  return Object.values(data).every((value) => (
-    (typeof value === 'string' && value.length <= 500) ||
+  return Object.entries(data).every(([key, value]) => (
+    (typeof value === 'string' && value.length <= (module === 'support' && key === 'message' ? 2000 : 500)) ||
     (typeof value === 'number' && Number.isFinite(value)) ||
     typeof value === 'boolean'
   ))
@@ -690,7 +690,7 @@ export function createApp(overrides = {}) {
   // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.put('/api/admin/appearance', requireAdmin, requireCsrf, async (req, res) => {
     const body = req.body || {}
-    const allowed = ['brandName', 'brandTagline', 'headerSearchPlaceholder', 'navHome', 'navProducts', 'navFavorites', 'navRewards', 'navMembership', 'navContact', 'heroTitle', 'heroDescription', 'heroButton', 'footerText', 'footerSupport', 'footerInfo', 'footerShopTitle', 'footerProducts', 'footerCart', 'footerMembership', 'footerRewards', 'footerSupportTitle', 'footerContact', 'footerAccount', 'footerInfoTitle', 'footerCopyright', 'accentColor', 'bannerLabel']
+    const allowed = ['brandName', 'brandTagline', 'headerSearchPlaceholder', 'navHome', 'navProducts', 'navFavorites', 'navRewards', 'navMembership', 'navContact', 'heroTitle', 'heroDescription', 'heroButton', 'footerText', 'footerSupport', 'footerInfo', 'footerShopTitle', 'footerProducts', 'footerCart', 'footerMembership', 'footerRewards', 'footerSupportTitle', 'footerContact', 'footerAccount', 'footerInfoTitle', 'footerCopyright', 'accentColor', 'bannerLabel', 'contactAddress', 'contactPhone', 'contactEmail', 'contactHours']
     // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (Object.keys(body).some((key) => !allowed.includes(key)) || allowed.some((key) => body[key] !== undefined && typeof body[key] !== 'string' || String(body[key] || '').length > 240)) {
       return res.status(400).json({ error: 'INVALID_APPEARANCE' })
