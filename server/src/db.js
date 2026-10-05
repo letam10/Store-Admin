@@ -362,6 +362,50 @@ export class StoreDb {
         paid_at TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_customer_orders_owner ON customer_orders(customer_id, created_at);
+      ALTER TABLE customer_orders DROP CONSTRAINT IF EXISTS customer_orders_status_check;
+      ALTER TABLE customer_orders ADD CONSTRAINT customer_orders_status_check CHECK(status IN ('pending','paid','completed','cancelled','refunded'));
+      ALTER TABLE customer_orders ALTER COLUMN subtotal TYPE BIGINT;
+      ALTER TABLE customer_orders ALTER COLUMN discount TYPE BIGINT;
+      ALTER TABLE customer_orders ALTER COLUMN goods_total TYPE BIGINT;
+      ALTER TABLE customer_orders ALTER COLUMN shipping_fee TYPE BIGINT;
+      ALTER TABLE customer_orders ALTER COLUMN total TYPE BIGINT;
+      ALTER TABLE customers ALTER COLUMN paid_goods_total TYPE BIGINT;
+      ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS shipping_base BIGINT NOT NULL DEFAULT 0;
+      ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cod';
+      ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS payment_mode TEXT NOT NULL DEFAULT 'demo';
+      ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS payment_reference TEXT NOT NULL DEFAULT '';
+      ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS payment_confirmation TEXT NOT NULL DEFAULT '';
+      ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS payment_reported_at TEXT;
+      ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS delivery_status TEXT NOT NULL DEFAULT 'processing';
+      ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS scheduled_at TEXT;
+      ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS delivered_at TEXT;
+      ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS late_compensated_at TEXT;
+      ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS refund_amount BIGINT NOT NULL DEFAULT 0;
+      ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS extra_paid BIGINT NOT NULL DEFAULT 0;
+      ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS voucher_snapshot_json TEXT NOT NULL DEFAULT '[]';
+      UPDATE customer_orders SET shipping_base = shipping_fee WHERE shipping_base = 0 AND shipping_fee > 0;
+      CREATE TABLE IF NOT EXISTS customer_after_sales (
+        id TEXT PRIMARY KEY,
+        order_id TEXT NOT NULL REFERENCES customer_orders(id) ON DELETE CASCADE,
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK(kind IN ('cancel','return','reschedule','merchant_fault')),
+        status TEXT NOT NULL CHECK(status IN ('awaiting_confirmation','pending','awaiting_payment','awaiting_return','resolved','rejected','cancelled')),
+        reason TEXT NOT NULL,
+        fee_json TEXT NOT NULL,
+        scheduled_at TEXT,
+        fee_paid_at TEXT,
+        refund_reference TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        compensation_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_after_sales_open ON customer_after_sales(order_id)
+        WHERE status NOT IN ('resolved','rejected','cancelled');
+      CREATE TABLE IF NOT EXISTS customer_order_events (
+        id SERIAL PRIMARY KEY, order_id TEXT NOT NULL REFERENCES customer_orders(id) ON DELETE CASCADE,
+        message TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL
+      );
     `
     if (this.isPglite) {
       await this.pglite.exec(ddl)
@@ -501,7 +545,7 @@ export class StoreDb {
           featuresJson,
           product.tone || 'green',
           product.symbol || '✦',
-          product.label || 'Demo',
+          product.label || 'Hàng mới',
           product.sourceUrl || product.source_url || '',
           product.sourcePriceCents ?? product.source_price_cents ?? 0,
           product.sourceCurrency || product.source_currency || 'VND',
@@ -548,7 +592,7 @@ export class StoreDb {
       features: parseJson(row.features_json, []),
       tone: row.tone,
       symbol: row.symbol,
-      label: row.label,
+      label: /\bdemo\b/i.test(row.label || '') ? (row.label || '').replace(/\bdemo\b/ig, '').trim() || 'Hàng mới' : row.label,
       sourceUrl: row.source_url,
       sourcePriceCents: Number(row.source_price_cents),
       sourceCurrency: row.source_currency,

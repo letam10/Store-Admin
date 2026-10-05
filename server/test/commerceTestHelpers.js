@@ -2,11 +2,11 @@ import { createApp } from '../src/app.js'
 import { StoreDb } from '../src/db.js'
 import { hashPassword } from '../src/security.js'
 
-export async function withCommerceServer(run) {
+export async function withCommerceServer(run, overrides = {}) {
   const storeDb = new StoreDb(':memory:')
   await storeDb.ready
   let clock = new Date('2026-10-02T02:00:00.000Z')
-  const { app } = createApp({ storeDb, now: () => new Date(clock) })
+  const { app } = createApp({ ...overrides, storeDb, now: () => new Date(clock) })
   const server = app.listen(0, '127.0.0.1')
   await new Promise(resolve => server.once('listening', resolve))
   const root = 'http://127.0.0.1:' + server.address().port

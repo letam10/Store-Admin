@@ -1,3 +1,5 @@
+import { registerStorefrontContact } from './storefrontContact.js'
+import { registerOrderWorkflow } from './orderWorkflow.js'
 /**
  * @codex-vn-doc
  * Tệp: server/src/customer.js
@@ -6,7 +8,7 @@
  * Liên kết trực tiếp: node:crypto, ../../shared/products.js, ./security.js.
  * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
  */
-import { randomBytes, randomInt, randomUUID } from 'node:crypto'
+import { randomBytes, randomInt } from 'node:crypto'
 import { products as baseProducts } from '../../shared/products.js'
 import { clearCookie, hashPassword, hashToken, normalizeUsername, parseCookies, randomToken, setCookie, verifyPassword } from './security.js'
 
@@ -122,7 +124,7 @@ function createCode() {
 }
 
 // Chức năng registerCustomerRoutes: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
-export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin, requireCsrf, eventBroadcaster }) {
+export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin, requireCsrf, eventBroadcaster, paymentWebhookSecret }) {
   const customerLimiter = new Map()
   // Chức năng limited: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   function limited(ip) {
@@ -507,174 +509,6 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
   })
 
   // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
-  app.post('/api/customer/orders', requireCustomer, customerCsrf, async (req, res) => {
-    try {
-      const recipient = String(req.body?.recipient || '').trim()
-      const phone = String(req.body?.phone || '').trim()
-      const address = String(req.body?.address || '').trim()
-      // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-      if (recipient.length < 2 || recipient.length > 100 || !/^[+0-9 ()-]{9,20}$/.test(phone) ||
-        (req.body?.fulfillment === 'delivery' && (address.length < 5 || address.length > 300))) throw new Error('INVALID_ORDER')
-
-      // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-      const order = await storeDb.transaction(async (tx) => {
-        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-        const freshRes = await tx.query('SELECT * FROM customers WHERE id = $1', [req.customer.id])
-        const fresh = freshRes.rows[0]
-        const data = await quote(fresh, req.body)
-        const id = 'ST-' + randomUUID().slice(0, 12).toUpperCase()
-        const createdAt = now().toISOString()
-        // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-        await tx.query(
-          `INSERT INTO customer_orders (
-             id, customer_id, items_json, recipient, phone, address, fulfillment, region, distance_km, weight_kg,
-             subtotal, discount, goods_total, shipping_fee, total, voucher_codes_json, tier, status, created_at
-           ) VALUES (
-             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-             $11, $12, $13, $14, $15, $16, $17, 'pending', $18
-           )`,
-          [
-            id, fresh.id, JSON.stringify(data.items), recipient, phone, address, data.fulfillment, data.region, data.distanceKm, data.weightKg,
-            data.subtotal, data.discount, data.goodsTotal, data.shippingFee, data.total, JSON.stringify(data.voucherCodes), data.tier, createdAt,
-          ],
-        )
-        for (const code of data.voucherCodes) {
-          // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-          await tx.query('DELETE FROM customer_vouchers WHERE customer_id = $1 AND code = $2', [fresh.id, code])
-        }
-        return { id, ...data, status: 'pending', createdAt, pointsEarned: 0 }
-      })
-      eventBroadcaster?.emit('order:created', {
-        orderId: order.id,
-        total: order.total,
-        goodsTotal: order.goodsTotal,
-        customer: req.customer.username,
-        recipient: req.body?.recipient,
-        fulfillment: order.fulfillment,
-        createdAt: order.createdAt,
-      })
-      res.status(201).json({ order })
-    } catch (error) {
-      fail(res, error)
-    }
-  })
-
-  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
-  app.get('/api/customer/orders', requireCustomer, async (req, res) => {
-    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-    const resOrders = await storeDb.query('SELECT * FROM customer_orders WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 100', [req.customer.id])
-    const orders = resOrders.rows.map((item) => ({
-      id: item.id,
-      items: JSON.parse(item.items_json),
-      itemCount: JSON.parse(item.items_json).reduce((sum, line) => sum + line.quantity, 0),
-      fulfillment: item.fulfillment,
-      subtotal: Number(item.subtotal),
-      discount: Number(item.discount),
-      goodsTotal: Number(item.goods_total),
-      shippingFee: Number(item.shipping_fee),
-      weightKg: Number(item.weight_kg),
-      total: Number(item.total),
-      voucherCodes: JSON.parse(item.voucher_codes_json),
-      tier: item.tier,
-      status: item.status,
-      pointsEarned: Number(item.points_earned),
-      createdAt: item.created_at,
-    }))
-    res.json({ orders })
-  })
-
-  // Chức năng processOrderPayment: xử lý thanh toán đơn hàng, tính điểm và lượt quay.
-  async function processOrderPayment(orderId) {
-    return storeDb.transaction(async (tx) => {
-      const orderRes = await tx.query('SELECT * FROM customer_orders WHERE id = $1', [orderId])
-      const order = orderRes.rows[0]
-      if (!order) return null
-      if (order.status === 'paid') return { alreadyPaid: true, pointsEarned: Number(order.points_earned), order }
-      const accRes = await tx.query('SELECT * FROM customers WHERE id = $1', [order.customer_id])
-      const account = accRes.rows[0]
-      const tier = tierForPoints(Number(account.points))
-      const goodsTotal = Number(order.goods_total)
-      const pointsEarned = pointsForPaidGoods(goodsTotal, tier)
-      const paidGoodsTotal = Number(account.paid_goods_total)
-      const before = Math.floor(paidGoodsTotal / 100000)
-      const after = Math.floor((paidGoodsTotal + goodsTotal) / 100000)
-      await tx.query(
-        'UPDATE customers SET points = points + $1, paid_goods_total = paid_goods_total + $2, spin_credits = spin_credits + $3 WHERE id = $4',
-        [pointsEarned, goodsTotal, after - before, account.id],
-      )
-      await tx.query("UPDATE customer_orders SET status = 'paid', paid_at = $1, points_earned = $2 WHERE id = $3", [now().toISOString(), pointsEarned, order.id])
-      return { alreadyPaid: false, pointsEarned, spinCreditsAdded: after - before, order }
-    })
-  }
-
-  // Route API: lấy thông tin thanh toán VietQR cho đơn hàng
-  app.get('/api/customer/orders/:id/payment-info', requireCustomer, async (req, res) => {
-    const orderRes = await storeDb.query('SELECT * FROM customer_orders WHERE id = $1 AND customer_id = $2', [req.params.id, req.customer.id])
-    const order = orderRes.rows[0]
-    if (!order) return res.status(404).json({ error: 'ORDER_NOT_FOUND' })
-    const amount = Number(order.total)
-    const transferContent = `ST ${order.id}`
-    const qrCodeUrl = `https://img.vietqr.io/image/MB-0388888999-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(transferContent)}&accountName=STORE%20VIETNAM`
-    res.json({
-      orderId: order.id,
-      amount,
-      currency: 'VND',
-      status: order.status,
-      bankName: 'MB Bank (Ngân hàng Quân Đội)',
-      accountNumber: '0388888999',
-      accountName: 'STORE VIETNAM',
-      transferContent,
-      qrCodeUrl,
-      instructions: 'Quét mã QR bằng ứng dụng ngân hàng hoặc chuyển khoản đúng nội dung để hệ thống tự động ghi nhận thanh toán.',
-    })
-  })
-
-  // Route API: mô phỏng thanh toán trực tuyến tức thì cho khách hàng (demo VietQR)
-  app.post('/api/customer/orders/:id/simulate-pay', requireCustomer, customerCsrf, async (req, res) => {
-    const orderRes = await storeDb.query('SELECT * FROM customer_orders WHERE id = $1 AND customer_id = $2', [req.params.id, req.customer.id])
-    if (!orderRes.rows.length) return res.status(404).json({ error: 'ORDER_NOT_FOUND' })
-    const result = await processOrderPayment(req.params.id)
-    if (!result) return res.status(404).json({ error: 'ORDER_NOT_FOUND' })
-    if (!result.alreadyPaid) {
-      eventBroadcaster?.emit('order:paid', {
-        orderId: req.params.id,
-        pointsEarned: result.pointsEarned,
-        total: Number(result.order?.total || 0),
-        customer: req.customer.username,
-        spinCreditsAdded: result.spinCreditsAdded,
-      })
-    }
-    res.json({ success: true, orderId: req.params.id, ...result })
-  })
-
-  // Route API: Webhook nhận thông báo thanh toán tự động từ Cổng thanh toán / Ngân hàng
-  app.post('/api/customer/payments/webhook', async (req, res) => {
-    const body = req.body || {}
-    const orderId = String(body.orderId || body.order_id || '').trim()
-    const amount = Number(body.amount)
-    if (!orderId || !/^[A-Za-z0-9_-]{3,60}$/.test(orderId)) {
-      return res.status(400).json({ error: 'INVALID_ORDER_ID' })
-    }
-    const orderRes = await storeDb.query('SELECT * FROM customer_orders WHERE id = $1', [orderId])
-    const order = orderRes.rows[0]
-    if (!order) return res.status(404).json({ error: 'ORDER_NOT_FOUND' })
-    if (order.status === 'paid') return res.json({ success: true, message: 'ORDER_ALREADY_PAID', orderId })
-    if (Number.isFinite(amount) && amount < Number(order.total)) {
-      return res.status(400).json({ error: 'INSUFFICIENT_AMOUNT', required: Number(order.total), received: amount })
-    }
-    const result = await processOrderPayment(orderId)
-    if (!result) return res.status(500).json({ error: 'PAYMENT_PROCESSING_FAILED' })
-    eventBroadcaster?.emit('order:paid', {
-      orderId,
-      pointsEarned: result.pointsEarned,
-      total: Number(order.total),
-      transactionCode: body.transactionCode || body.transaction_code || 'WEBHOOK',
-      spinCreditsAdded: result.spinCreditsAdded,
-    })
-    res.json({ success: true, orderId, ...result })
-  })
-
-  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.get('/api/admin/customers', requireAdmin, async (req, res) => {
     // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
     const resCust = await storeDb.query(
@@ -826,39 +660,8 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
   })
 
   // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
-  app.get('/api/admin/customer-orders', requireAdmin, async (req, res) => {
-    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-    const ordersRes = await storeDb.query(
-      `SELECT o.id, o.recipient, o.phone, o.address, o.region,
-              o.distance_km AS "distanceKm", o.goods_total AS "goodsTotal", o.shipping_fee AS "shippingFee",
-              o.total, o.status, o.created_at AS "createdAt", o.points_earned AS "pointsEarned", c.username
-       FROM customer_orders o JOIN customers c ON c.id = o.customer_id ORDER BY o.created_at DESC LIMIT 200`,
-    )
-    const orders = ordersRes.rows.map((row) => ({
-      ...row,
-      distanceKm: Number(row.distanceKm),
-      goodsTotal: Number(row.goodsTotal),
-      shippingFee: Number(row.shippingFee),
-      total: Number(row.total),
-      pointsEarned: Number(row.pointsEarned),
-    }))
-    res.json({ orders })
-  })
-
-  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
-  app.post('/api/admin/customer-orders/:id/paid', requireAdmin, requireCsrf, async (req, res) => {
-    const result = await processOrderPayment(req.params.id)
-    if (!result) return res.status(404).json({ error: 'ORDER_NOT_FOUND' })
-    if (!result.alreadyPaid) {
-      eventBroadcaster?.emit('order:paid', {
-        orderId: req.params.id,
-        pointsEarned: result.pointsEarned,
-        total: Number(result.order?.total || 0),
-        spinCreditsAdded: result.spinCreditsAdded,
-      })
-    }
-    res.json({ alreadyPaid: result.alreadyPaid, pointsEarned: result.pointsEarned, spinCreditsAdded: result.spinCreditsAdded })
-  })
+  registerStorefrontContact(app, { storeDb })
+  registerOrderWorkflow(app, { storeDb, now, requireCustomer, customerCsrf, requireAdmin, requireCsrf, quote, issueVoucher, tierForPoints, pointsForPaidGoods, eventBroadcaster, paymentWebhookSecret })
 
   return { requireCustomer, customerCsrf }
 }
