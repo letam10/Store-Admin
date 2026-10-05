@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from 'node:crypto'
+import { randomInt, randomUUID, timingSafeEqual } from 'node:crypto'
 import QRCode from 'qrcode'
 import { renderReceipt } from './receipt.js'
 
@@ -21,6 +21,7 @@ const messages = {
   REFUND_REFERENCE_REQUIRED: 'Cần xác nhận chuyển tiền hoàn và nhập mã giao dịch.', CASE_PENDING: 'Đơn đang có yêu cầu sau bán hàng cần xử lý.',
   COUNTER_CONFIRMATION_REQUIRED: 'Cần xác nhận đã thu tiền trực tiếp tại quầy.', DELIVERY_PAYMENT_CONFIRMATION_REQUIRED: 'Cần xác nhận đã thu tiền khi giao hàng.',
   INVALID_PAYMENT_SETTINGS: 'Kiểm tra chế độ, ngân hàng, số tài khoản và tên người nhận.',
+  WEBHOOK_NOT_CONFIGURED: 'Chưa cấu hình khóa xác thực webhook thanh toán.', INVALID_PAYMENT_AMOUNT: 'Số tiền thanh toán chưa hợp lệ.',
 }
 function fail(code, status = 400) { throw Object.assign(new Error(code), { status }) }
 function futureDate(value, now) {
@@ -79,7 +80,7 @@ function publicCase(row) {
 }
 
 export function registerOrderWorkflow(app, { storeDb, now, requireCustomer, customerCsrf, requireAdmin, requireCsrf,
-  quote, issueVoucher, tierForPoints, pointsForPaidGoods }) {
+  quote, issueVoucher, tierForPoints, pointsForPaidGoods, eventBroadcaster, paymentWebhookSecret = '' }) {
   const route = handler => async (req, res, next) => {
     try { res.set('Cache-Control', 'no-store'); await handler(req, res) } catch (error) {
       if (error.status || messages[error.message]) res.status(error.status || 400).json({ error: error.message, message: messages[error.message] || 'Không thực hiện được thao tác.' })
@@ -117,6 +118,12 @@ export function registerOrderWorkflow(app, { storeDb, now, requireCustomer, cust
     await storeDb.query("UPDATE customer_orders SET status = 'paid', paid_at = $1, points_earned = $2, payment_reference = $3, payment_confirmation = $4 WHERE id = $5", [now().toISOString(), pointsEarned, reference, confirmation, order.id])
     await event(order.id, confirmation === 'counter' ? 'Xác nhận thu tiền trực tiếp tại cửa hàng.' : 'Đã ghi nhận thanh toán: ' + reference, actor)
     return { alreadyPaid: false, pointsEarned, spinCreditsAdded: spins }
+  }
+  // Chỉ phát realtime sau khi giao dịch đã commit; callback lặp không cộng điểm hoặc phát sự kiện lần nữa.
+  async function notifyPaid(orderId, result, transactionCode) {
+    if (result.alreadyPaid) return
+    const order = await orderFor(orderId)
+    eventBroadcaster?.emit('order:paid', { orderId, ...result, total: Number(order.total), transactionCode })
   }
   async function compensate(customerId, count, source, shippingOnly = false) {
     const vouchers = []
@@ -182,6 +189,7 @@ export function registerOrderWorkflow(app, { storeDb, now, requireCustomer, cust
       await event(id, 'Tạo đơn ' + (method === 'bank_transfer' ? 'chuyển khoản' : method === 'cash' ? 'thanh toán tại quầy' : 'thu tiền khi giao'), 'customer')
       return publicOrder(await orderFor(id, account.id))
     })
+    eventBroadcaster?.emit('order:created', { orderId: order.id, total: order.total, goodsTotal: order.goodsTotal, customer: req.customer.username, recipient: order.recipient, fulfillment: order.fulfillment, createdAt: order.createdAt })
     res.status(201).json({ order })
   }))
   app.get('/api/customer/orders', requireCustomer, route(async (req, res) => {
@@ -193,9 +201,12 @@ export function registerOrderWorkflow(app, { storeDb, now, requireCustomer, cust
     const rows = (await storeDb.query('SELECT o.*, c.username FROM customer_orders o JOIN customers c ON c.id = o.customer_id ORDER BY o.created_at DESC LIMIT 500')).rows
     res.json({ orders: rows.map(publicOrder) })
   }))
-  app.get('/api/customer/orders/:id/payment', requireCustomer, route(async (req, res) => {
+  app.get(['/api/customer/orders/:id/payment', '/api/customer/orders/:id/payment-info'], requireCustomer, route(async (req, res) => {
     const order = await orderFor(req.params.id, req.customer.id)
-    res.json({ order: publicOrder(order), payment: await paymentInfo(order) })
+    const payment = await paymentInfo(order)
+    res.json({ order: publicOrder(order), payment, orderId: order.id, amount: payment.amount, currency: 'VND', status: order.status,
+      bankName: payment.bankName, accountNumber: payment.accountNumber, accountName: payment.accountName,
+      transferContent: payment.reference, qrCodeUrl: payment.qrImage })
   }))
   for (const audience of ['customer','admin']) app.get(['/api/' + audience + '/orders/:id/receipt', '/api/' + audience + '/orders/:id/receipt.html'], audience === 'customer' ? requireCustomer : requireAdmin, route(async (req, res) => {
     const order = await orderFor(req.params.id, audience === 'customer' ? req.customer.id : undefined)
@@ -205,13 +216,35 @@ export function registerOrderWorkflow(app, { storeDb, now, requireCustomer, cust
     if (req.path.endsWith('.html') || req.query.format === 'html') res.type('html').send(renderReceipt(receipt, audience))
     else res.json(receipt)
   }))
-  app.post('/api/customer/orders/:id/demo-paid', requireCustomer, customerCsrf, route(async (req, res) => {
+  app.post(['/api/customer/orders/:id/demo-paid', '/api/customer/orders/:id/simulate-pay'], requireCustomer, customerCsrf, route(async (req, res) => {
     const result = await storeDb.transaction(async () => {
       const order = await orderFor(req.params.id, req.customer.id, true)
       if (order.payment_mode !== 'demo' || order.payment_method !== 'bank_transfer' || (await settings()).mode !== 'demo') fail('DEMO_ONLY', 403)
       return markPaid(order, 'DEMO-' + order.id, 'customer-demo')
     })
-    res.json(result)
+    await notifyPaid(req.params.id, result)
+    res.json({ success: true, orderId: req.params.id, ...result })
+  }))
+  app.post('/api/customer/payments/webhook', route(async (req, res) => {
+    // Thông báo từ ngân hàng phải có khóa xác thực; không cho request công khai tự đánh dấu đã thu tiền.
+    if (!paymentWebhookSecret) fail('WEBHOOK_NOT_CONFIGURED', 503)
+    const supplied = Buffer.from(String(req.headers.authorization || ''))
+    const expected = Buffer.from('Bearer ' + paymentWebhookSecret)
+    if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) fail('UNAUTHORIZED', 401)
+    const body = req.body || {}, orderId = String(body.orderId || body.order_id || '').trim()
+    if (!/^[A-Za-z0-9_-]{3,60}$/.test(orderId)) fail('INVALID_ORDER')
+    const amount = Number(body.amount)
+    if (!['number', 'string'].includes(typeof body.amount) || String(body.amount).trim() === '' || !Number.isSafeInteger(amount) || amount < 0) fail('INVALID_PAYMENT_AMOUNT')
+    const reference = String(body.transactionCode || body.transaction_code || '').trim()
+    if (reference.length < 3 || reference.length > 100) fail('PAYMENT_REFERENCE_REQUIRED')
+    const result = await storeDb.transaction(async () => {
+      const order = await orderFor(orderId, undefined, true)
+      if (order.payment_method !== 'bank_transfer' || order.payment_mode === 'demo') fail('ACTION_NOT_ALLOWED', 409)
+      if (amount < Number(order.total)) fail('INVALID_PAYMENT_AMOUNT')
+      return markPaid(order, reference, 'bank-webhook')
+    })
+    await notifyPaid(orderId, result, reference)
+    res.json({ success: true, orderId, ...result })
   }))
   app.post('/api/customer/orders/:id/payment-report', requireCustomer, customerCsrf, route(async (req, res) => {
     const order = await orderFor(req.params.id, req.customer.id)
@@ -229,6 +262,7 @@ export function registerOrderWorkflow(app, { storeDb, now, requireCustomer, cust
       if (order.status === 'pending' && order.payment_method === 'bank_transfer' && order.payment_mode !== 'demo' && reference.length < 3) fail('PAYMENT_REFERENCE_REQUIRED')
       return markPaid(order, reference || (order.payment_method === 'cash' ? 'COUNTER-' : 'ADMIN-') + order.id, 'admin')
     })
+    await notifyPaid(req.params.id, result)
     res.json(result)
   }))
   app.post('/api/customer/orders/:id/cancel-unpaid', requireCustomer, customerCsrf, route(async (req, res) => {

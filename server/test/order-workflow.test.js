@@ -23,6 +23,61 @@ const schedule = '2026-10-03T02:00:00.000Z'
 const rescheduled = '2026-10-04T02:00:00.000Z'
 const realBank = { mode: 'manual', bankName: 'Ngân hàng kiểm thử', bankBin: '970436', accountNumber: '1234567890', accountName: 'STORE TEST' }
 
+test('VietQR trên main dùng chung biên nhận, quyền sở hữu và xác nhận mô phỏng đúng một lần', async () => {
+  const events = []
+  await withCommerceServer(async ({ root, storeDb }) => {
+    const customer = await customerSession(root), other = await customerSession(root, 'other'), admin = await adminSession(root, storeDb)
+    const order = await createOrder(root, storeDb, customer)
+    const info = await read(root, '/api/customer/orders/' + order.id + '/payment-info', customer)
+    assert.equal(info.amount, order.total)
+    assert.equal(info.qrCodeUrl, info.payment.qrImage)
+    assert.equal(info.transferContent, info.payment.reference)
+    assert.equal((await fetch(root + '/api/customer/orders/' + order.id + '/payment-info', { headers: { cookie: other.cookie } })).status, 404)
+    const payments = await Promise.all(Array.from({ length: 4 }, () => write(root, '/api/customer/orders/' + order.id + '/simulate-pay', customer)))
+    for (const response of payments) assert.equal(response.status, 200)
+    const receipt = await read(root, '/api/customer/orders/' + order.id + '/receipt', customer)
+    const account = (await read(root, '/api/customer/session', customer)).account
+    assert.equal(receipt.order.status, 'paid')
+    assert.equal(receipt.order.paymentConfirmation, 'demo_transfer')
+    assert.equal(account.points, receipt.order.pointsEarned)
+    assert.equal(events.filter(event => event.type === 'order:created').length, 1)
+    assert.equal(events.filter(event => event.type === 'order:paid').length, 1)
+    const cash = await createOrder(root, storeDb, customer, { paymentMethod: 'cash', fulfillment: 'pickup', address: '' })
+    assert.equal((await write(root, '/api/customer/orders/' + cash.id + '/simulate-pay', customer)).status, 403)
+    await write(root, '/api/admin/payment-settings', admin, realBank, 'PUT')
+    const manual = await createOrder(root, storeDb, customer)
+    assert.equal((await write(root, '/api/customer/orders/' + manual.id + '/simulate-pay', customer)).status, 403)
+    assert.equal((await fetch(root + '/api/customer/payments/webhook', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orderId: manual.id, amount: manual.total }) })).status, 503)
+  }, { paymentWebhookSecret: '', eventBroadcaster: { emit: (type, data) => events.push({ type, data }) } })
+})
+
+test('webhook VietQR xác thực khóa và số tiền, cạnh tranh với admin không cộng điểm trùng', async () => {
+  const events = [], secret = 'webhook-secret-chi-dung-trong-test'
+  await withCommerceServer(async ({ root, storeDb }) => {
+    const customer = await customerSession(root), admin = await adminSession(root, storeDb)
+    await write(root, '/api/admin/payment-settings', admin, realBank, 'PUT')
+    const order = await createOrder(root, storeDb, customer)
+    const info = await read(root, '/api/customer/orders/' + order.id + '/payment-info', customer)
+    assert.match(info.qrCodeUrl, /970436-1234567890/)
+    const webhook = (body, token = secret) => fetch(root + '/api/customer/payments/webhook', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token }, body: JSON.stringify({ orderId: order.id, amount: order.total, transactionCode: 'BANK-001', ...body }) })
+    assert.equal((await webhook({}, 'khong-hop-le')).status, 401)
+    for (const amount of [undefined, null, '', 'không phải tiền', -1, 1.5, order.total - 1]) assert.equal((await webhook({ amount })).status, 400)
+    assert.equal((await webhook({ transactionCode: '' })).status, 400)
+    assert.equal((await read(root, '/api/customer/session', customer)).account.points, 0)
+    const results = await Promise.all([webhook({ amount: String(order.total) }), webhook({}), write(root, '/api/admin/customer-orders/' + order.id + '/paid', admin, { reference: 'BANK-001' })])
+    for (const response of results) assert.equal(response.status, 200)
+    const account = (await read(root, '/api/customer/session', customer)).account
+    const receipt = await read(root, '/api/customer/orders/' + order.id + '/receipt', customer)
+    assert.equal(receipt.order.paymentReference, 'BANK-001')
+    assert.equal(account.points, receipt.order.pointsEarned)
+    assert.equal(account.spinCredits, Math.floor(order.goodsTotal / 100000))
+    assert.equal(events.filter(event => event.type === 'order:paid').length, 1)
+    const cancelled = await createOrder(root, storeDb, customer)
+    await write(root, '/api/customer/orders/' + cancelled.id + '/cancel-unpaid', customer)
+    assert.equal((await webhook({ orderId: cancelled.id, amount: cancelled.total })).status, 409)
+  }, { paymentWebhookSecret: secret, eventBroadcaster: { emit: (type, data) => events.push({ type, data }) } })
+})
+
 test('chuyển khoản phải đối soát; xác nhận đồng thời chỉ cộng điểm và lượt một lần', () => withCommerceServer(async ({ root, storeDb }) => {
   const customer = await customerSession(root), other = await customerSession(root, 'other'), admin = await adminSession(root, storeDb)
   assert.equal((await write(root, '/api/admin/payment-settings', admin, realBank, 'PUT')).status, 200)

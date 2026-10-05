@@ -71,6 +71,7 @@ export const config = Object.freeze({
   generationQueueMax: integerEnv('GENERATION_QUEUE_MAX', 4, { min: 0, max: 50 }),
   generationQueueWaitMs: integerEnv('GENERATION_QUEUE_WAIT_MS', 30000, { min: 1000, max: 300000 }),
   cookieSecure: process.env.COOKIE_SECURE === 'true',
+  paymentWebhookSecret: process.env.PAYMENT_WEBHOOK_SECRET || '',
   // Keep a small, clearly labelled dataset available for local development
   // unless the operator explicitly disables it in server/.env.
   enableDemoData: process.env.ENABLE_DEMO_DATA === undefined ? true : process.env.ENABLE_DEMO_DATA === 'true',

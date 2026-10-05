@@ -50,7 +50,7 @@ export function AdminCustomers() {
   const totalPoints = customers.reduce((sum, item) => sum + Number(item.points || 0), 0)
   const topCustomer = [...customers].sort((a, b) => Number(b.points || 0) - Number(a.points || 0))[0]
   const activeSpinCredits = customers.reduce((sum, item) => sum + Number(item.spinCredits || 0), 0)
-  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">KHÁCH HÀNG THỰC</p><h2>Điểm và hạng thành viên</h2><p>Sắp xếp theo điểm giảm dần. Điểm chỉ cộng khi đơn được ghi nhận thanh toán.</p></div><span className="admin-preview-badge">{data?.customers.length || 0} khách</span></div>
+  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">KHÁCH HÀNG THỰC</p><h2>Điểm và hạng thành viên</h2><p>Sắp xếp theo điểm giảm dần. Điểm chỉ cộng khi đơn được ghi nhận thanh toán.</p></div><span className="admin-preview-badge">{data?.customers?.length || 0} khách</span></div>
     <div className="admin-commerce-summary"><div><small>Tổng khách</small><b>{customers.length}</b><span>Đang theo dõi</span></div><div><small>Tổng điểm</small><b>{totalPoints.toLocaleString('vi-VN')}</b><span>Điểm tích lũy</span></div><div><small>Người dẫn đầu</small><b>{topCustomer?.username || '—'}</b><span>{topCustomer ? topCustomer.points.toLocaleString('vi-VN') + ' điểm' : 'Chưa có dữ liệu'}</span></div><div><small>Lượt quay còn lại</small><b>{activeSpinCredits}</b><span>Toàn hệ thống</span></div></div>
 
     <div className="admin-module-toolbar"><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm tên hoặc email" /><label>Điểm tối thiểu <input type="number" min="0" value={minPoints} onChange={(event) => setMinPoints(event.target.value)} /></label></div>
@@ -142,10 +142,10 @@ export function AdminVouchers({ csrfToken }) {
 // Chức năng AdminFavorites: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function AdminFavorites() {
   const { data, error } = useReport('/api/admin/favorites')
-  const highest = data?.favorites[0]?.count || 1
+  const highest = data?.favorites?.[0]?.count || 1
   return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">SỞ THÍCH KHÁCH HÀNG</p><h2>Sản phẩm được yêu thích nhất</h2></div></div>
     {error && <p role="alert">{error}</p>}{!data && !error && <p>Đang tải…</p>}
-    {data && <div className="admin-view-list">{data.favorites.length ? data.favorites.map((item, index) => <article key={item.id}><b className="admin-view-rank">{index + 1}</b>{item.image ? <img src={item.image} alt="" width="48" height="48" loading="lazy" /> : <span className="admin-view-symbol" aria-hidden="true">{item.symbol}</span>}<div><strong title={item.name}>{item.name}</strong><small>{item.id}</small><span className="admin-view-bar" style={{ '--view-width': `${item.count / highest * 100}%` }} /></div><b>{item.count} lượt yêu thích</b></article>) : <p>Chưa có sản phẩm yêu thích.</p>}</div>}
+    {data && <div className="admin-view-list">{data.favorites?.length ? data.favorites.map((item, index) => <article key={item.id}><b className="admin-view-rank">{index + 1}</b>{item.image ? <img src={item.image} alt="" width="48" height="48" loading="lazy" /> : <span className="admin-view-symbol" aria-hidden="true">{item.symbol}</span>}<div><strong title={item.name}>{item.name}</strong><small>{item.id}</small><span className="admin-view-bar" style={{ '--view-width': `${item.count / highest * 100}%` }} /></div><b>{item.count} lượt yêu thích</b></article>) : <p>Chưa có sản phẩm yêu thích.</p>}</div>}
   </section>
 }
 

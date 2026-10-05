@@ -65,6 +65,7 @@ export default function Admin() {
   const [range, setRange] = useState({ from: today.slice(0, 8) + '01', to: today })
   const [activeModule, setActiveModule] = useState('dashboard')
   const [adminSearch, setAdminSearch] = useState('')
+  const [realtimeEvents, setRealtimeEvents] = useState([])
   const logRef = useRef(null)
   const gateRef = useRef(createRequestGate())
   const loadEpochRef = useRef(0)
@@ -186,6 +187,56 @@ export default function Admin() {
   // Session identity is the lifecycle boundary for all private UI data.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.authenticated, session?.username])
+
+  useEffect(() => {
+    if (!session?.authenticated) return undefined
+    let es
+    try {
+      es = new EventSource('/api/admin/events/stream')
+      es.addEventListener('order:created', (e) => {
+        try {
+          const d = JSON.parse(e.data)
+          setRealtimeEvents((curr) => [{
+            id: Math.random(),
+            type: 'order',
+            text: `🔔 Đơn mới: ${d.orderId} (${new Intl.NumberFormat('vi-VN').format(d.total)} ₫) từ ${d.customer || d.recipient}`,
+            time: new Date().toLocaleTimeString('vi-VN'),
+          }, ...curr].slice(0, 4))
+        } catch (_err) {
+          void _err
+        }
+      })
+      es.addEventListener('order:paid', (e) => {
+        try {
+          const d = JSON.parse(e.data)
+          setRealtimeEvents((curr) => [{
+            id: Math.random(),
+            type: 'payment',
+            text: `💰 Thanh toán thành công: ${d.orderId} (+${d.pointsEarned} điểm)`,
+            time: new Date().toLocaleTimeString('vi-VN'),
+          }, ...curr].slice(0, 4))
+        } catch (_err) {
+          void _err
+        }
+      })
+      es.addEventListener('review:created', (e) => {
+        try {
+          const d = JSON.parse(e.data)
+          setRealtimeEvents((curr) => [{
+            id: Math.random(),
+            type: 'review',
+            text: `⭐ Đánh giá ${d.rating}★ từ ${d.customer} cho sản phẩm ${d.productId}`,
+            time: new Date().toLocaleTimeString('vi-VN'),
+          }, ...curr].slice(0, 4))
+        } catch (_err) {
+          void _err
+        }
+      })
+    } catch (_err) {
+      void _err
+    }
+    return () => { es?.close() }
+  }, [session?.authenticated])
 
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [messages, activity])
 
@@ -385,6 +436,13 @@ export default function Admin() {
           </div>
           <div className="admin-header__actions"><span className="admin-live-dot">{copy.local}</span><ThemeLanguageControls /><button type="button" onClick={logout}>{copy.signOut}</button></div>
         </header>
+        {realtimeEvents.length > 0 && (
+          <div className="admin-realtime-bar" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', background: '#f4fbf5', border: '1px solid #cbe9d3', padding: '0.5rem 1rem', borderRadius: '6px', margin: '0.5rem 0', fontSize: '0.875rem' }}>
+            <span style={{ fontWeight: 'bold', color: '#254535' }}>📡 Live SSE:</span>
+            <span style={{ flex: 1, color: '#1b3327' }}>{realtimeEvents[0].text}</span>
+            <small style={{ color: '#688272' }}>{realtimeEvents[0].time}</small>
+          </div>
+        )}
         {pageError && <p className="admin-error" role="alert">{pageError}</p>}
         {activeModule !== 'ai-local' && <AdminModule module={activeModule} csrfToken={session.csrfToken} onNavigate={setActiveModule} language={language} />}
         {activeModule === 'ai-local' && <>

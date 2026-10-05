@@ -166,6 +166,62 @@ function createCoordinator() {
   }
 }
 
+// Chức năng createEventBroadcaster: quản lý kết nối SSE Realtime cho Admin
+function createEventBroadcaster() {
+  const clients = new Set()
+  return {
+    addClient(res) {
+      clients.add(res)
+      res.on('close', () => clients.delete(res))
+    },
+    emit(type, data = {}) {
+      const payload = `event: ${type}\ndata: ${JSON.stringify({ ...data, timestamp: new Date().toISOString() })}\n\n`
+      for (const res of clients) {
+        if (!res.writableEnded && !res.destroyed) {
+          try { res.write(payload) } catch { clients.delete(res) }
+        } else {
+          clients.delete(res)
+        }
+      }
+    },
+    get size() {
+      return clients.size
+    },
+  }
+}
+
+// Chức năng createCacheManager: lưu cache in-memory và sinh ETag cho các endpoint đọc nhiều
+function createCacheManager() {
+  const store = new Map()
+  return {
+    get(key) {
+      const entry = store.get(key)
+      if (!entry) return null
+      if (entry.expiresAt && Date.now() > entry.expiresAt) {
+        store.delete(key)
+        return null
+      }
+      return entry
+    },
+    set(key, data, ttlMs = 30000) {
+      const json = typeof data === 'string' ? data : JSON.stringify(data)
+      const etag = '"' + hashToken(json).slice(0, 16) + '"'
+      const entry = { data, json, etag, expiresAt: Date.now() + ttlMs }
+      store.set(key, entry)
+      return entry
+    },
+    invalidate(prefix) {
+      if (!prefix) {
+        store.clear()
+        return
+      }
+      for (const key of store.keys()) {
+        if (key.startsWith(prefix)) store.delete(key)
+      }
+    },
+  }
+}
+
 // Chức năng createApp: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function createApp(overrides = {}) {
   const defaultTarget = config.databaseUrl ||
@@ -180,6 +236,8 @@ export function createApp(overrides = {}) {
   const generationQueue = overrides.generationQueue || new GenerationQueue({ concurrency: 1, maxQueued: config.generationQueueMax })
   const now = overrides.now || (() => new Date())
   const coordinator = createCoordinator()
+  const eventBroadcaster = overrides.eventBroadcaster || createEventBroadcaster()
+  const cache = overrides.cache || createCacheManager()
   const loginIpLimiter = new SlidingWindowLimiter({ limit: 20, windowMs: 10 * 60 * 1000, maxKeys: 5000 })
   const loginAccountLimiter = new SlidingWindowLimiter({ limit: 5, windowMs: 10 * 60 * 1000, maxKeys: 5000 })
   const chatLimiter = new SlidingWindowLimiter({ limit: 20, windowMs: 60 * 1000, maxKeys: 5000 })
@@ -243,7 +301,7 @@ export function createApp(overrides = {}) {
     next()
   }
 
-  const { requireCustomer, customerCsrf } = registerCustomerRoutes(app, { storeDb, config, now, requireAdmin, requireCsrf })
+  const { requireCustomer, customerCsrf } = registerCustomerRoutes(app, { storeDb, config, now, requireAdmin, requireCsrf, eventBroadcaster, paymentWebhookSecret: overrides.paymentWebhookSecret ?? config.paymentWebhookSecret })
 
   // Chức năng ownedConversation: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function ownedConversation(id, kind, ownerKey) {
@@ -697,7 +755,29 @@ export function createApp(overrides = {}) {
     }
     const appearance = Object.fromEntries(allowed.map((key) => [key, String(body[key] || '').trim()]))
     await storeDb.setSetting('storefront_appearance', JSON.stringify(appearance))
+    cache.invalidate('appearance')
     res.json({ appearance })
+  })
+
+  // Route API: Server-Sent Events (SSE) phát sự kiện thời gian thực cho Admin
+  app.get('/api/admin/events/stream', requireAdmin, (req, res) => {
+    res.status(200).set({
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+    res.flushHeaders()
+    res.write('event: connected\ndata: {"status":"connected"}\n\n')
+    eventBroadcaster.addClient(res)
+    const timer = setInterval(() => {
+      if (!res.writableEnded && !res.destroyed) {
+        res.write(': keepalive\n\n')
+      } else {
+        clearInterval(timer)
+      }
+    }, 25000)
+    req.on('close', () => clearInterval(timer))
   })
 
   // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
@@ -726,6 +806,7 @@ export function createApp(overrides = {}) {
       stockCount,
     }
     await storeDb.upsertCatalogProducts([product])
+    cache.invalidate('catalog')
     res.status(201).json({ product: await storeDb.getCatalogProduct(id) })
   })
 
@@ -752,6 +833,7 @@ export function createApp(overrides = {}) {
     const product = await storeDb.updateCatalogProduct(req.params.id, patch)
     // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!product) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    cache.invalidate('catalog')
     res.json({ product })
   })
 
@@ -761,6 +843,7 @@ export function createApp(overrides = {}) {
     if (/^[1-4]$/.test(req.params.id)) return res.status(400).json({ error: 'FEATURED_PRODUCT_PROTECTED' })
     // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!(await storeDb.deleteCatalogProduct(req.params.id))) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    cache.invalidate('catalog')
     res.json({ ok: true, id: req.params.id })
   })
 
@@ -797,35 +880,67 @@ export function createApp(overrides = {}) {
     }
     // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!(await storeDb.updateCatalogOffer(req.params.id, body))) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    cache.invalidate('catalog')
     res.json({ ok: true, id: req.params.id, ...body })
   })
 
   // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.get('/api/storefront/catalog', async (req, res) => {
-    res.set('Cache-Control', 'no-store')
     const details = req.query.details === '1'
-    const catalog = await storeDb.storefrontCatalog({ details })
-    const base = []
-    for (const product of originalProducts) {
-      base.push({
-        id: String(product.id), source: 'shared-demo', sourceId: String(product.id),
-        name: product.name, category: product.category, price: product.price,
-        description: product.description, image: null, features: product.features || [],
-        tone: product.tone, symbol: product.symbol, label: product.label,
-        sourceUrl: 'local://shared-demo', sourcePriceCents: product.price,
-        sourceCurrency: 'VND', importedAt: null, discountPercent: 0, stockCount: 20,
-        viewCount: await storeDb.getProductViewCount(String(product.id)),
-        favoriteCount: await storeDb.getProductFavoriteCount(String(product.id)),
-      })
+    const cacheKey = 'catalog:' + (details ? '1' : '0')
+    const ifNoneMatch = req.headers['if-none-match']
+    let cached = cache.get(cacheKey)
+    if (!cached) {
+      const catalog = await storeDb.storefrontCatalog({ details })
+      const base = []
+      for (const product of originalProducts) {
+        base.push({
+          id: String(product.id), source: 'shared-demo', sourceId: String(product.id),
+          name: product.name, category: product.category, price: product.price,
+          description: product.description, image: null, features: product.features || [],
+          tone: product.tone, symbol: product.symbol, label: product.label,
+          sourceUrl: 'local://shared-demo', sourcePriceCents: product.price,
+          sourceCurrency: 'VND', importedAt: null, discountPercent: 0, stockCount: 20,
+          viewCount: await storeDb.getProductViewCount(String(product.id)),
+          favoriteCount: await storeDb.getProductFavoriteCount(String(product.id)),
+        })
+      }
+      const products = [...new Map([...base, ...catalog].map((product) => [String(product.id), product])).values()]
+      cached = cache.set(cacheKey, { products }, 30000)
     }
-    const products = [...new Map([...base, ...catalog].map((product) => [String(product.id), product])).values()]
-    res.json({ products })
+
+    res.set({
+      'Cache-Control': 'public, max-age=30, stale-while-revalidate=60',
+      'ETag': cached.etag,
+    })
+
+    if (ifNoneMatch && ifNoneMatch === cached.etag) {
+      return res.status(304).end()
+    }
+
+    res.type('application/json').send(cached.json)
   })
 
   // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.get('/api/storefront/appearance', async (req, res) => {
-    res.set('Cache-Control', 'no-store')
-    res.json({ appearance: parseJson(await storeDb.getSetting('storefront_appearance'), {}) })
+    const cacheKey = 'appearance'
+    const ifNoneMatch = req.headers['if-none-match']
+    let cached = cache.get(cacheKey)
+    if (!cached) {
+      const appearance = parseJson(await storeDb.getSetting('storefront_appearance'), {})
+      cached = cache.set(cacheKey, { appearance }, 60000)
+    }
+
+    res.set({
+      'Cache-Control': 'public, max-age=60, stale-while-revalidate=120',
+      'ETag': cached.etag,
+    })
+
+    if (ifNoneMatch && ifNoneMatch === cached.etag) {
+      return res.status(304).end()
+    }
+
+    res.type('application/json').send(cached.json)
   })
 
   // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
@@ -839,6 +954,7 @@ export function createApp(overrides = {}) {
     const viewCount = await storeDb.recordProductView(id)
     // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (viewCount === null) return res.status(404).json({ error: 'PRODUCT_NOT_FOUND' })
+    cache.invalidate('catalog')
     res.json({ id, viewCount })
   })
 

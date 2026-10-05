@@ -124,7 +124,7 @@ function createCode() {
 }
 
 // Chức năng registerCustomerRoutes: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
-export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin, requireCsrf }) {
+export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin, requireCsrf, eventBroadcaster, paymentWebhookSecret }) {
   const customerLimiter = new Map()
   // Chức năng limited: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   function limited(ip) {
@@ -459,6 +459,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
          rating = EXCLUDED.rating, comment = EXCLUDED.comment, admin_reply = '', replied_at = NULL, created_at = EXCLUDED.created_at`,
       [req.customer.id, id, rating, comment, now().toISOString()],
     )
+    eventBroadcaster?.emit('review:created', { productId: id, rating, customer: req.customer.username, comment })
     res.json({ ok: true })
   })
 
@@ -660,7 +661,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
 
   // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   registerStorefrontContact(app, { storeDb })
-  registerOrderWorkflow(app, { storeDb, now, requireCustomer, customerCsrf, requireAdmin, requireCsrf, quote, issueVoucher, tierForPoints, pointsForPaidGoods })
+  registerOrderWorkflow(app, { storeDb, now, requireCustomer, customerCsrf, requireAdmin, requireCsrf, quote, issueVoucher, tierForPoints, pointsForPaidGoods, eventBroadcaster, paymentWebhookSecret })
 
   return { requireCustomer, customerCsrf }
 }
