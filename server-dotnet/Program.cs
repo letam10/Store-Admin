@@ -49,9 +49,9 @@ var db = app.Services.GetRequiredService<StoreDb>();
 
 if (isInteractive)
 {
-    ConsoleMenu.Run(db, () => app.Run());
+    await ConsoleMenu.RunAsync(db, app);
 }
 else
 {
-    app.Run();
+    await app.RunAsync();
 }

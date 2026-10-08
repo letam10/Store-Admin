@@ -1,17 +1,20 @@
 /*
  * Tệp: server-dotnet/Data/ConsoleMenu.cs
- * Mục đích: Bảng menu tương tác quản lý hệ thống trên Console ASP.NET Core.
+ * Mục đích: Bảng menu tương tác quản lý hệ thống trên Console ASP.NET Core (chạy ngầm API không làm mất menu).
  */
+using Microsoft.AspNetCore.Builder;
 using StoreApi.Security;
 
 namespace StoreApi.Data;
 
 public static class ConsoleMenu
 {
-    public static void Run(StoreDb db, Action startServer)
+    public static async Task RunAsync(StoreDb db, WebApplication app)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         Console.InputEncoding = System.Text.Encoding.UTF8;
+
+        bool isServerRunning = false;
 
         while (true)
         {
@@ -22,7 +25,24 @@ public static class ConsoleMenu
             Console.WriteLine("======================================================");
             Console.ResetColor();
 
-            Console.WriteLine("  [1] 🚀 Khởi chạy Web API (Mở cổng 5000 & Swagger)");
+            if (isServerRunning)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("  Trạng thái API: 🟢 ĐANG CHẠY (http://127.0.0.1:5000)");
+                Console.WriteLine("  Swagger UI:     http://localhost:5000/swagger");
+                Console.ResetColor();
+                Console.WriteLine("------------------------------------------------------");
+                Console.WriteLine("  [1] 🛑 Dừng Web API Server");
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine("  Trạng thái API: ⚪ ĐÃ TẮT");
+                Console.ResetColor();
+                Console.WriteLine("------------------------------------------------------");
+                Console.WriteLine("  [1] 🚀 Khởi chạy Web API (Mở cổng 5000 & Swagger)");
+            }
+
             Console.WriteLine("  [2] 🛡️  Tạo tài khoản Admin mới");
             Console.WriteLine("  [3] 🔑 Đổi mật khẩu tài khoản Admin");
             Console.WriteLine("  [4] 👥 Tạo nhanh tài khoản Khách hàng mẫu (Test Data)");
@@ -40,11 +60,47 @@ public static class ConsoleMenu
             switch (choice)
             {
                 case "1":
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine("\n[+] Đang khởi động Web API Server...");
-                    Console.ResetColor();
-                    startServer();
-                    return;
+                    if (!isServerRunning)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine("\n[+] Đang khởi động Web API Server...");
+                        Console.ResetColor();
+                        try
+                        {
+                            await app.StartAsync();
+                            isServerRunning = true;
+                            Console.ForegroundColor = ConsoleColor.Green;
+                            Console.WriteLine("✅ Server đã bật thành công tại http://127.0.0.1:5000!");
+                            Console.WriteLine("👉 Web API đang chạy ngầm, bạn vẫn có thể chọn các menu khác bình thường!");
+                            Console.ResetColor();
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Red;
+                            Console.WriteLine($"❌ Lỗi khởi động server: {ex.Message}");
+                            Console.ResetColor();
+                        }
+                    }
+                    else
+                    {
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.WriteLine("\n[-] Đang dừng Web API Server...");
+                        Console.ResetColor();
+                        try
+                        {
+                            await app.StopAsync();
+                            isServerRunning = false;
+                            Console.ForegroundColor = ConsoleColor.Green;
+                            Console.WriteLine("✅ Đã dừng Web API Server.");
+                            Console.ResetColor();
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"❌ Lỗi dừng server: {ex.Message}");
+                        }
+                    }
+                    WaitKey();
+                    break;
 
                 case "2":
                     CreateAdmin(db);
@@ -71,6 +127,10 @@ public static class ConsoleMenu
                     break;
 
                 case "0":
+                    if (isServerRunning)
+                    {
+                        try { await app.StopAsync(); } catch { }
+                    }
                     Console.WriteLine("\nĐã thoát chương trình.");
                     Environment.Exit(0);
                     return;
