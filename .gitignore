@@ -23,6 +23,8 @@ dist-ssr
 *.sln
 !server-dotnet/*.sln
 !server-dotnet/*.slnx
+.vs/
+*.user
 *.sw?
 
 # Secrets
