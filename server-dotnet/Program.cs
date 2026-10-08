@@ -1,6 +1,6 @@
 /*
  * Tệp: server-dotnet/Program.cs
- * Mục đích: Điểm khởi động ASP.NET Core C# và đăng ký DI, EF Core SQL Server, CORS, Swagger, controllers.
+ * Mục đích: Điểm khởi động ASP.NET Core C# và đăng ký DI, EF Core SQL Server, CORS, Swagger, controllers và Menu quản lý.
  */
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
@@ -44,4 +44,14 @@ if (app.Environment.IsDevelopment())
 app.UseCors("local-frontends");
 app.MapControllers();
 
-app.Run();
+var isInteractive = Environment.UserInteractive && !Console.IsInputRedirected && !args.Contains("--no-menu") && !args.Contains("--server");
+var db = app.Services.GetRequiredService<StoreDb>();
+
+if (isInteractive)
+{
+    ConsoleMenu.Run(db, () => app.Run());
+}
+else
+{
+    app.Run();
+}

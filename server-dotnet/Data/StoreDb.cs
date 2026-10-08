@@ -5,6 +5,7 @@
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using StoreApi.Models;
+using StoreApi.Security;
 
 namespace StoreApi.Data;
 
@@ -42,20 +43,37 @@ public sealed class StoreDb
         EnsureCustomerTables();
     }
 
-    private SqlConnection Open()
+    public SqlConnection Open()
     {
         var connection = new SqlConnection(_connectionString);
         connection.Open();
         return connection;
     }
 
-    private void EnsureCustomerTables()
+    public void EnsureCustomerTables()
     {
         try
         {
             using var db = Open();
             using var command = db.CreateCommand();
             command.CommandText = """
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'admins')
+                CREATE TABLE admins (
+                  id INT IDENTITY(1,1) PRIMARY KEY,
+                  username NVARCHAR(255) NOT NULL UNIQUE,
+                  password_salt NVARCHAR(MAX) NOT NULL,
+                  password_hash NVARCHAR(MAX) NOT NULL,
+                  created_at NVARCHAR(100) NOT NULL
+                );
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'admin_sessions')
+                CREATE TABLE admin_sessions (
+                  token_hash NVARCHAR(255) PRIMARY KEY,
+                  admin_id INT NOT NULL FOREIGN KEY REFERENCES admins(id) ON DELETE CASCADE,
+                  expires_at NVARCHAR(100) NOT NULL,
+                  created_at NVARCHAR(100) NOT NULL
+                );
+
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'customers')
                 CREATE TABLE customers (
                   id BIGINT IDENTITY(1,1) PRIMARY KEY, username NVARCHAR(255) NOT NULL UNIQUE,
@@ -64,25 +82,30 @@ public sealed class StoreDb
                   paid_goods_total INT NOT NULL DEFAULT 0, spin_credits INT NOT NULL DEFAULT 0,
                   created_at NVARCHAR(100) NOT NULL
                 );
+
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'customer_sessions')
                 CREATE TABLE customer_sessions (
                   token_hash NVARCHAR(255) PRIMARY KEY, customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
                   expires_at NVARCHAR(100) NOT NULL
                 );
+
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'customer_favorites')
                 CREATE TABLE customer_favorites (
                   customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
                   product_id NVARCHAR(255) NOT NULL, created_at NVARCHAR(100) NOT NULL,
                   PRIMARY KEY(customer_id, product_id)
                 );
+
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'voucher_codes')
                 CREATE TABLE voucher_codes (code NVARCHAR(255) PRIMARY KEY, created_at NVARCHAR(100) NOT NULL);
+
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'customer_vouchers')
                 CREATE TABLE customer_vouchers (
                   code NVARCHAR(255) PRIMARY KEY FOREIGN KEY REFERENCES voucher_codes(code), customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
                   label NVARCHAR(255) NOT NULL, type NVARCHAR(50) NOT NULL, value INT NOT NULL, scope NVARCHAR(50) NOT NULL DEFAULT 'goods',
                   expires_at NVARCHAR(100) NOT NULL, source NVARCHAR(255) NOT NULL, created_at NVARCHAR(100) NOT NULL
                 );
+
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'product_reviews')
                 CREATE TABLE product_reviews (
                   id BIGINT IDENTITY(1,1) PRIMARY KEY, customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
@@ -90,6 +113,7 @@ public sealed class StoreDb
                   admin_reply NVARCHAR(MAX) NOT NULL DEFAULT '', created_at NVARCHAR(100) NOT NULL, replied_at NVARCHAR(100) NULL,
                   CONSTRAINT UQ_reviews_customer_product UNIQUE(customer_id, product_id)
                 );
+
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'customer_orders')
                 CREATE TABLE customer_orders (
                   id NVARCHAR(255) PRIMARY KEY, customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
@@ -100,13 +124,48 @@ public sealed class StoreDb
                   status NVARCHAR(50) NOT NULL DEFAULT 'pending', points_earned INT NOT NULL DEFAULT 0,
                   created_at NVARCHAR(100) NOT NULL, paid_at NVARCHAR(100) NULL
                 );
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Products')
+                CREATE TABLE Products (
+                  Id INT IDENTITY(1,1) PRIMARY KEY,
+                  Name NVARCHAR(255) NOT NULL,
+                  Price DECIMAL(18,2) NOT NULL,
+                  Category NVARCHAR(255) NOT NULL,
+                  Description NVARCHAR(MAX) NULL,
+                  Image NVARCHAR(MAX) NULL
+                );
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'catalog_products')
+                CREATE TABLE catalog_products (
+                  id NVARCHAR(255) PRIMARY KEY,
+                  source NVARCHAR(100) NOT NULL DEFAULT 'local',
+                  source_id NVARCHAR(255) NOT NULL DEFAULT '',
+                  name NVARCHAR(500) NOT NULL,
+                  category NVARCHAR(255) NOT NULL,
+                  price BIGINT NOT NULL CHECK(price >= 0),
+                  description NVARCHAR(MAX) NOT NULL,
+                  image NVARCHAR(MAX) NOT NULL,
+                  features_json NVARCHAR(MAX) NOT NULL DEFAULT '[]',
+                  tone NVARCHAR(100) NOT NULL DEFAULT 'neutral',
+                  symbol NVARCHAR(50) NOT NULL DEFAULT '',
+                  label NVARCHAR(255) NOT NULL DEFAULT '',
+                  source_url NVARCHAR(MAX) NOT NULL DEFAULT '',
+                  source_price_cents INT NOT NULL DEFAULT 0 CHECK(source_price_cents >= 0),
+                  source_currency NVARCHAR(20) NOT NULL DEFAULT 'VND',
+                  imported_at NVARCHAR(100) NOT NULL DEFAULT '',
+                  discount_percent INT NOT NULL DEFAULT 0 CHECK(discount_percent BETWEEN 0 AND 90),
+                  stock_count INT NOT NULL DEFAULT 20 CHECK(stock_count >= 0)
+                );
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'product_views')
+                CREATE TABLE product_views (
+                  product_id NVARCHAR(255) PRIMARY KEY,
+                  view_count INT NOT NULL DEFAULT 0 CHECK(view_count >= 0)
+                );
                 """;
             command.ExecuteNonQuery();
         }
-        catch
-        {
-            // Table creation might already be handled by schema script
-        }
+        catch { }
     }
 
     public IReadOnlyList<CatalogProduct> Catalog()
@@ -196,15 +255,17 @@ public sealed class StoreDb
         return reader.Read() ? (Convert.ToInt64(reader.GetValue(0)), reader.GetString(1), reader.GetString(2), Convert.ToInt32(reader.GetValue(3)), Convert.ToInt32(reader.GetValue(4))) : null;
     }
 
-    public long CreateCustomer(string username, string email, string salt, string hash)
+    public long CreateCustomer(string username, string email, string salt, string hash, int points = 0, int spinCredits = 0)
     {
         using var db = Open();
         using var command = db.CreateCommand();
-        command.CommandText = "INSERT INTO customers(username,email,password_salt,password_hash,created_at) VALUES(@u,@e,@s,@h,@now); SELECT CAST(SCOPE_IDENTITY() AS BIGINT);";
+        command.CommandText = "INSERT INTO customers(username,email,password_salt,password_hash,points,spin_credits,created_at) VALUES(@u,@e,@s,@h,@p,@sc,@now); SELECT CAST(SCOPE_IDENTITY() AS BIGINT);";
         command.Parameters.AddWithValue("@u", username.Trim());
         command.Parameters.AddWithValue("@e", email.Trim());
         command.Parameters.AddWithValue("@s", salt);
         command.Parameters.AddWithValue("@h", hash);
+        command.Parameters.AddWithValue("@p", points);
+        command.Parameters.AddWithValue("@sc", spinCredits);
         command.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
         return Convert.ToInt64(command.ExecuteScalar());
     }
@@ -258,6 +319,29 @@ public sealed class StoreDb
         command.Parameters.AddWithValue("@u", username.Trim());
         var value = command.ExecuteScalar();
         return value is null || value is DBNull ? null : Convert.ToInt64(value);
+    }
+
+    public bool CreateAdmin(string username, string password)
+    {
+        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password)) return false;
+        var existing = FindAdmin(username);
+        var (salt, hash) = Tokens.HashPassword(password);
+        using var db = Open();
+        using var command = db.CreateCommand();
+
+        if (existing is not null)
+        {
+            command.CommandText = "UPDATE admins SET password_salt=@s, password_hash=@h WHERE LOWER(username)=LOWER(@u)";
+        }
+        else
+        {
+            command.CommandText = "INSERT INTO admins (username, password_salt, password_hash, created_at) VALUES (@u, @s, @h, @now)";
+            command.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+        }
+        command.Parameters.AddWithValue("@u", username.Trim());
+        command.Parameters.AddWithValue("@s", salt);
+        command.Parameters.AddWithValue("@h", hash);
+        return command.ExecuteNonQuery() > 0;
     }
 
     public void CreateAdminSession(string tokenHash, long adminId, DateTimeOffset expiresAt)
@@ -354,6 +438,14 @@ public sealed class StoreDb
         return result;
     }
 
+    public int AdminCount()
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM admins";
+        return Convert.ToInt32(command.ExecuteScalar());
+    }
+
     public int CustomerCount()
     {
         using var db = Open();
@@ -374,8 +466,8 @@ public sealed class StoreDb
     {
         using var db = Open();
         using var command = db.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM catalog_products";
-        return Convert.ToInt64(command.ExecuteScalar()) + BaseProducts.Count;
+        command.CommandText = "SELECT COUNT(*) FROM Products";
+        return Convert.ToInt64(command.ExecuteScalar());
     }
 
     public long TotalViews()
@@ -421,5 +513,78 @@ public sealed class StoreDb
             });
         }
         return result;
+    }
+
+    public void SeedDefaultProducts()
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = """
+            IF NOT EXISTS (SELECT 1 FROM Products)
+            BEGIN
+                INSERT INTO Products (Name, Price, Category, Description, Image) VALUES
+                (N'Tai nghe Everyday', 890000, N'Điện tử', N'Tai nghe chống ồn công nghệ cao', N'/products/headphones.svg'),
+                (N'Túi Everyday Tote', 249000, N'Trang phục', N'Túi vải Canvas phong cách tối giản', N'/products/bag.svg'),
+                (N'Đồng hồ Minimal', 1290000, N'Phụ kiện', N'Đồng hồ đeo tay phong cách Bauhaus', N'/products/watch.svg'),
+                (N'Ly cà phê Morning', 159000, N'Đồ gia dụng', N'Ly sứ giữ nhiệt cao cấp', N'/products/cup.svg'),
+                (N'Bàn phím cơ Không Dây', 1450000, N'Điện tử', N'Bàn phím cơ layout 75% switch êm ái', N'/products/keyboard.svg'),
+                (N'Bình nước thể thao 1L', 180000, N'Đồ gia dụng', N'Bình giữ nhiệt inox 304', N'/products/bottle.svg');
+            END
+
+            IF NOT EXISTS (SELECT 1 FROM catalog_products WHERE id = '1')
+            BEGIN
+                INSERT INTO catalog_products (id, name, category, price, description, image, features_json, tone, symbol, label, source_url, source_price_cents, source_currency, imported_at, discount_percent, stock_count)
+                VALUES
+                ('1', N'Tai nghe Everyday', N'Điện tử', 890000, N'Tai nghe demo của Store.', '/products/headphones.svg', '["Chống ồn","Pin 30h"]', 'electronic', N'◉', N'Được yêu thích', '', 0, 'VND', '2026-10-08', 0, 20),
+                ('2', N'Túi Everyday Tote', N'Trang phục', 249000, N'Túi Everyday dùng hằng ngày.', '/products/bag.svg', '["Vải Canvas"]', 'apparel', N'□', N'Mới', '', 0, 'VND', '2026-10-08', 0, 20),
+                ('3', N'Đồng hồ Minimal', N'Phụ kiện', 1290000, N'Đồng hồ tối giản.', '/products/watch.svg', '["Dây da","Chống nước 5ATM"]', 'accessories', N'◷', N'Tối giản', '', 0, 'VND', '2026-10-08', 0, 20),
+                ('4', N'Ly cà phê Morning', N'Đồ gia dụng', 159000, N'Ly cà phê dùng mỗi ngày.', '/products/cup.svg', '["Gốm sứ"]', 'home', N'◌', N'Mỗi ngày', '', 0, 'VND', '2026-10-08', 0, 20);
+            END
+            """;
+        command.ExecuteNonQuery();
+    }
+
+    public void ResetDatabase()
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = """
+            DELETE FROM customer_favorites;
+            DELETE FROM customer_vouchers;
+            DELETE FROM voucher_codes;
+            DELETE FROM product_reviews;
+            DELETE FROM customer_orders;
+            DELETE FROM customer_sessions;
+            DELETE FROM customers;
+            DELETE FROM admin_sessions;
+            DELETE FROM admins;
+            DELETE FROM product_views;
+            DELETE FROM Products;
+            DELETE FROM catalog_products;
+            """;
+        command.ExecuteNonQuery();
+        SeedDefaultProducts();
+    }
+
+    public IReadOnlyList<(string Username, string CreatedAt)> ListAdmins()
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "SELECT username, created_at FROM admins ORDER BY id";
+        using var reader = command.ExecuteReader();
+        var list = new List<(string, string)>();
+        while (reader.Read()) list.Add((reader.GetString(0), reader.GetString(1)));
+        return list;
+    }
+
+    public IReadOnlyList<(string Username, string Email, int Points)> ListCustomers()
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "SELECT TOP 10 username, email, points FROM customers ORDER BY id DESC";
+        using var reader = command.ExecuteReader();
+        var list = new List<(string, string, int)>();
+        while (reader.Read()) list.Add((reader.GetString(0), reader.GetString(1), Convert.ToInt32(reader.GetValue(2))));
+        return list;
     }
 }
