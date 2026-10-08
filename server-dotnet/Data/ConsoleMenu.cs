@@ -1,7 +1,8 @@
 /*
  * Tệp: server-dotnet/Data/ConsoleMenu.cs
- * Mục đích: Bảng menu tương tác quản lý hệ thống trên Console ASP.NET Core (chạy ngầm API không làm mất menu).
+ * Mục đích: Bảng menu tương tác quản lý hệ thống trên Console ASP.NET Core (chạy ngầm API và hỗ trợ bật nhanh Frontend).
  */
+using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using StoreApi.Security;
 
@@ -49,12 +50,15 @@ public static class ConsoleMenu
             Console.WriteLine("  [5] 📦 Nạp lại dữ liệu Sản phẩm mẫu (Seed Products)");
             Console.WriteLine("  [6] 📊 Xem thống kê hệ thống (SP, Khách hàng, Admin)");
             Console.WriteLine("  [7] 🧹 Làm sạch & Reset Database về mặc định");
+            Console.WriteLine("------------------------------------------------------");
+            Console.WriteLine("  [8] 🌐 Bật Giao diện Store Khách hàng (React - 5173)");
+            Console.WriteLine("  [9] 🛠️  Bật Giao diện Admin Dashboard (React - 5174)");
             Console.WriteLine("  [0] ❌ Thoát chương trình");
 
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("======================================================");
             Console.ResetColor();
-            Console.Write("👉 Nhập lựa chọn của bạn [0-7]: ");
+            Console.Write("👉 Nhập lựa chọn của bạn [0-9]: ");
 
             var choice = Console.ReadLine()?.Trim();
             switch (choice)
@@ -71,7 +75,7 @@ public static class ConsoleMenu
                             isServerRunning = true;
                             Console.ForegroundColor = ConsoleColor.Green;
                             Console.WriteLine("✅ Server đã bật thành công tại http://127.0.0.1:5000!");
-                            Console.WriteLine("👉 Web API đang chạy ngầm, bạn vẫn có thể chọn các menu khác bình thường!");
+                            Console.WriteLine("👉 Web API đang chạy ngầm, bạn có thể chọn tiếp [8] hoặc [9] để mở web ngay!");
                             Console.ResetColor();
                         }
                         catch (Exception ex)
@@ -126,6 +130,14 @@ public static class ConsoleMenu
                     ResetDatabase(db);
                     break;
 
+                case "8":
+                    StartFrontendStore();
+                    break;
+
+                case "9":
+                    StartFrontendAdmin();
+                    break;
+
                 case "0":
                     if (isServerRunning)
                     {
@@ -143,6 +155,56 @@ public static class ConsoleMenu
                     break;
             }
         }
+    }
+
+    private static void StartFrontendStore()
+    {
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("\n[+] Đang mở cửa sổ chạy Frontend Store (http://localhost:5173)...");
+        Console.ResetColor();
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = "/k cd /d \"D:\\Web\\Store\" && npm run dev",
+                UseShellExecute = true
+            });
+            try { Process.Start(new ProcessStartInfo { FileName = "http://localhost:5173", UseShellExecute = true }); } catch { }
+            Console.WriteLine("✅ Đã mở Frontend Store thành công!");
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"❌ Lỗi mở Store: {ex.Message}");
+            Console.ResetColor();
+        }
+        WaitKey();
+    }
+
+    private static void StartFrontendAdmin()
+    {
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("\n[+] Đang mở cửa sổ chạy Admin Dashboard (http://localhost:5174)...");
+        Console.ResetColor();
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = "/k cd /d \"D:\\Web\\Store-Admin\" && npm run dev",
+                UseShellExecute = true
+            });
+            try { Process.Start(new ProcessStartInfo { FileName = "http://localhost:5174", UseShellExecute = true }); } catch { }
+            Console.WriteLine("✅ Đã mở Admin Dashboard thành công!");
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"❌ Lỗi mở Admin Dashboard: {ex.Message}");
+            Console.ResetColor();
+        }
+        WaitKey();
     }
 
     private static void CreateAdmin(StoreDb db)
