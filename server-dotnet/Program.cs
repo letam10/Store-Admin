@@ -1,34 +1,47 @@
 /*
- * @codex-vn-doc
  * Tệp: server-dotnet/Program.cs
- * Mục đích: Điểm khởi động ASP.NET Core C# và đăng ký DI, CORS, Swagger, controllers.
- * Thành phần chính: các hàm/lớp và xử lý nội bộ trong tệp.
- * Liên kết trực tiếp: Microsoft.OpenApi.Models, StoreApi.Data.
- * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
+ * Mục đích: Điểm khởi động ASP.NET Core C# và đăng ký DI, EF Core SQL Server, CORS, Swagger, controllers.
  */
+using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using StoreApi.Data;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Đăng ký Entity Framework Core với SQL Server
+var connectionString = builder.Configuration.GetConnectionString("StoreDb") 
+    ?? "Server=localhost;Database=StoreDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true;";
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlServer(connectionString));
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options => options.SwaggerDoc("v1", new OpenApiInfo
 {
-    Title = "Store API (ASP.NET Core)", Version = "v1",
-    Description = "C# migration backend for Store and Store-Admin."
+    Title = "Store API (ASP.NET Core)",
+    Version = "v1",
+    Description = "ASP.NET Core Web API kết nối SQL Server với Entity Framework Core."
 }));
+
 builder.Services.AddSingleton<StoreDb>();
 builder.Services.AddHttpContextAccessor();
+
 builder.Services.AddCors(options => options.AddPolicy("local-frontends", policy => policy
-    .WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174")
-    .AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
+    .WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174", "http://localhost:3000", "http://127.0.0.1:3000")
+    .AllowAnyHeader()
+    .AllowAnyMethod()
+    .AllowCredentials()));
 
 var app = builder.Build();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI(options => options.SwaggerEndpoint("/swagger/v1/swagger.json", "Store API v1"));
 }
+
 app.UseCors("local-frontends");
 app.MapControllers();
+
 app.Run();

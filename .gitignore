@@ -21,6 +21,8 @@ dist-ssr
 *.ntvs*
 *.njsproj
 *.sln
+!server-dotnet/*.sln
+!server-dotnet/*.slnx
 *.sw?
 
 # Secrets
