@@ -1,6 +1,6 @@
 /*
  * Tệp: server-dotnet/Data/ConsoleMenu.cs
- * Mục đích: Bảng menu tương tác quản lý hệ thống trên Console ASP.NET Core (chạy ngầm API và hỗ trợ bật nhanh Frontend).
+ * Mục đích: Bảng menu tương tác quản lý hệ thống trên Console ASP.NET Core (giao diện chuẩn, căn lề thẳng hàng 100%).
  */
 using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
@@ -21,42 +21,42 @@ public static class ConsoleMenu
         {
             Console.Clear();
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("======================================================");
-            Console.WriteLine("      STORE MANAGEMENT SYSTEM - ASP.NET CORE (C#)     ");
-            Console.WriteLine("======================================================");
+            Console.WriteLine("============================================================");
+            Console.WriteLine("        STORE MANAGEMENT SYSTEM - ASP.NET CORE (C#)         ");
+            Console.WriteLine("============================================================");
             Console.ResetColor();
 
             if (isServerRunning)
             {
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("  Trạng thái API: 🟢 ĐANG CHẠY (http://127.0.0.1:5000)");
-                Console.WriteLine("  Swagger UI:     http://localhost:5000/swagger");
+                Console.WriteLine("  Trạng thái API   : [ 🟢 ĐANG CHẠY - http://127.0.0.1:5000 ]");
+                Console.WriteLine("  Tài liệu Swagger : http://localhost:5000/swagger");
                 Console.ResetColor();
-                Console.WriteLine("------------------------------------------------------");
-                Console.WriteLine("  [1] 🛑 Dừng Web API Server");
+                Console.WriteLine("------------------------------------------------------------");
+                PrintMenuItem("1", "Dừng Web API Server", ConsoleColor.Yellow);
             }
             else
             {
                 Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.WriteLine("  Trạng thái API: ⚪ ĐÃ TẮT");
+                Console.WriteLine("  Trạng thái API   : [ ⚪ ĐÃ TẮT ]");
                 Console.ResetColor();
-                Console.WriteLine("------------------------------------------------------");
-                Console.WriteLine("  [1] 🚀 Khởi chạy Web API (Mở cổng 5000 & Swagger)");
+                Console.WriteLine("------------------------------------------------------------");
+                PrintMenuItem("1", "Khởi chạy Web API (Mở cổng 5000 & Swagger)", ConsoleColor.Green);
             }
 
-            Console.WriteLine("  [2] 🛡️  Tạo tài khoản Admin mới");
-            Console.WriteLine("  [3] 🔑 Đổi mật khẩu tài khoản Admin");
-            Console.WriteLine("  [4] 👥 Tạo nhanh tài khoản Khách hàng mẫu (Test Data)");
-            Console.WriteLine("  [5] 📦 Nạp lại dữ liệu Sản phẩm mẫu (Seed Products)");
-            Console.WriteLine("  [6] 📊 Xem thống kê hệ thống (SP, Khách hàng, Admin)");
-            Console.WriteLine("  [7] 🧹 Làm sạch & Reset Database về mặc định");
-            Console.WriteLine("------------------------------------------------------");
-            Console.WriteLine("  [8] 🌐 Bật Giao diện Store Khách hàng (React - 5173)");
-            Console.WriteLine("  [9] 🛠️  Bật Giao diện Admin Dashboard (React - 5174)");
-            Console.WriteLine("  [0] ❌ Thoát chương trình");
+            PrintMenuItem("2", "Tạo tài khoản Admin mới");
+            PrintMenuItem("3", "Đổi mật khẩu tài khoản Admin");
+            PrintMenuItem("4", "Tạo nhanh tài khoản Khách hàng mẫu (Test Data)");
+            PrintMenuItem("5", "Nạp lại dữ liệu Sản phẩm mẫu (Seed Products)");
+            PrintMenuItem("6", "Xem thống kê hệ thống (SP, Khách hàng, Admin)");
+            PrintMenuItem("7", "Làm sạch & Reset Database về mặc định");
+            Console.WriteLine("------------------------------------------------------------");
+            PrintMenuItem("8", "Bật Giao diện Store Khách hàng (React - Cổng 5173)");
+            PrintMenuItem("9", "Bật Giao diện Admin Dashboard (React - Cổng 5174)");
+            PrintMenuItem("0", "Thoát chương trình", ConsoleColor.DarkGray);
 
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("======================================================");
+            Console.WriteLine("============================================================");
             Console.ResetColor();
             Console.Write("👉 Nhập lựa chọn của bạn [0-9]: ");
 
@@ -155,6 +155,16 @@ public static class ConsoleMenu
                     break;
             }
         }
+    }
+
+    private static void PrintMenuItem(string key, string text, ConsoleColor? color = null)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.Write($"  [{key}] ");
+        if (color.HasValue) Console.ForegroundColor = color.Value;
+        else Console.ResetColor();
+        Console.WriteLine(text);
+        Console.ResetColor();
     }
 
     private static void StartFrontendStore()
