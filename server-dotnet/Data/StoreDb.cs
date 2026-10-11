@@ -89,6 +89,36 @@ public sealed class StoreDb
                   expires_at NVARCHAR(100) NOT NULL
                 );
 
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'password_resets')
+                CREATE TABLE password_resets (
+                  token_hash NVARCHAR(255) PRIMARY KEY, customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
+                  expires_at NVARCHAR(100) NOT NULL, used_at NVARCHAR(100) NULL, created_at NVARCHAR(100) NOT NULL
+                );
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'oauth_states')
+                CREATE TABLE oauth_states (
+                  state NVARCHAR(255) PRIMARY KEY, next_url NVARCHAR(500) NOT NULL DEFAULT '/account',
+                  expires_at NVARCHAR(100) NOT NULL, created_at NVARCHAR(100) NOT NULL
+                );
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'login_challenges')
+                CREATE TABLE login_challenges (
+                  id NVARCHAR(255) PRIMARY KEY, customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
+                  expires_at NVARCHAR(100) NOT NULL, created_at NVARCHAR(100) NOT NULL
+                );
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'customer_totp_backups')
+                CREATE TABLE customer_totp_backups (
+                  id BIGINT IDENTITY(1,1) PRIMARY KEY, customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
+                  code_hash NVARCHAR(255) NOT NULL, used_at NVARCHAR(100) NULL, created_at NVARCHAR(100) NOT NULL
+                );
+
+                IF COL_LENGTH('customers', 'google_sub') IS NULL ALTER TABLE customers ADD google_sub NVARCHAR(255) NULL;
+                IF COL_LENGTH('customers', 'totp_secret') IS NULL ALTER TABLE customers ADD totp_secret NVARCHAR(MAX) NULL;
+                IF COL_LENGTH('customers', 'totp_enabled') IS NULL ALTER TABLE customers ADD totp_enabled INT NOT NULL DEFAULT 0;
+                IF COL_LENGTH('customers', 'totp_pending_secret') IS NULL ALTER TABLE customers ADD totp_pending_secret NVARCHAR(MAX) NULL;
+                IF COL_LENGTH('customers', 'totp_verified_at') IS NULL ALTER TABLE customers ADD totp_verified_at NVARCHAR(100) NULL;
+
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'customer_favorites')
                 CREATE TABLE customer_favorites (
                   customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
@@ -376,6 +406,43 @@ public sealed class StoreDb
         command.ExecuteNonQuery();
     }
 
+    public IReadOnlyList<object> Orders(long customerId)
+    {
+        try
+        {
+            using var db = Open();
+            using var command = db.CreateCommand();
+            command.CommandText = "SELECT id,items_json,recipient,phone,address,fulfillment,region,subtotal,discount,goods_total,shipping_fee,total,tier,status,created_at FROM customer_orders WHERE customer_id=@id ORDER BY created_at DESC";
+            command.Parameters.AddWithValue("@id", customerId);
+            using var reader = command.ExecuteReader();
+            var result = new List<object>();
+            while (reader.Read())
+            {
+                string S(int i) => reader.IsDBNull(i) ? "" : reader.GetString(i);
+                result.Add(new
+                {
+                    id = S(0),
+                    items = S(1),
+                    recipient = S(2),
+                    phone = S(3),
+                    address = S(4),
+                    fulfillment = S(5),
+                    region = S(6),
+                    subtotal = Convert.ToInt32(reader.GetValue(7)),
+                    discount = Convert.ToInt32(reader.GetValue(8)),
+                    goodsTotal = Convert.ToInt32(reader.GetValue(9)),
+                    shippingFee = Convert.ToInt32(reader.GetValue(10)),
+                    total = Convert.ToInt32(reader.GetValue(11)),
+                    tier = S(12),
+                    status = S(13),
+                    createdAt = S(14),
+                });
+            }
+            return result;
+        }
+        catch { return Array.Empty<object>(); }
+    }
+
     public IReadOnlyList<string> Favorites(long customerId)
     {
         using var db = Open();
@@ -544,12 +611,230 @@ public sealed class StoreDb
         command.ExecuteNonQuery();
     }
 
+    public (long Id, string Username, string Email, string GoogleSub, string TotpSecret, int TotpEnabled, string PendingSecret)? FindCustomerFull(long id)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "SELECT TOP 1 id,username,email,google_sub,totp_secret,totp_enabled,totp_pending_secret FROM customers WHERE id=@id";
+        command.Parameters.AddWithValue("@id", id);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) return null;
+        return (Convert.ToInt64(reader.GetValue(0)), reader.GetString(1), reader.GetString(2), reader.IsDBNull(3) ? "" : reader.GetString(3), reader.IsDBNull(4) ? "" : reader.GetString(4), reader.IsDBNull(5) ? 0 : Convert.ToInt32(reader.GetValue(5)), reader.IsDBNull(6) ? "" : reader.GetString(6));
+    }
+
+    public (long Id, string Username, string Email, string Salt, string Hash, string GoogleSub, string TotpSecret, int TotpEnabled, string PendingSecret)? FindCustomerAuth(string login)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "SELECT TOP 1 id,username,email,password_salt,password_hash,google_sub,totp_secret,totp_enabled,totp_pending_secret FROM customers WHERE LOWER(username)=LOWER(@u) OR LOWER(email)=LOWER(@u)";
+        command.Parameters.AddWithValue("@u", login);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) return null;
+        string G(int i) => reader.IsDBNull(i) ? "" : reader.GetString(i);
+        return (Convert.ToInt64(reader.GetValue(0)), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), G(5), G(6), reader.IsDBNull(7) ? 0 : Convert.ToInt32(reader.GetValue(7)), G(8));
+    }
+
+    public void CreatePasswordReset(string tokenHash, long customerId, DateTimeOffset expiresAt)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "DELETE FROM password_resets WHERE customer_id=@id OR expires_at<=@now; INSERT INTO password_resets(token_hash,customer_id,expires_at,created_at) VALUES(@h,@id,@exp,@now)";
+        command.Parameters.AddWithValue("@h", tokenHash);
+        command.Parameters.AddWithValue("@id", customerId);
+        command.Parameters.AddWithValue("@exp", expiresAt.ToString("o"));
+        command.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("o"));
+        command.ExecuteNonQuery();
+    }
+
+    public (long CustomerId, string ExpiresAt, string? UsedAt)? FindPasswordReset(string tokenHash)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "SELECT TOP 1 customer_id,expires_at,used_at FROM password_resets WHERE token_hash=@h";
+        command.Parameters.AddWithValue("@h", tokenHash);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) return null;
+        return (Convert.ToInt64(reader.GetValue(0)), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2));
+    }
+
+    public void ConsumePasswordReset(string tokenHash, long customerId, string salt, string hash)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "UPDATE customers SET password_salt=@s,password_hash=@h WHERE id=@id; UPDATE password_resets SET used_at=@now WHERE token_hash=@t; DELETE FROM customer_sessions WHERE customer_id=@id";
+        command.Parameters.AddWithValue("@s", salt);
+        command.Parameters.AddWithValue("@h", hash);
+        command.Parameters.AddWithValue("@id", customerId);
+        command.Parameters.AddWithValue("@t", tokenHash);
+        command.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("o"));
+        command.ExecuteNonQuery();
+    }
+
+    public void CreateLoginChallenge(string id, long customerId, DateTimeOffset expiresAt)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "INSERT INTO login_challenges(id,customer_id,expires_at,created_at) VALUES(@id,@cid,@exp,@now)";
+        command.Parameters.AddWithValue("@id", id);
+        command.Parameters.AddWithValue("@cid", customerId);
+        command.Parameters.AddWithValue("@exp", expiresAt.ToString("o"));
+        command.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("o"));
+        command.ExecuteNonQuery();
+    }
+
+    public (long CustomerId, string ExpiresAt)? FindLoginChallenge(string id)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "SELECT TOP 1 customer_id,expires_at FROM login_challenges WHERE id=@id";
+        command.Parameters.AddWithValue("@id", id);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) return null;
+        return (Convert.ToInt64(reader.GetValue(0)), reader.GetString(1));
+    }
+
+    public void DeleteLoginChallenge(string id)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "DELETE FROM login_challenges WHERE id=@id; DELETE FROM login_challenges WHERE expires_at<=@now";
+        command.Parameters.AddWithValue("@id", id);
+        command.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("o"));
+        command.ExecuteNonQuery();
+    }
+
+    public void CreateOAuthState(string state, string nextUrl, DateTimeOffset expiresAt)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "INSERT INTO oauth_states(state,next_url,expires_at,created_at) VALUES(@s,@n,@exp,@now)";
+        command.Parameters.AddWithValue("@s", state);
+        command.Parameters.AddWithValue("@n", nextUrl);
+        command.Parameters.AddWithValue("@exp", expiresAt.ToString("o"));
+        command.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("o"));
+        command.ExecuteNonQuery();
+    }
+
+    public string? ConsumeOAuthState(string state)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "SELECT TOP 1 next_url,expires_at FROM oauth_states WHERE state=@s";
+        command.Parameters.AddWithValue("@s", state);
+        string? next = null;
+        using (var reader = command.ExecuteReader())
+        {
+            if (reader.Read())
+            {
+                var expires = reader.GetString(1);
+                if (string.Compare(expires, DateTimeOffset.UtcNow.ToString("o"), StringComparison.Ordinal) > 0) next = reader.GetString(0);
+            }
+        }
+        using var del = db.CreateCommand();
+        del.CommandText = "DELETE FROM oauth_states WHERE state=@s";
+        del.Parameters.AddWithValue("@s", state);
+        del.ExecuteNonQuery();
+        return next;
+    }
+
+    public (long Id, string Username, string Email)? FindCustomerByGoogleSub(string sub)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "SELECT TOP 1 id,username,email FROM customers WHERE google_sub=@s";
+        command.Parameters.AddWithValue("@s", sub);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) return null;
+        return (Convert.ToInt64(reader.GetValue(0)), reader.GetString(1), reader.GetString(2));
+    }
+
+    public void LinkGoogleSub(long id, string sub)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "UPDATE customers SET google_sub=@s WHERE id=@id";
+        command.Parameters.AddWithValue("@s", sub);
+        command.Parameters.AddWithValue("@id", id);
+        command.ExecuteNonQuery();
+    }
+
+    public void BeginTotpSetup(long id, string pendingSecret)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "UPDATE customers SET totp_pending_secret=@s WHERE id=@id";
+        command.Parameters.AddWithValue("@s", pendingSecret);
+        command.Parameters.AddWithValue("@id", id);
+        command.ExecuteNonQuery();
+    }
+
+    public List<string> ConfirmTotpSetup(long id, string secret)
+    {
+        var codes = Totp.BackupCodes(10);
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "UPDATE customers SET totp_secret=@s,totp_enabled=1,totp_pending_secret='',totp_verified_at=@now WHERE id=@id; DELETE FROM customer_totp_backups WHERE customer_id=@id";
+        command.Parameters.AddWithValue("@s", secret);
+        command.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("o"));
+        command.Parameters.AddWithValue("@id", id);
+        command.ExecuteNonQuery();
+        foreach (var code in codes)
+        {
+            using var ins = db.CreateCommand();
+            ins.CommandText = "INSERT INTO customer_totp_backups(customer_id,code_hash,created_at) VALUES(@id,@h,@now)";
+            ins.Parameters.AddWithValue("@id", id);
+            ins.Parameters.AddWithValue("@h", Tokens.Sha256(code.ToUpperInvariant()));
+            ins.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("o"));
+            ins.ExecuteNonQuery();
+        }
+        return codes;
+    }
+
+    public void DisableTotp(long id)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "UPDATE customers SET totp_secret='',totp_enabled=0,totp_pending_secret='' WHERE id=@id; DELETE FROM customer_totp_backups WHERE customer_id=@id";
+        command.Parameters.AddWithValue("@id", id);
+        command.ExecuteNonQuery();
+    }
+
+    public bool ConsumeBackupCode(long id, string code)
+    {
+        using var db = Open();
+        using var find = db.CreateCommand();
+        find.CommandText = "SELECT TOP 1 id FROM customer_totp_backups WHERE customer_id=@id AND code_hash=@h AND used_at IS NULL";
+        find.Parameters.AddWithValue("@id", id);
+        find.Parameters.AddWithValue("@h", Tokens.Sha256(code.ToUpperInvariant()));
+        var row = find.ExecuteScalar();
+        if (row is null || row == DBNull.Value) return false;
+        using var upd = db.CreateCommand();
+        upd.CommandText = "UPDATE customer_totp_backups SET used_at=@now WHERE id=@bid";
+        upd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("o"));
+        upd.Parameters.AddWithValue("@bid", Convert.ToInt64(row));
+        upd.ExecuteNonQuery();
+        return true;
+    }
+
+    public int BackupCodesLeft(long id)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM customer_totp_backups WHERE customer_id=@id AND used_at IS NULL";
+        command.Parameters.AddWithValue("@id", id);
+        return Convert.ToInt32(command.ExecuteScalar());
+    }
+
     public void ResetDatabase()
     {
         using var db = Open();
         using var command = db.CreateCommand();
         command.CommandText = """
             DELETE FROM customer_favorites;
+            DELETE FROM password_resets;
+            DELETE FROM oauth_states;
+            DELETE FROM login_challenges;
+            DELETE FROM customer_totp_backups;
             DELETE FROM customer_vouchers;
             DELETE FROM voucher_codes;
             DELETE FROM product_reviews;

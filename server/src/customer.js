@@ -8,9 +8,13 @@ import { registerOrderWorkflow } from './orderWorkflow.js'
  * Liên kết trực tiếp: node:crypto, ../../shared/products.js, ./security.js.
  * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
  */
-import { randomBytes, randomInt } from 'node:crypto'
+import { randomBytes, randomInt, randomUUID } from 'node:crypto'
 import { products as baseProducts } from '../../shared/products.js'
 import { clearCookie, hashPassword, hashToken, normalizeUsername, parseCookies, randomToken, setCookie, verifyPassword } from './security.js'
+import QRCode from 'qrcode'
+import { base32Decode, generateBackupCodes, generateTotpSecret, otpauthUrl, verifyTotp } from './totp.js'
+import { mailerStatus, sendResetEmail } from './mailer.js'
+import { buildGoogleAuthUrl, exchangeGoogleCode, fetchGoogleProfile, googleStatus } from './google.js'
 
 const COOKIE = 'store_customer_session'
 const SESSION_SECONDS = 60 * 60 * 24 * 30
@@ -184,6 +188,13 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
       tier: tierForPoints(Number(row.points)),
       spinCredits: Number(row.spin_credits),
       csrfToken: row.csrfToken,
+      googleLinked: Boolean(row.google_sub),
+      twoFactorEnabled: Number(row.totp_enabled || 0) === 1,
+      authMethods: [
+        ...(row.password_hash ? ['password'] : []),
+        ...(row.google_sub ? ['google'] : []),
+        ...(Number(row.totp_enabled || 0) === 1 ? ['totp'] : []),
+      ],
     }
   }
 
@@ -359,7 +370,7 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     }
   })
 
-  // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
+  // Route API: login mat khau; neu bat 2FA thi tra challenge 5 phut thay vi mo session ngay.
   app.post('/api/customer/login', async (req, res) => {
     // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (limited(req.ip)) return res.status(429).json({ error: 'RATE_LIMITED' })
@@ -375,8 +386,226 @@ export function registerCustomerRoutes(app, { storeDb, config, now, requireAdmin
     const row = resRow.rows[0]
     // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
     if (!row || !verifyPassword(password, row.password_salt, row.password_hash)) return res.status(401).json({ error: 'INVALID_CREDENTIALS' })
+    if (Number(row.totp_enabled || 0) === 1 && row.totp_secret) {
+      const challengeId = randomUUID()
+      await storeDb.query(
+        'INSERT INTO login_challenges (id, customer_id, expires_at, created_at) VALUES ($1, $2, $3, $4)',
+        [challengeId, row.id, new Date(now().getTime() + 5 * 60 * 1000).toISOString(), now().toISOString()],
+      )
+      return res.status(202).json({ twoFactorRequired: true, challengeId })
+    }
     res.json({ account: await beginSession(res, row) })
   })
+
+  // Route API: hoan tat login khi bat 2FA (TOTP hoac backup code dung 1 lan).
+  app.post('/api/customer/login/2fa', async (req, res) => {
+    if (limited(req.ip)) return res.status(429).json({ error: 'RATE_LIMITED' })
+    const challengeId = String(req.body?.challengeId || '').trim()
+    const code = String(req.body?.code || '').replace(/\s/g, '')
+    if (!challengeId || !/^[0-9a-f-]{8,100}$/i.test(challengeId) || !/^[A-Za-z0-9]{6,10}$/.test(code)) {
+      return res.status(400).json({ error: 'INVALID_2FA_CODE' })
+    }
+    const challRes = await storeDb.query('SELECT * FROM login_challenges WHERE id = $1', [challengeId])
+    const challenge = challRes.rows[0]
+    if (!challenge || challenge.expires_at <= now().toISOString()) {
+      if (challenge) await storeDb.query('DELETE FROM login_challenges WHERE id = $1', [challengeId])
+      return res.status(401).json({ error: 'CHALLENGE_EXPIRED' })
+    }
+    const custRes = await storeDb.query('SELECT * FROM customers WHERE id = $1', [challenge.customer_id])
+    const row = custRes.rows[0]
+    if (!row) return res.status(401).json({ error: 'INVALID_CREDENTIALS' })
+    let ok = false
+    if (row.totp_secret && verifyTotp(row.totp_secret, code)) ok = true
+    if (!ok) {
+      const backupRes = await storeDb.query(
+        'SELECT * FROM customer_totp_backups WHERE customer_id = $1 AND code_hash = $2 AND used_at IS NULL',
+        [row.id, hashToken(code.toUpperCase())],
+      )
+      if (backupRes.rows[0]) {
+        await storeDb.query('UPDATE customer_totp_backups SET used_at = $1 WHERE id = $2', [now().toISOString(), backupRes.rows[0].id])
+        ok = true
+      }
+    }
+    if (!ok) return res.status(401).json({ error: 'INVALID_2FA_CODE' })
+    await storeDb.query('DELETE FROM login_challenges WHERE id = $1', [challengeId])
+    await storeDb.query('DELETE FROM login_challenges WHERE expires_at <= $1', [now().toISOString()])
+    res.json({ account: await beginSession(res, row) })
+  })
+  // Route API: trang thai cau hinh Google/SMTP de UI an-hien nut.
+  app.get('/api/customer/auth/status', async (req, res) => {
+    res.json({ google: googleStatus(), mailer: mailerStatus() })
+  })
+
+  // Route API: bat dau Google OAuth (state chong CSRF 10 phut).
+  app.get('/api/customer/google/start', async (req, res) => {
+    if (!googleStatus().configured) return res.status(501).json({ error: 'GOOGLE_NOT_CONFIGURED' })
+    const next = String(req.query?.next || '/account')
+    const safeNext = next.startsWith('/') && !next.startsWith('//') ? next.slice(0, 200) : '/account'
+    const state = randomToken(16)
+    await storeDb.query(
+      'INSERT INTO oauth_states (state, next_url, expires_at, created_at) VALUES ($1, $2, $3, $4)',
+      [state, safeNext, new Date(now().getTime() + 10 * 60 * 1000).toISOString(), now().toISOString()],
+    )
+    res.redirect(302, buildGoogleAuthUrl(state))
+  })
+  // Route API: Google redirect ve, lien ket/tao tai khoan roi mo session.
+  app.get('/api/customer/google/callback', async (req, res) => {
+    const frontend = String(config.frontendUrl || 'http://127.0.0.1:5173').replace(/\/+$/, '')
+    const failRedirect = (msg) => res.redirect(302, frontend + '/login?googleError=' + encodeURIComponent(msg))
+    try {
+      const code = String(req.query?.code || '')
+      const state = String(req.query?.state || '')
+      if (!code || !state) return failRedirect('GOOGLE_CANCELLED')
+      const stateRes = await storeDb.query('SELECT * FROM oauth_states WHERE state = $1', [state])
+      const saved = stateRes.rows[0]
+      await storeDb.query('DELETE FROM oauth_states WHERE state = $1', [state])
+      if (!saved || saved.expires_at <= now().toISOString()) return failRedirect('GOOGLE_STATE_EXPIRED')
+      const tokens = await exchangeGoogleCode(code)
+      const profile = await fetchGoogleProfile(tokens.access_token)
+      let row = (await storeDb.query('SELECT * FROM customers WHERE google_sub = $1', [profile.sub])).rows[0]
+      if (!row) row = (await storeDb.query('SELECT * FROM customers WHERE LOWER(email) = LOWER($1)', [profile.email])).rows[0]
+      if (row && !row.google_sub) {
+        await storeDb.query('UPDATE customers SET google_sub = $1 WHERE id = $2', [profile.sub, row.id])
+        row = (await storeDb.query('SELECT * FROM customers WHERE id = $1', [row.id])).rows[0]
+      }
+      if (!row) {
+        const baseName = String(profile.name || profile.email.split('@')[0] || 'Google User').trim().slice(0, 60) || 'Google User'
+        let username = baseName
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          try {
+            const randomPass = hashPassword(randomToken(16))
+            const inserted = await storeDb.query(
+              'INSERT INTO customers (username, email, password_salt, password_hash, google_sub, created_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+              [username, profile.email, randomPass.salt, randomPass.hash, profile.sub, now().toISOString()],
+            )
+            row = (await storeDb.query('SELECT * FROM customers WHERE id = $1', [inserted.rows[0].id])).rows[0]
+            break
+          } catch (error) {
+            if (error.code === '23505' || String(error.message || '').includes('duplicate') || String(error.message || '').includes('UNIQUE')) {
+              username = baseName.slice(0, 50) + ' ' + randomBytes(2).toString('hex')
+              continue
+            }
+            throw error
+          }
+        }
+        if (!row) return failRedirect('GOOGLE_LINK_FAILED')
+      }
+      if (Number(row.totp_enabled || 0) === 1 && row.totp_secret) {
+        const challengeId = randomUUID()
+        await storeDb.query(
+          'INSERT INTO login_challenges (id, customer_id, expires_at, created_at) VALUES ($1, $2, $3, $4)',
+          [challengeId, row.id, new Date(now().getTime() + 5 * 60 * 1000).toISOString(), now().toISOString()],
+        )
+        return res.redirect(302, frontend + '/login?challengeId=' + encodeURIComponent(challengeId) + '&twoFactor=1&next=' + encodeURIComponent(saved.next_url || '/account'))
+      }
+      await beginSession(res, row)
+      return res.redirect(302, frontend + (saved.next_url || '/account'))
+    } catch (error) {
+      const msg = String(error?.message || 'GOOGLE_FAILED')
+      return failRedirect(msg.startsWith('GOOGLE_EMAIL') ? 'GOOGLE_EMAIL_UNVERIFIED' : 'GOOGLE_FAILED')
+    }
+  })
+
+  // Route API: quen mat khau — luon tra OK de chong do email, gui link 30 phut.
+  app.post('/api/customer/password/forgot', async (req, res) => {
+    if (limited(req.ip)) return res.status(429).json({ error: 'RATE_LIMITED' })
+    const email = String(req.body?.email || '').trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+      return res.status(400).json({ error: 'INVALID_EMAIL' })
+    }
+    const found = (await storeDb.query('SELECT * FROM customers WHERE LOWER(email) = LOWER($1)', [email])).rows[0]
+    if (found) {
+      await storeDb.query('DELETE FROM password_resets WHERE customer_id = $1 OR expires_at <= $2', [found.id, now().toISOString()])
+      const raw = randomToken(32)
+      const resetLink = String(config.frontendUrl || 'http://127.0.0.1:5173').replace(/\/+$/, '') + '/reset-password?token=' + encodeURIComponent(raw)
+      await storeDb.query(
+        'INSERT INTO password_resets (token_hash, customer_id, expires_at, created_at) VALUES ($1, $2, $3, $4)',
+        [hashToken(raw), found.id, new Date(now().getTime() + 30 * 60 * 1000).toISOString(), now().toISOString()],
+      )
+      await sendResetEmail(email, resetLink)
+    }
+    res.json({ ok: true })
+  })
+
+  // Route API: dat lai mat khau bang token 30 phut (1 lan).
+  app.post('/api/customer/password/reset', async (req, res) => {
+    if (limited(req.ip)) return res.status(429).json({ error: 'RATE_LIMITED' })
+    const token = String(req.body?.token || '').trim()
+    const password = req.body?.password
+    if (!token || token.length > 200 || typeof password !== 'string' || password.length < 8 || password.length > 256) {
+      return res.status(400).json({ error: 'INVALID_RESET' })
+    }
+    const tokenHash = hashToken(token)
+    const resetRes = await storeDb.query('SELECT * FROM password_resets WHERE token_hash = $1', [tokenHash])
+    const saved = resetRes.rows[0]
+    if (!saved || saved.used_at || saved.expires_at <= now().toISOString()) {
+      return res.status(400).json({ error: 'RESET_EXPIRED' })
+    }
+    const { salt, hash } = hashPassword(password)
+    await storeDb.query('UPDATE customers SET password_salt = $1, password_hash = $2 WHERE id = $3', [salt, hash, saved.customer_id])
+    await storeDb.query('UPDATE password_resets SET used_at = $1 WHERE token_hash = $2', [now().toISOString(), tokenHash])
+    await storeDb.query('DELETE FROM customer_sessions WHERE customer_id = $1', [saved.customer_id])
+    res.json({ ok: true })
+  })
+  // Route API: bat dau bat 2FA — tao secret tam, tra QR + otpauth URL.
+  app.post('/api/customer/2fa/setup', requireCustomer, customerCsrf, async (req, res) => {
+    const me = (await storeDb.query('SELECT * FROM customers WHERE id = $1', [req.customer.id])).rows[0]
+    if (!me) return res.status(401).json({ error: 'LOGIN_REQUIRED' })
+    if (Number(me.totp_enabled || 0) === 1) return res.status(409).json({ error: 'TWO_FACTOR_ALREADY_ENABLED' })
+    const secret = generateTotpSecret()
+    await storeDb.query('UPDATE customers SET totp_pending_secret = $1 WHERE id = $2', [secret, me.id])
+    const url = otpauthUrl({ secret, email: me.email })
+    let qrImage = null
+    try { qrImage = await QRCode.toDataURL(url, { width: 240, margin: 1 }) } catch { qrImage = null }
+    res.json({ otpauthUrl: url, qrImage, secretHint: secret.slice(0, 4) + '…' + secret.slice(-4) })
+  })
+
+  // Route API: xac nhan bat 2FA bang ma 6 so tu app Authenticator.
+  app.post('/api/customer/2fa/verify', requireCustomer, customerCsrf, async (req, res) => {
+    const code = String(req.body?.code || '').replace(/\s/g, '')
+    if (!/^\d{6,8}$/.test(code)) return res.status(400).json({ error: 'INVALID_2FA_CODE' })
+    const me = (await storeDb.query('SELECT * FROM customers WHERE id = $1', [req.customer.id])).rows[0]
+    if (!me?.totp_pending_secret || !base32Decode(me.totp_pending_secret).length) {
+      return res.status(400).json({ error: 'TWO_FACTOR_SETUP_REQUIRED' })
+    }
+    if (!verifyTotp(me.totp_pending_secret, code)) return res.status(401).json({ error: 'INVALID_2FA_CODE' })
+    const codes = generateBackupCodes(10)
+    await storeDb.query('UPDATE customers SET totp_secret = $1, totp_enabled = 1, totp_pending_secret = $2, totp_verified_at = $3 WHERE id = $4',
+      [me.totp_pending_secret, '', now().toISOString(), me.id])
+    await storeDb.query('DELETE FROM customer_totp_backups WHERE customer_id = $1', [me.id])
+    for (const plain of codes) {
+      await storeDb.query('INSERT INTO customer_totp_backups (customer_id, code_hash, created_at) VALUES ($1, $2, $3)',
+        [me.id, hashToken(plain), now().toISOString()])
+    }
+    res.json({ enabled: true, backupCodes: codes })
+  })
+
+  // Route API: tat 2FA (can mat khau de xac nhan).
+  app.post('/api/customer/2fa/disable', requireCustomer, customerCsrf, async (req, res) => {
+    const password = req.body?.password
+    if (typeof password !== 'string' || !password) return res.status(400).json({ error: 'INVALID_CREDENTIALS' })
+    const me = (await storeDb.query('SELECT * FROM customers WHERE id = $1', [req.customer.id])).rows[0]
+    if (!me || !verifyPassword(password, me.password_salt, me.password_hash)) return res.status(401).json({ error: 'INVALID_CREDENTIALS' })
+    await storeDb.query('UPDATE customers SET totp_secret = $1, totp_enabled = 0, totp_pending_secret = $1 WHERE id = $2', ['', me.id])
+    await storeDb.query('DELETE FROM customer_totp_backups WHERE customer_id = $1', [me.id])
+    res.json({ disabled: true })
+  })
+
+  // Route API: trang thai 2FA + Google lien ket cho trang Account.
+  app.get('/api/customer/security', requireCustomer, async (req, res) => {
+    const me = (await storeDb.query('SELECT * FROM customers WHERE id = $1', [req.customer.id])).rows[0]
+    if (!me) return res.status(401).json({ error: 'LOGIN_REQUIRED' })
+    const leftRes = await storeDb.query('SELECT COUNT(*) AS count FROM customer_totp_backups WHERE customer_id = $1 AND used_at IS NULL', [me.id])
+    res.json({
+      twoFactorEnabled: Number(me.totp_enabled || 0) === 1,
+      googleLinked: Boolean(me.google_sub),
+      backupCodesLeft: Number(leftRes.rows[0]?.count || 0),
+      google: googleStatus(),
+    })
+  })
+
+
+
 
   // Route API: nhận request, kiểm tra quyền/dữ liệu rồi gọi nghiệp vụ tương ứng.
   app.get('/api/customer/session', async (req, res) => {

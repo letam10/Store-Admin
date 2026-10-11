@@ -72,6 +72,10 @@ export const config = Object.freeze({
   generationQueueWaitMs: integerEnv('GENERATION_QUEUE_WAIT_MS', 30000, { min: 1000, max: 300000 }),
   cookieSecure: process.env.COOKIE_SECURE === 'true',
   paymentWebhookSecret: process.env.PAYMENT_WEBHOOK_SECRET || '',
+  frontendUrl: (process.env.FRONTEND_URL || 'http://127.0.0.1:5173').replace(/\/+$/, ''),
+  googleClientId: process.env.GOOGLE_CLIENT_ID || '',
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+  googleRedirectUri: process.env.GOOGLE_REDIRECT_URI || '',
   // Keep a small, clearly labelled dataset available for local development
   // unless the operator explicitly disables it in server/.env.
   enableDemoData: process.env.ENABLE_DEMO_DATA === undefined ? true : process.env.ENABLE_DEMO_DATA === 'true',

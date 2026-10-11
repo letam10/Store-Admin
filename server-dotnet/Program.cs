@@ -6,11 +6,35 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using StoreApi.Data;
 
+// Nạp các biến cấu hình từ file .env nếu có (GOOGLE_CLIENT_ID, SMTP, ...)
+var envPath = Path.Combine(Directory.GetCurrentDirectory(), ".env");
+if (File.Exists(envPath))
+{
+    foreach (var line in File.ReadAllLines(envPath))
+    {
+        var trimmed = line.Trim();
+        if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith("#")) continue;
+        var idx = trimmed.IndexOf('=');
+        if (idx > 0)
+        {
+            var key = trimmed.Substring(0, idx).Trim();
+            var val = trimmed.Substring(idx + 1).Trim().Trim('"', '\'');
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(key)))
+            {
+                Environment.SetEnvironmentVariable(key, val);
+            }
+        }
+    }
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Đăng ký Entity Framework Core với SQL Server
 var connectionString = builder.Configuration.GetConnectionString("StoreDb") 
     ?? "Server=localhost;Database=StoreDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true;";
+
+// Chốt cổng chuẩn: API luôn nghe http://127.0.0.1:5000 (Google callback + Vite proxy).
+builder.WebHost.UseUrls("http://127.0.0.1:5000");
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(connectionString));

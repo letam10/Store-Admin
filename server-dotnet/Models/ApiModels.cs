@@ -24,5 +24,15 @@ public sealed record RegisterRequest(string? Username, string? Email, string? Pa
 public sealed record LoginRequest(string? Username, string? Password);
 // Vai trò kiểu OfferRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
 public sealed record OfferRequest(int DiscountPercent, int StockCount);
+// Vai trò kiểu PasswordForgotRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
+public sealed record PasswordForgotRequest(string? Email);
+// Vai trò kiểu PasswordResetRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
+public sealed record PasswordResetRequest(string? Token, string? Password);
+// Vai trò kiểu TwoFactorChallengeRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
+public sealed record TwoFactorChallengeRequest(string? ChallengeId, string? Code);
+// Vai trò kiểu TwoFactorCodeRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
+public sealed record TwoFactorCodeRequest(string? Code);
+// Vai trò kiểu TwoFactorDisableRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
+public sealed record TwoFactorDisableRequest(string? Password);
 // Vai trò kiểu RecordRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
 public sealed record RecordRequest(string? Title, string? Status, Dictionary<string, object?>? Data);

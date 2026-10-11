@@ -298,6 +298,34 @@ export class StoreDb {
         customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
         expires_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS password_resets (
+        token_hash TEXT PRIMARY KEY,
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        expires_at TEXT NOT NULL,
+        used_at TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_password_resets_owner ON password_resets(customer_id, expires_at);
+      CREATE TABLE IF NOT EXISTS oauth_states (
+        state TEXT PRIMARY KEY,
+        next_url TEXT NOT NULL DEFAULT '/account',
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS login_challenges (
+        id TEXT PRIMARY KEY,
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS customer_totp_backups (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        code_hash TEXT NOT NULL,
+        used_at TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_totp_backups_owner ON customer_totp_backups(customer_id);
 
       CREATE TABLE IF NOT EXISTS voucher_codes (
         code TEXT PRIMARY KEY,
@@ -383,6 +411,12 @@ export class StoreDb {
       ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS refund_amount BIGINT NOT NULL DEFAULT 0;
       ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS extra_paid BIGINT NOT NULL DEFAULT 0;
       ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS voucher_snapshot_json TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE customers ADD COLUMN IF NOT EXISTS google_sub TEXT;
+      ALTER TABLE customers ADD COLUMN IF NOT EXISTS totp_secret TEXT NOT NULL DEFAULT '';
+      ALTER TABLE customers ADD COLUMN IF NOT EXISTS totp_enabled INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE customers ADD COLUMN IF NOT EXISTS totp_pending_secret TEXT NOT NULL DEFAULT '';
+      ALTER TABLE customers ADD COLUMN IF NOT EXISTS totp_verified_at TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_google_sub ON customers(google_sub) WHERE google_sub IS NOT NULL AND google_sub <> '';
       UPDATE customer_orders SET shipping_base = shipping_fee WHERE shipping_base = 0 AND shipping_fee > 0;
       CREATE TABLE IF NOT EXISTS customer_after_sales (
         id TEXT PRIMARY KEY,
