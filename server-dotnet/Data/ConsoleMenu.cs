@@ -3,6 +3,7 @@
  * Mục đích: Bảng menu tương tác quản lý hệ thống trên Console ASP.NET Core (giao diện chuẩn, căn lề thẳng hàng 100%).
  */
 using System.Diagnostics;
+using System.Net.Sockets;
 using Microsoft.AspNetCore.Builder;
 using StoreApi.Security;
 
@@ -53,12 +54,13 @@ public static class ConsoleMenu
             Console.WriteLine("------------------------------------------------------------");
             PrintMenuItem("8", "Bật Giao diện Store Khách hàng (React - Cổng 5173)");
             PrintMenuItem("9", "Bật Giao diện Admin Dashboard (React - Cổng 5174)");
+            PrintMenuItem("10", "Tắt cả hai Frontend (Đóng cổng 5173 & 5174)", ConsoleColor.Red);
             PrintMenuItem("0", "Thoát chương trình", ConsoleColor.DarkGray);
 
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("============================================================");
             Console.ResetColor();
-            Console.Write("👉 Nhập lựa chọn của bạn [0-9]: ");
+            Console.Write("👉 Nhập lựa chọn của bạn [0-10]: ");
 
             var choice = Console.ReadLine()?.Trim();
             switch (choice)
@@ -138,6 +140,10 @@ public static class ConsoleMenu
                     StartFrontendAdmin();
                     break;
 
+                case "10":
+                    StopFrontends();
+                    break;
+
                 case "0":
                     if (isServerRunning)
                     {
@@ -167,8 +173,35 @@ public static class ConsoleMenu
         Console.ResetColor();
     }
 
+    private static bool IsPortInUse(int port)
+    {
+        try
+        {
+            using var client = new TcpClient();
+            var result = client.BeginConnect("127.0.0.1", port, null, null);
+            var success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromMilliseconds(500));
+            if (!success) return false;
+            client.EndConnect(result);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static void StartFrontendStore()
     {
+        if (IsPortInUse(5173))
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("Cong 5173 dang chay Vite roi - mo lai trinh duyet thay vi khoi dong moi.");
+            Console.ResetColor();
+            try { Process.Start(new ProcessStartInfo { FileName = "http://localhost:5173", UseShellExecute = true }); } catch { }
+            Console.WriteLine("Da mo lai Frontend Store.");
+            WaitKey();
+            return;
+        }
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine("\n[+] Đang mở cửa sổ chạy Frontend Store (http://localhost:5173)...");
         Console.ResetColor();
@@ -177,7 +210,7 @@ public static class ConsoleMenu
             Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = "/k cd /d \"D:\\Web\\Store\" && npm run dev",
+                Arguments = "/k cd /d \"D:\\Web\\Store\" && npm.cmd run dev",
                 UseShellExecute = true
             });
             try { Process.Start(new ProcessStartInfo { FileName = "http://localhost:5173", UseShellExecute = true }); } catch { }
@@ -194,6 +227,16 @@ public static class ConsoleMenu
 
     private static void StartFrontendAdmin()
     {
+        if (IsPortInUse(5174))
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("Cong 5174 dang chay Vite roi - mo lai trinh duyet thay vi khoi dong moi.");
+            Console.ResetColor();
+            try { Process.Start(new ProcessStartInfo { FileName = "http://localhost:5174", UseShellExecute = true }); } catch { }
+            Console.WriteLine("Da mo lai Admin Dashboard.");
+            WaitKey();
+            return;
+        }
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine("\n[+] Đang mở cửa sổ chạy Admin Dashboard (http://localhost:5174)...");
         Console.ResetColor();
@@ -202,7 +245,7 @@ public static class ConsoleMenu
             Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = "/k cd /d \"D:\\Web\\Store-Admin\" && npm run dev",
+                Arguments = "/k cd /d \"D:\\Web\\Store-Admin\" && npm.cmd run dev",
                 UseShellExecute = true
             });
             try { Process.Start(new ProcessStartInfo { FileName = "http://localhost:5174", UseShellExecute = true }); } catch { }
@@ -215,6 +258,111 @@ public static class ConsoleMenu
             Console.ResetColor();
         }
         WaitKey();
+    }
+
+    private static void StopFrontends()
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("\n[-] Dang tat ca hai Frontend (5173 & 5174)...");
+        Console.ResetColor();
+        StopPort(5173);
+        StopPort(5174);
+        WaitKey();
+    }
+
+    private static void StopPort(int port)
+    {
+        try
+        {
+            var pids = GetPidsByPort(port);
+            if (pids.Count == 0)
+            {
+                Console.WriteLine($"  Cong {port}: hien dang trong - khong can tat.");
+                return;
+            }
+            Console.WriteLine($"  Cong {port}: tim thay PID {string.Join(", ", pids)} - dang tat...");
+            foreach (var pid in pids)
+            {
+                try
+                {
+                    // /T = kill ca cay tien trinh con (cmd -> npm -> node/vite), /F = bat buoc
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = "taskkill",
+                        Arguments = $"/PID {pid} /T /F",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    using var p = Process.Start(psi);
+                    if (p != null)
+                    {
+                        p.WaitForExit(5000);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"  Cong {port} PID {pid}: khong tat duoc ({ex.Message})");
+                }
+            }
+            System.Threading.Thread.Sleep(800);
+            if (!IsPortInUse(port))
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"  Cong {port}: da tat thanh cong!");
+                Console.ResetColor();
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"  Cong {port}: van con tien trinh giu cong. Thu mo CMD chay: netstat -ano | findstr :{port}  roi taskkill /PID <PID> /F");
+                Console.ResetColor();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"  Cong {port}: loi {ex.Message}");
+            Console.ResetColor();
+        }
+    }
+
+    private static List<int> GetPidsByPort(int port)
+    {
+        var pids = new List<int>();
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "netstat",
+                Arguments = "-ano -p TCP",
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var p = Process.Start(psi);
+            if (p == null) return pids;
+            string output = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(5000);
+            int selfPid = Environment.ProcessId;
+            foreach (var rawLine in output.Split('\n'))
+            {
+                var line = rawLine.Trim();
+                if (!line.StartsWith("TCP", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!line.Contains("LISTENING", StringComparison.OrdinalIgnoreCase)) continue;
+                // Khop chinh xac ":5173 " de tranh nham ":51730"
+                if (!line.Contains($":{port} ", StringComparison.Ordinal)) continue;
+                var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0) continue;
+                if (int.TryParse(parts[^1], out int pid) && pid > 0 && pid != selfPid && !pids.Contains(pid))
+                {
+                    pids.Add(pid);
+                }
+            }
+        }
+        catch { }
+        return pids;
     }
 
     private static void CreateAdmin(StoreDb db)
