@@ -21,12 +21,53 @@ public sealed class StoreDb
 
     private readonly string _connectionString;
 
+    public string ConnectionString => _connectionString;
+
+    public string DatabaseName
+    {
+        get
+        {
+            try
+            {
+                return new SqlConnectionStringBuilder(_connectionString).InitialCatalog;
+            }
+            catch
+            {
+                return Environment.GetEnvironmentVariable("SQL_DATABASE") ?? "StoreDb";
+            }
+        }
+    }
+
     public StoreDb(IConfiguration configuration)
     {
         var configured = configuration.GetConnectionString("StoreDb") ?? Environment.GetEnvironmentVariable("DATABASE_URL");
         if (!string.IsNullOrWhiteSpace(configured))
         {
-            _connectionString = configured;
+            // Cho phép cấu hình thiếu TrustServerCertificate trên máy mới (sqlcmd/driver 18 mặc định encrypt).
+            // Nếu connection string chưa ghi rõ TrustServerCertificate/Encrypt thì tự bổ sung để tránh lỗi SSL.
+            try
+            {
+                var csb = new SqlConnectionStringBuilder(configured);
+                var raw = configured ?? string.Empty;
+                if (!raw.Contains("TrustServerCertificate", StringComparison.OrdinalIgnoreCase))
+                {
+                    csb.TrustServerCertificate = true;
+                }
+                if (!raw.Contains("Encrypt", StringComparison.OrdinalIgnoreCase))
+                {
+                    // LocalDB/SQL Express nội bộ: giữ Encrypt=false để tương thích máy chưa cài chứng chỉ.
+                    csb.Encrypt = false;
+                }
+                if (!raw.Contains("MultipleActiveResultSets", StringComparison.OrdinalIgnoreCase))
+                {
+                    csb.MultipleActiveResultSets = true;
+                }
+                _connectionString = csb.ConnectionString;
+            }
+            catch
+            {
+                _connectionString = configured;
+            }
         }
         else
         {
@@ -36,11 +77,69 @@ public sealed class StoreDb
                 InitialCatalog = Environment.GetEnvironmentVariable("SQL_DATABASE") ?? "StoreDb",
                 IntegratedSecurity = true,
                 TrustServerCertificate = true,
+                Encrypt = false,
                 MultipleActiveResultSets = true
             };
             _connectionString = builder.ConnectionString;
         }
-        EnsureCustomerTables();
+        try
+        {
+            EnsureDatabaseExists();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[StoreDb] Chưa tạo được database '{DatabaseName}': {ex.Message}");
+            Console.WriteLine("[StoreDb] Hãy kiểm tra SQL Server đã Running + chạy scripts/setup-db.ps1");
+        }
+        try
+        {
+            EnsureCustomerTables();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[StoreDb] Chưa tạo được tables: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Tự tạo database StoreDb nếu máy thành viên mới pull về chưa có.
+    /// Kết nối tới `master` rồi chạy CREATE DATABASE (idempotent).
+    /// </summary>
+    public void EnsureDatabaseExists()
+    {
+        var masterBuilder = new SqlConnectionStringBuilder(_connectionString)
+        {
+            InitialCatalog = "master"
+        };
+        using var master = new SqlConnection(masterBuilder.ConnectionString);
+        master.Open();
+        using var command = master.CreateCommand();
+        // Không tham số hoá tên DB được nên kiểm tra tên an toàn trước khi ghép chuỗi.
+        // Cho phép chữ, số, gạch dưới, gạch ngang, khoảng trắng (dùng [brackets] nên an toàn).
+        var dbName = DatabaseName;
+        if (string.IsNullOrWhiteSpace(dbName) || dbName.IndexOfAny([';', '\'', '/', '\\']) >= 0)
+        {
+            throw new InvalidOperationException($"Tên database không hợp lệ: '{dbName}'");
+        }
+        command.CommandText = $"IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'{dbName.Replace("'", "''")}') CREATE DATABASE [{dbName}];";
+        command.ExecuteNonQuery();
+    }
+
+    /// <summary>Kiểm tra kết nối DB cho endpoint /api/health/db (không ném exception).</summary>
+    public (bool Ok, string Message) TryCheckHealth()
+    {
+        try
+        {
+            using var db = Open();
+            using var command = db.CreateCommand();
+            command.CommandText = "SELECT 1;";
+            command.ExecuteScalar();
+            return (true, $"Kết nối database '{DatabaseName}' thành công.");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Không kết nối được database '{DatabaseName}': {ex.Message}");
+        }
     }
 
     public SqlConnection Open()
@@ -52,11 +151,9 @@ public sealed class StoreDb
 
     public void EnsureCustomerTables()
     {
-        try
-        {
-            using var db = Open();
-            using var command = db.CreateCommand();
-            command.CommandText = """
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = """
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'admins')
                 CREATE TABLE admins (
                   id INT IDENTITY(1,1) PRIMARY KEY,
@@ -192,10 +289,43 @@ public sealed class StoreDb
                   product_id NVARCHAR(255) PRIMARY KEY,
                   view_count INT NOT NULL DEFAULT 0 CHECK(view_count >= 0)
                 );
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'settings')
+                CREATE TABLE settings (
+                  [key] NVARCHAR(255) PRIMARY KEY,
+                  value NVARCHAR(MAX) NOT NULL,
+                  updated_at NVARCHAR(100) NOT NULL
+                );
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'orders')
+                CREATE TABLE orders (
+                  id NVARCHAR(255) PRIMARY KEY,
+                  business_date NVARCHAR(50) NOT NULL,
+                  status NVARCHAR(50) NOT NULL,
+                  total_amount INT NOT NULL CHECK(total_amount >= 0),
+                  refund_amount INT NOT NULL DEFAULT 0 CHECK(refund_amount >= 0),
+                  is_demo INT NOT NULL DEFAULT 0
+                );
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'backend_owner')
+                CREATE TABLE backend_owner (
+                  singleton INT PRIMARY KEY CHECK(singleton = 1),
+                  pid INT NOT NULL,
+                  token NVARCHAR(MAX) NOT NULL
+                );
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'admin_records')
+                CREATE TABLE admin_records (
+                  id INT IDENTITY(1,1) PRIMARY KEY,
+                  module NVARCHAR(255) NOT NULL,
+                  title NVARCHAR(500) NOT NULL,
+                  data_json NVARCHAR(MAX) NOT NULL DEFAULT '{}',
+                  status NVARCHAR(100) NOT NULL DEFAULT N'Đang dùng',
+                  created_at NVARCHAR(100) NOT NULL,
+                  updated_at NVARCHAR(100) NOT NULL
+                );
                 """;
             command.ExecuteNonQuery();
-        }
-        catch { }
     }
 
     public IReadOnlyList<CatalogProduct> Catalog()

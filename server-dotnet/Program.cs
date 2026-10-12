@@ -30,11 +30,62 @@ if (File.Exists(envPath))
 var builder = WebApplication.CreateBuilder(args);
 
 // Đăng ký Entity Framework Core với SQL Server
-var connectionString = builder.Configuration.GetConnectionString("StoreDb") 
-    ?? "Server=localhost;Database=StoreDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true;";
+// Chuẩn hoá connection string cho máy mới: driver 18 mặc định Encrypt=true gây lỗi chứng chỉ
+// self-signed nếu thiếu TrustServerCertificate/Encrypt. Tự bổ sung nếu cấu hình chưa ghi rõ.
+static string NormalizeConnectionString(string raw)
+{
+    try
+    {
+        var csb = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(raw);
+        if (!raw.Contains("TrustServerCertificate", StringComparison.OrdinalIgnoreCase))
+        {
+            csb.TrustServerCertificate = true;
+        }
+        if (!raw.Contains("Encrypt", StringComparison.OrdinalIgnoreCase))
+        {
+            csb.Encrypt = false;
+        }
+        if (!raw.Contains("MultipleActiveResultSets", StringComparison.OrdinalIgnoreCase))
+        {
+            csb.MultipleActiveResultSets = true;
+        }
+        return csb.ConnectionString;
+    }
+    catch
+    {
+        return raw;
+    }
+}
+var connectionString = NormalizeConnectionString(builder.Configuration.GetConnectionString("StoreDb")
+    ?? "Server=localhost;Database=StoreDb;Trusted_Connection=True;TrustServerCertificate=True;Encrypt=False;MultipleActiveResultSets=true;");
 
 // Chốt cổng chuẩn: API luôn nghe http://127.0.0.1:5000 (Google callback + Vite proxy).
-builder.WebHost.UseUrls("http://127.0.0.1:5000");
+// Tôn trọng --urls / ASPNETCORE_URLS nếu người gọi truyền rõ (phục vụ test cổng khác);
+// nếu không, ép về 5000 để launch profile / appsettings lệch cổng không làm trôi API.
+static string? GetArgValue(string[] a, string name)
+{
+    for (var i = 0; i < a.Length; i++)
+    {
+        if (a[i].Equals(name, StringComparison.OrdinalIgnoreCase) && i + 1 < a.Length)
+        {
+            return a[i + 1];
+        }
+        if (a[i].StartsWith(name + "=", StringComparison.OrdinalIgnoreCase))
+        {
+            return a[i].Substring(name.Length + 1);
+        }
+    }
+    return null;
+}
+var explicitUrls = GetArgValue(args, "--urls") ?? Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+if (!string.IsNullOrWhiteSpace(explicitUrls))
+{
+    builder.WebHost.UseUrls(explicitUrls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+}
+else
+{
+    builder.WebHost.UseUrls("http://127.0.0.1:5000");
+}
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(connectionString));
@@ -67,6 +118,35 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors("local-frontends");
 app.MapControllers();
+
+// Tự dựng StoreDb cho máy mới pull về: tạo database + tables + seed nếu rỗng.
+// Chạy idempotent nên máy đã có DB không bị mất dữ liệu.
+try
+{
+    using var scope = app.Services.CreateScope();
+    var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await context.Database.EnsureCreatedAsync();
+
+    var storeDb = scope.ServiceProvider.GetRequiredService<StoreDb>();
+    try { storeDb.EnsureDatabaseExists(); } catch { /* đã log trong StoreDb ctor */ }
+    storeDb.EnsureCustomerTables();
+    try
+    {
+        storeDb.SeedDefaultProducts();
+    }
+    catch (Exception seedEx)
+    {
+        Console.WriteLine($"[StoreDb] Chưa seed được sản phẩm mẫu: {seedEx.Message}");
+    }
+    Console.WriteLine($"[StoreDb] Sẵn sàng database '{storeDb.DatabaseName}'. Kiểm tra: GET /api/health/db");
+}
+catch (Exception ex)
+{
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine($"[StoreDb] Cảnh báo khởi động: chưa đảm bảo được database. Chi tiết: {ex.Message}");
+    Console.WriteLine("[StoreDb] Hãy kiểm tra SQL Server đang Running rồi chạy: powershell ./scripts/setup-db.ps1");
+    Console.ResetColor();
+}
 
 var isInteractive = Environment.UserInteractive && !Console.IsInputRedirected && !args.Contains("--no-menu") && !args.Contains("--server");
 var db = app.Services.GetRequiredService<StoreDb>();
