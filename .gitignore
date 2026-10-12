@@ -31,17 +31,8 @@ dist-ssr
 .env
 .env.*
 !.env.example
-!server/.env.example
 *.pem
 *.key
-
-# Local backend data
-server/data/*.sqlite
-server/data/*.sqlite-*
-server/data/*.db
-server/data/*.db-*
-server/data/pgdata/
-*.pgdata/
 
 # Local AI artifacts (code/config remain tracked)
 ai/models/

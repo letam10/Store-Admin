@@ -47,7 +47,7 @@ Cài extension `C# Dev Kit`, đặt breakpoint trong `Controllers` hoặc `Data/
 
 ## Cấu hình
 
-Backend C# dùng **SQL Server** (không phải PostgreSQL — đoạn README cũ ghi nhầm đã sửa ở đây).
+Backend C# dùng **SQL Server**.
 Cấu hình bằng connection string `StoreDb` trong `appsettings.json`, hoặc biến môi trường:
 
 - `ConnectionStrings__StoreDb` (ưu tiên nhất, đặt trong `.env` local — **không commit**),

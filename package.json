@@ -13,11 +13,8 @@
     "lint": "eslint .",
     "test": "node --test test/*.test.js",
     "preview": "vite preview",
-    "dev:api": "npm --prefix server run dev",
-    "dev:api:node-legacy": "npm --prefix server run dev",
-    "dev:api:cs": "dotnet watch --project server-dotnet run --urls http://127.0.0.1:5000",
-    "build:api:cs": "dotnet build server-dotnet/server-dotnet.csproj",
-    "test:api": "npm --prefix server test"
+    "dev:api": "dotnet watch --project server-dotnet run --urls http://127.0.0.1:5000",
+    "build:api": "dotnet build server-dotnet/server-dotnet.csproj"
   },
   "dependencies": {
     "react": "^19.2.8",

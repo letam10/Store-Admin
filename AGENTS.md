@@ -15,7 +15,7 @@ Tài liệu này là quy tắc bắt buộc áp dụng cho mọi AI coding agent
   * Sửa lỗi: `sửa lỗi <mô tả>` (Ví dụ: `sửa lỗi hiển thị biểu đồ doanh thu`)
   * Tối ưu/Cải tiến: `tối ưu <mô tả>` (Ví dụ: `tối ưu tốc độ truy vấn cơ sở dữ liệu`)
   * Cập nhật giao diện: `cập nhật giao diện <mô tả>` (Ví dụ: `cập nhật giao diện trang quản trị đơn hàng`)
-  * Cấu hình/Hạ tầng: `cấu hình <mô tả>` (Ví dụ: `cấu hình kết nối cơ sở dữ liệu postgresql`)
+  * Cấu hình/Hạ tầng: `cấu hình <mô tả>` (Ví dụ: `cấu hình kết nối cơ sở dữ liệu sql server`)
 
 ---
 
