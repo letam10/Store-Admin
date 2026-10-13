@@ -7,8 +7,35 @@ using Microsoft.OpenApi.Models;
 using StoreApi.Data;
 
 // Nạp các biến cấu hình từ file .env nếu có (GOOGLE_CLIENT_ID, SMTP, ...)
-var envPath = Path.Combine(Directory.GetCurrentDirectory(), ".env");
-if (File.Exists(envPath))
+var candidateEnvPaths = new[]
+{
+    Path.Combine(Directory.GetCurrentDirectory(), ".env"),
+    Path.Combine(Directory.GetCurrentDirectory(), "server-dotnet", ".env"),
+    Path.Combine(Directory.GetCurrentDirectory(), "Store-Admin", "server-dotnet", ".env"),
+    Path.Combine(AppContext.BaseDirectory, ".env"),
+    Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".env"),
+    Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "server-dotnet", ".env")
+};
+
+string? envPath = candidateEnvPaths.FirstOrDefault(File.Exists);
+if (envPath == null)
+{
+    foreach (var baseDir in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+    {
+        var cur = new DirectoryInfo(baseDir);
+        while (cur != null)
+        {
+            var p1 = Path.Combine(cur.FullName, ".env");
+            if (File.Exists(p1)) { envPath = p1; break; }
+            var p2 = Path.Combine(cur.FullName, "Store-Admin", "server-dotnet", ".env");
+            if (File.Exists(p2)) { envPath = p2; break; }
+            cur = cur.Parent;
+        }
+        if (envPath != null) break;
+    }
+}
+
+if (!string.IsNullOrEmpty(envPath) && File.Exists(envPath))
 {
     foreach (var line in File.ReadAllLines(envPath))
     {
