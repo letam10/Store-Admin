@@ -205,6 +205,14 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
             var raw = Tokens.RandomToken();
             db.CreateSession(Tokens.Sha256(raw), id, DateTimeOffset.UtcNow.AddDays(30));
             Response.Cookies.Append(Cookie, raw, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, MaxAge = TimeSpan.FromDays(30), Path = "/" });
+            
+            // Gửi email thông báo đăng nhập Google
+            _ = Task.Run(async () =>
+            {
+                try { await emailService.SendGoogleLoginEmailAsync(email, auth?.Username ?? email); }
+                catch (Exception ex) { Console.WriteLine($"[Store Mailer] Google login email exception: {ex.Message}"); }
+            });
+            
             return Redirect(frontend + nextUrl);
         }
         catch { return Fail("GOOGLE_FAILED"); }

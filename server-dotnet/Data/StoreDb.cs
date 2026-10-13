@@ -459,15 +459,93 @@ public sealed class StoreDb
         command.ExecuteNonQuery();
     }
 
+    private static readonly Dictionary<string, string> DefaultAppearance = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["brandName"] = "store",
+        ["brandTagline"] = "EVERYDAY",
+        ["headerSearchPlaceholder"] = "Tìm sản phẩm, danh mục…",
+        ["navHome"] = "Trang chủ",
+        ["navProducts"] = "Hàng hóa",
+        ["navFavorites"] = "Yêu thích",
+        ["navRewards"] = "May mắn",
+        ["navMembership"] = "Thành viên",
+        ["navContact"] = "Địa chỉ & liên hệ",
+        ["heroTitle"] = "Chọn món bạn yêu. Sống theo cách riêng.",
+        ["heroDescription"] = "Khám phá sản phẩm nổi bật, ưu đãi và các nhóm hàng dễ tìm.",
+        ["heroButton"] = "Khám phá cửa hàng",
+        ["footerText"] = "Những điều nhỏ, cho một ngày tốt hơn.",
+        ["footerSupport"] = "Đội ngũ Store luôn sẵn sàng hỗ trợ bạn.",
+        ["footerInfo"] = "Giá và ưu đãi được cập nhật tại cửa hàng. Điểm thành viên được cộng sau khi xác nhận thanh toán.",
+        ["footerShopTitle"] = "Mua sắm",
+        ["footerProducts"] = "Hàng hóa",
+        ["footerCart"] = "Giỏ hàng",
+        ["footerMembership"] = "Thành viên",
+        ["footerRewards"] = "Vòng quay may mắn",
+        ["footerSupportTitle"] = "Hỗ trợ",
+        ["footerContact"] = "Địa chỉ & liên hệ",
+        ["footerAccount"] = "Tài khoản của bạn",
+        ["footerInfoTitle"] = "Thông tin",
+        ["footerCopyright"] = "© 2026 Store",
+        ["accentColor"] = "#4f8b67",
+        ["bannerLabel"] = "STORE EVERYDAY",
+        ["contactAddress"] = "123 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh",
+        ["contactPhone"] = "0901234567",
+        ["contactEmail"] = "support@store.vn",
+        ["contactHours"] = "08:00 - 21:00 mỗi ngày"
+    };
+
     public IReadOnlyDictionary<string, string> Appearance()
     {
+        var result = new Dictionary<string, string>(DefaultAppearance, StringComparer.OrdinalIgnoreCase);
         using var db = Open();
         using var command = db.CreateCommand();
-        command.CommandText = "SELECT [key],[value] FROM settings WHERE [key] LIKE 'appearance.%'";
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        command.CommandText = "SELECT [key],[value] FROM settings WHERE [key] LIKE 'appearance.%' OR [key] = 'storefront_appearance'";
         using var reader = command.ExecuteReader();
-        while (reader.Read()) result[reader.GetString(0)[11..]] = reader.GetString(1);
+        while (reader.Read())
+        {
+            var k = reader.GetString(0);
+            var v = reader.GetString(1);
+            if (k.Equals("storefront_appearance", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var map = JsonSerializer.Deserialize<Dictionary<string, string>>(v);
+                    if (map is not null)
+                    {
+                        foreach (var (mk, mv) in map) if (!string.IsNullOrWhiteSpace(mv)) result[mk] = mv;
+                    }
+                }
+                catch { }
+            }
+            else if (k.StartsWith("appearance.", StringComparison.OrdinalIgnoreCase))
+            {
+                result[k[11..]] = v;
+            }
+        }
         return result;
+    }
+
+    public void SaveAppearance(IReadOnlyDictionary<string, string> dict)
+    {
+        var merged = new Dictionary<string, string>(Appearance(), StringComparer.OrdinalIgnoreCase);
+        foreach (var (k, v) in dict) merged[k] = v ?? "";
+        var json = JsonSerializer.Serialize(merged);
+        SetSetting("storefront_appearance", json);
+        using var db = Open();
+        foreach (var (k, v) in merged)
+        {
+            using var cmd = db.CreateCommand();
+            cmd.CommandText = """
+                IF EXISTS (SELECT 1 FROM settings WHERE [key] = @key)
+                    UPDATE settings SET [value] = @val, [updated_at] = @now WHERE [key] = @key;
+                ELSE
+                    INSERT INTO settings([key], [value], [updated_at]) VALUES(@key, @val, @now);
+                """;
+            cmd.Parameters.AddWithValue("@key", "appearance." + k);
+            cmd.Parameters.AddWithValue("@val", v ?? "");
+            cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.ExecuteNonQuery();
+        }
     }
 
     public (string Salt, string Hash)? FindAdmin(string username)
@@ -674,6 +752,15 @@ public sealed class StoreDb
         }
         catch { }
 
+        var st = S(13);
+        var deliveryStatus = st == "cancelled" ? "cancelled"
+            : st is "delivered" or "completed" ? "delivered"
+            : st == "shipped" ? "shipped"
+            : st == "ready" ? "ready"
+            : "processing";
+
+        var username = reader.FieldCount > 18 && !reader.IsDBNull(18) ? reader.GetString(18) : "";
+
         return new
         {
             id = S(0),
@@ -690,13 +777,14 @@ public sealed class StoreDb
             shippingFee = Convert.ToInt32(reader.GetValue(10)),
             total = Convert.ToInt32(reader.GetValue(11)),
             tier = S(12),
-            status = S(13),
-            deliveryStatus = S(13) == "cancelled" ? "cancelled" : S(13) == "completed" ? "delivered" : "processing",
+            status = st,
+            deliveryStatus,
             paymentMethod = S(14),
             paymentMode = "demo",
             scheduledAt = reader.IsDBNull(15) ? null : reader.GetString(15),
             createdAt = S(16),
             paidAt = reader.IsDBNull(17) ? null : reader.GetString(17),
+            username = string.IsNullOrWhiteSpace(username) ? S(2) : username,
             extraPaid = 0,
             refundAmount = 0
         };
@@ -1131,4 +1219,666 @@ public sealed class StoreDb
         while (reader.Read()) list.Add((reader.GetString(0), reader.GetString(1), Convert.ToInt32(reader.GetValue(2))));
         return list;
     }
+
+    public void SetSetting(string key, string value)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            IF EXISTS (SELECT 1 FROM settings WHERE [key] = @key)
+                UPDATE settings SET [value] = @val, [updated_at] = @now WHERE [key] = @key;
+            ELSE
+                INSERT INTO settings([key], [value], [updated_at]) VALUES(@key, @val, @now);
+            """;
+        cmd.Parameters.AddWithValue("@key", key);
+        cmd.Parameters.AddWithValue("@val", value);
+        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+        cmd.ExecuteNonQuery();
+    }
+
+    public string? GetSetting(string key)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT TOP 1 [value] FROM settings WHERE [key] = @key";
+        cmd.Parameters.AddWithValue("@key", key);
+        var res = cmd.ExecuteScalar();
+        return res is null || res is DBNull ? null : Convert.ToString(res);
+    }
+
+    public object GetPaymentSettings()
+    {
+        var raw = GetSetting("payment_settings");
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+            try
+            {
+                var doc = JsonSerializer.Deserialize<Dictionary<string, string>>(raw);
+                if (doc is not null)
+                {
+                    return new
+                    {
+                        mode = doc.GetValueOrDefault("mode", "demo"),
+                        bankName = doc.GetValueOrDefault("bankName", "Vietcombank"),
+                        bankBin = doc.GetValueOrDefault("bankBin", "970436"),
+                        accountNumber = doc.GetValueOrDefault("accountNumber", "0123456789"),
+                        accountName = doc.GetValueOrDefault("accountName", "CONG TY TNHH STORE")
+                    };
+                }
+            }
+            catch { }
+        }
+        return new
+        {
+            mode = "demo",
+            bankName = "Vietcombank",
+            bankBin = "970436",
+            accountNumber = "0123456789",
+            accountName = "CONG TY TNHH STORE"
+        };
+    }
+
+    public object SavePaymentSettings(string mode, string? bankName, string? bankBin, string? accountNumber, string? accountName)
+    {
+        var settings = new Dictionary<string, string>
+        {
+            ["mode"] = mode ?? "demo",
+            ["bankName"] = bankName ?? "",
+            ["bankBin"] = bankBin ?? "",
+            ["accountNumber"] = accountNumber ?? "",
+            ["accountName"] = accountName ?? ""
+        };
+        SetSetting("payment_settings", JsonSerializer.Serialize(settings));
+        return settings;
+    }
+
+    public IReadOnlyList<object> ListAdminRecords(string? module = null)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = string.IsNullOrWhiteSpace(module)
+            ? "SELECT id, module, title, data_json, status, created_at, updated_at FROM admin_records ORDER BY id DESC"
+            : "SELECT id, module, title, data_json, status, created_at, updated_at FROM admin_records WHERE module = @m ORDER BY id DESC";
+        if (!string.IsNullOrWhiteSpace(module)) cmd.Parameters.AddWithValue("@m", module);
+        using var reader = cmd.ExecuteReader();
+        var list = new List<object>();
+        while (reader.Read())
+        {
+            var rawData = reader.IsDBNull(3) ? "{}" : reader.GetString(3);
+            object dataObj;
+            try { dataObj = JsonSerializer.Deserialize<Dictionary<string, object?>>(rawData) ?? []; }
+            catch { dataObj = new Dictionary<string, object?>(); }
+            list.Add(new
+            {
+                id = Convert.ToInt32(reader.GetValue(0)),
+                module = reader.GetString(1),
+                title = reader.GetString(2),
+                data = dataObj,
+                status = reader.GetString(4),
+                createdAt = reader.GetString(5),
+                updatedAt = reader.GetString(6)
+            });
+        }
+        return list;
+    }
+
+    public object CreateAdminRecord(string module, string title, string status, string dataJson)
+    {
+        var now = DateTimeOffset.UtcNow.ToString("O");
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO admin_records(module, title, data_json, status, created_at, updated_at)
+            OUTPUT INSERTED.id
+            VALUES(@module, @title, @dataJson, @status, @now, @now);
+            """;
+        cmd.Parameters.AddWithValue("@module", module);
+        cmd.Parameters.AddWithValue("@title", title);
+        cmd.Parameters.AddWithValue("@dataJson", dataJson);
+        cmd.Parameters.AddWithValue("@status", status);
+        cmd.Parameters.AddWithValue("@now", now);
+        var id = Convert.ToInt32(cmd.ExecuteScalar());
+        object dataObj;
+        try { dataObj = JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson) ?? []; }
+        catch { dataObj = new Dictionary<string, object?>(); }
+        return new { id, module, title, data = dataObj, status, createdAt = now, updatedAt = now };
+    }
+
+    public object? UpdateAdminRecord(int id, string? module, string title, string status, string dataJson)
+    {
+        var now = DateTimeOffset.UtcNow.ToString("O");
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            UPDATE admin_records
+            SET title = @title, status = @status, data_json = @dataJson, updated_at = @now
+            WHERE id = @id;
+            SELECT module, created_at FROM admin_records WHERE id = @id;
+            """;
+        cmd.Parameters.AddWithValue("@id", id);
+        cmd.Parameters.AddWithValue("@title", title);
+        cmd.Parameters.AddWithValue("@status", status);
+        cmd.Parameters.AddWithValue("@dataJson", dataJson);
+        cmd.Parameters.AddWithValue("@now", now);
+        using var reader = cmd.ExecuteReader();
+        if (!reader.Read()) return null;
+        var actualModule = reader.GetString(0);
+        var createdAt = reader.GetString(1);
+        object dataObj;
+        try { dataObj = JsonSerializer.Deserialize<Dictionary<string, object?>>(dataJson) ?? []; }
+        catch { dataObj = new Dictionary<string, object?>(); }
+        return new { id, module = actualModule, title, data = dataObj, status, createdAt, updatedAt = now };
+    }
+
+    public bool DeleteAdminRecord(int id)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "DELETE FROM admin_records WHERE id = @id";
+        cmd.Parameters.AddWithValue("@id", id);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+    public IReadOnlyList<object> ListAdminCustomers()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT id, username, email, points, paid_goods_total, spin_credits, created_at FROM customers ORDER BY points DESC, id ASC";
+        using var reader = cmd.ExecuteReader();
+        var list = new List<object>();
+        while (reader.Read())
+        {
+            var pts = Convert.ToInt32(reader.GetValue(3));
+            list.Add(new
+            {
+                id = Convert.ToInt64(reader.GetValue(0)),
+                username = reader.GetString(1),
+                email = reader.GetString(2),
+                points = pts,
+                paidGoodsTotal = Convert.ToInt32(reader.GetValue(4)),
+                spinCredits = Convert.ToInt32(reader.GetValue(5)),
+                createdAt = reader.GetString(6),
+                tier = pts >= 10000 ? "diamond" : pts >= 1000 ? "gold" : pts >= 100 ? "silver" : "bronze"
+            });
+        }
+        return list;
+    }
+
+    public IReadOnlyList<object> ListAdminVouchers()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT v.code, v.label, v.type, v.value, v.scope, v.expires_at, v.source, v.created_at, c.id, c.username, c.email
+            FROM customer_vouchers v
+            JOIN customers c ON c.id = v.customer_id
+            ORDER BY v.created_at DESC
+            """;
+        using var reader = cmd.ExecuteReader();
+        var list = new List<object>();
+        while (reader.Read())
+        {
+            list.Add(new
+            {
+                code = reader.GetString(0),
+                label = reader.GetString(1),
+                type = reader.GetString(2),
+                value = Convert.ToInt32(reader.GetValue(3)),
+                scope = reader.GetString(4),
+                expiresAt = reader.GetString(5),
+                source = reader.GetString(6),
+                createdAt = reader.GetString(7),
+                customerId = Convert.ToInt64(reader.GetValue(8)),
+                username = reader.GetString(9),
+                email = reader.GetString(10),
+                active = true
+            });
+        }
+        return list;
+    }
+
+    public object CreateAdminVoucher(string code, long customerId, string label, string type, int value, string scope, string expiresAt, string source)
+    {
+        var now = DateTimeOffset.UtcNow.ToString("O");
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            IF NOT EXISTS (SELECT 1 FROM voucher_codes WHERE code = @code)
+                INSERT INTO voucher_codes(code, created_at) VALUES(@code, @now);
+            INSERT INTO customer_vouchers(code, customer_id, label, type, value, scope, expires_at, source, created_at)
+            VALUES(@code, @cid, @label, @type, @val, @scope, @exp, @src, @now);
+            """;
+        cmd.Parameters.AddWithValue("@code", code);
+        cmd.Parameters.AddWithValue("@cid", customerId);
+        cmd.Parameters.AddWithValue("@label", label);
+        cmd.Parameters.AddWithValue("@type", type);
+        cmd.Parameters.AddWithValue("@val", value);
+        cmd.Parameters.AddWithValue("@scope", scope);
+        cmd.Parameters.AddWithValue("@exp", expiresAt);
+        cmd.Parameters.AddWithValue("@src", source);
+        cmd.Parameters.AddWithValue("@now", now);
+        cmd.ExecuteNonQuery();
+        return new { code, label, type, value, scope, expiresAt, source, createdAt = now, customerId };
+    }
+
+    public bool UpdateAdminVoucher(string code, string? label, string? type, int? value, string? scope, string? expiresAt)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            UPDATE customer_vouchers
+            SET label = COALESCE(@label, label),
+                type = COALESCE(@type, type),
+                value = COALESCE(@val, value),
+                scope = COALESCE(@scope, scope),
+                expires_at = COALESCE(@exp, expires_at)
+            WHERE code = @code
+            """;
+        cmd.Parameters.AddWithValue("@code", code);
+        cmd.Parameters.AddWithValue("@label", (object?)label ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@type", (object?)type ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@val", (object?)value ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@scope", (object?)scope ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@exp", (object?)expiresAt ?? DBNull.Value);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+    public bool DeleteAdminVoucher(string code)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "DELETE FROM customer_vouchers WHERE code = @c; DELETE FROM voucher_codes WHERE code = @c;";
+        cmd.Parameters.AddWithValue("@c", code);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+
+    public IReadOnlyList<object> ListAdminFavorites()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT f.product_id, COUNT(*) AS cnt, p.name, p.image, p.symbol
+            FROM customer_favorites f
+            LEFT JOIN catalog_products p ON p.id = f.product_id
+            GROUP BY f.product_id, p.name, p.image, p.symbol
+            ORDER BY cnt DESC, f.product_id ASC
+            """;
+        using var reader = cmd.ExecuteReader();
+        var list = new List<object>();
+        while (reader.Read())
+        {
+            var pid = reader.GetString(0);
+            list.Add(new
+            {
+                id = pid,
+                count = Convert.ToInt32(reader.GetValue(1)),
+                name = reader.IsDBNull(2) ? pid : reader.GetString(2),
+                image = reader.IsDBNull(3) ? null : reader.GetString(3),
+                symbol = reader.IsDBNull(4) ? "✦" : reader.GetString(4)
+            });
+        }
+        return list;
+    }
+
+    public IReadOnlyList<object> ListAdminReviews()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT r.id, r.product_id, r.rating, r.comment, r.admin_reply, r.created_at, c.username, p.name
+            FROM product_reviews r
+            JOIN customers c ON c.id = r.customer_id
+            LEFT JOIN catalog_products p ON p.id = r.product_id
+            ORDER BY r.created_at DESC
+            """;
+        using var reader = cmd.ExecuteReader();
+        var list = new List<object>();
+        while (reader.Read())
+        {
+            var pid = reader.GetString(1);
+            list.Add(new
+            {
+                id = Convert.ToInt64(reader.GetValue(0)),
+                productId = pid,
+                rating = Convert.ToInt32(reader.GetValue(2)),
+                comment = reader.GetString(3),
+                adminReply = reader.IsDBNull(4) ? "" : reader.GetString(4),
+                createdAt = reader.GetString(5),
+                username = reader.GetString(6),
+                productName = reader.IsDBNull(7) ? pid : reader.GetString(7)
+            });
+        }
+        return list;
+    }
+
+    public bool ReplyAdminReview(long id, string reply)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "UPDATE product_reviews SET admin_reply = @reply, replied_at = @now WHERE id = @id";
+        cmd.Parameters.AddWithValue("@reply", reply);
+        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+        cmd.Parameters.AddWithValue("@id", id);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+    public IReadOnlyList<object> ListAllAdminOrders()
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT o.id, o.items_json, o.recipient, o.phone, o.address, o.fulfillment, o.region,
+                   o.subtotal, o.discount, o.goods_total, o.shipping_fee, o.total, o.tier, o.status,
+                   o.payment_method, o.scheduled_at, o.created_at, o.paid_at, c.username
+            FROM customer_orders o
+            LEFT JOIN customers c ON c.id = o.customer_id
+            ORDER BY o.created_at DESC
+            """;
+        using var reader = cmd.ExecuteReader();
+        var list = new List<object>();
+        while (reader.Read())
+        {
+            list.Add(ReadOrderObject(reader));
+        }
+        return list;
+    }
+
+    public bool MarkAdminOrderPaid(string orderId, string? reference)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "UPDATE customer_orders SET status = 'paid', paid_at = COALESCE(paid_at, @now) WHERE id = @id";
+        cmd.Parameters.AddWithValue("@id", orderId);
+        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+    public bool UpdateAdminOrderFulfillment(string orderId, string fulfillmentStatus)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        var status = fulfillmentStatus == "delivered" ? "completed" : fulfillmentStatus;
+        cmd.CommandText = "UPDATE customer_orders SET status = @st WHERE id = @id";
+        cmd.Parameters.AddWithValue("@st", status);
+        cmd.Parameters.AddWithValue("@id", orderId);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+    public bool CancelAdminOrder(string orderId)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "UPDATE customer_orders SET status = 'cancelled' WHERE id = @id";
+        cmd.Parameters.AddWithValue("@id", orderId);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+
+    public CatalogProduct? GetCatalogProduct(string id)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT p.id, p.name, p.category, p.price, p.description, p.image, p.features_json, p.tone, p.symbol, p.label,
+                   COALESCE(p.discount_percent,0), COALESCE(p.stock_count,20), COALESCE(v.view_count,0)
+            FROM catalog_products p
+            LEFT JOIN product_views v ON v.product_id = p.id
+            WHERE p.id = @id
+            """;
+        cmd.Parameters.AddWithValue("@id", id);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? ReadProduct(reader) : null;
+    }
+
+    public CatalogProduct CreateCatalogProduct(
+        string id, string name, string category, long price, string description, string image,
+        IReadOnlyList<string> features, string tone, string symbol, string label, int stockCount)
+    {
+        var now = DateTimeOffset.UtcNow.ToString("O");
+        var featuresJson = JsonSerializer.Serialize(features ?? []);
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO catalog_products
+            (id, source, source_id, name, category, price, description, image, features_json, tone, symbol, label, source_url, source_price_cents, source_currency, imported_at, discount_percent, stock_count)
+            VALUES
+            (@id, 'admin-manual', @id, @name, @category, @price, @desc, @img, @feat, @tone, @sym, @label, 'local://admin-manual', @price, 'VND', @now, 0, @stock);
+
+            INSERT INTO Products(Name, Price, Category, Description, Image)
+            VALUES(@name, @price, @category, @desc, @img);
+            """;
+        cmd.Parameters.AddWithValue("@id", id);
+        cmd.Parameters.AddWithValue("@name", name);
+        cmd.Parameters.AddWithValue("@category", category);
+        cmd.Parameters.AddWithValue("@price", price);
+        cmd.Parameters.AddWithValue("@desc", description);
+        cmd.Parameters.AddWithValue("@img", image);
+        cmd.Parameters.AddWithValue("@feat", featuresJson);
+        cmd.Parameters.AddWithValue("@tone", tone);
+        cmd.Parameters.AddWithValue("@sym", symbol);
+        cmd.Parameters.AddWithValue("@label", label);
+        cmd.Parameters.AddWithValue("@stock", stockCount);
+        cmd.Parameters.AddWithValue("@now", now);
+        cmd.ExecuteNonQuery();
+
+        return new CatalogProduct(id, name, category, price, description, image, features ?? [], tone, symbol, label, 0, stockCount, 0);
+    }
+
+    public CatalogProduct? UpdateCatalogProduct(
+        string id, string? name, string? category, long? price, string? description,
+        string? image, string? label, int? stockCount, string? symbol)
+    {
+        var existing = GetCatalogProduct(id);
+        if (existing is null) return null;
+
+        var newName = name ?? existing.Name;
+        var newCategory = category ?? existing.Category;
+        var newPrice = price ?? existing.Price;
+        var newDesc = description ?? existing.Description;
+        var newImg = image ?? existing.Image;
+        var newLabel = label ?? existing.Label;
+        var newStock = stockCount ?? existing.StockCount;
+        var newSym = symbol ?? existing.Symbol;
+
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            UPDATE catalog_products
+            SET name = @name, category = @category, price = @price, description = @desc,
+                image = @img, label = @label, stock_count = @stock, symbol = @sym
+            WHERE id = @id;
+
+            UPDATE Products
+            SET Name = @name, Price = @price, Category = @category, Description = @desc, Image = @img
+            WHERE Name = @oldName;
+            """;
+        cmd.Parameters.AddWithValue("@id", id);
+        cmd.Parameters.AddWithValue("@name", newName);
+        cmd.Parameters.AddWithValue("@category", newCategory);
+        cmd.Parameters.AddWithValue("@price", newPrice);
+        cmd.Parameters.AddWithValue("@desc", newDesc);
+        cmd.Parameters.AddWithValue("@img", newImg);
+        cmd.Parameters.AddWithValue("@label", newLabel);
+        cmd.Parameters.AddWithValue("@stock", newStock);
+        cmd.Parameters.AddWithValue("@sym", newSym);
+        cmd.Parameters.AddWithValue("@oldName", existing.Name);
+        cmd.ExecuteNonQuery();
+
+        return new CatalogProduct(id, newName, newCategory, newPrice, newDesc, newImg, existing.Features, existing.Tone, newSym, newLabel, existing.DiscountPercent, newStock, existing.ViewCount);
+    }
+
+    public bool DeleteCatalogProduct(string id)
+    {
+        var existing = GetCatalogProduct(id);
+        if (existing is null) return false;
+
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            DELETE FROM catalog_products WHERE id = @id;
+            DELETE FROM product_views WHERE product_id = @id;
+            DELETE FROM Products WHERE Name = @name;
+            """;
+        cmd.Parameters.AddWithValue("@id", id);
+        cmd.Parameters.AddWithValue("@name", existing.Name);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+
+    public object CalculateAdminRevenue(string from, string to)
+    {
+        using var db = Open();
+        long custAll = 0, custInc = 0, custGross = 0, custNet = 0;
+        using (var cmd = db.CreateCommand())
+        {
+            cmd.CommandText = """
+                SELECT
+                    COUNT(*),
+                    SUM(CASE WHEN status IN ('paid', 'completed', 'delivered') THEN 1 ELSE 0 END),
+                    COALESCE(SUM(CASE WHEN status IN ('paid', 'completed', 'delivered') THEN CAST(total AS BIGINT) ELSE 0 END), 0)
+                FROM customer_orders
+                WHERE SUBSTRING(COALESCE(paid_at, created_at), 1, 10) BETWEEN @from AND @to
+                """;
+            cmd.Parameters.AddWithValue("@from", from);
+            cmd.Parameters.AddWithValue("@to", to);
+            using var r = cmd.ExecuteReader();
+            if (r.Read())
+            {
+                custAll = r.IsDBNull(0) ? 0 : Convert.ToInt64(r.GetValue(0));
+                custInc = r.IsDBNull(1) ? 0 : Convert.ToInt64(r.GetValue(1));
+                custGross = r.IsDBNull(2) ? 0 : Convert.ToInt64(r.GetValue(2));
+                custNet = custGross;
+            }
+        }
+
+        long ordAll = 0, ordInc = 0, ordGross = 0, ordRefund = 0, ordNet = 0, ordDemo = 0, ordReal = 0;
+        using (var cmd = db.CreateCommand())
+        {
+            cmd.CommandText = """
+                SELECT
+                    COUNT(*),
+                    SUM(CASE WHEN status IN ('paid', 'completed') THEN 1 ELSE 0 END),
+                    COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN CAST(total_amount AS BIGINT) ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN CAST(refund_amount AS BIGINT) ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN CAST(total_amount - refund_amount AS BIGINT) ELSE 0 END), 0),
+                    SUM(CASE WHEN is_demo = 1 THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN is_demo = 0 THEN 1 ELSE 0 END)
+                FROM orders
+                WHERE business_date BETWEEN @from AND @to
+                """;
+            cmd.Parameters.AddWithValue("@from", from);
+            cmd.Parameters.AddWithValue("@to", to);
+            using var r = cmd.ExecuteReader();
+            if (r.Read())
+            {
+                ordAll = r.IsDBNull(0) ? 0 : Convert.ToInt64(r.GetValue(0));
+                ordInc = r.IsDBNull(1) ? 0 : Convert.ToInt64(r.GetValue(1));
+                ordGross = r.IsDBNull(2) ? 0 : Convert.ToInt64(r.GetValue(2));
+                ordRefund = r.IsDBNull(3) ? 0 : Convert.ToInt64(r.GetValue(3));
+                ordNet = r.IsDBNull(4) ? 0 : Convert.ToInt64(r.GetValue(4));
+                ordDemo = r.IsDBNull(5) ? 0 : Convert.ToInt64(r.GetValue(5));
+                ordReal = r.IsDBNull(6) ? 0 : Convert.ToInt64(r.GetValue(6));
+            }
+        }
+
+        var allOrders = custAll + ordAll;
+        var includedOrders = custInc + ordInc;
+        var grossRevenue = custGross + ordGross;
+        var refunds = ordRefund;
+        var netRevenue = custNet + ordNet;
+        var realOrders = ordReal + custAll;
+        var demoOrders = ordDemo;
+
+        var dataMode = allOrders == 0 ? "none" : demoOrders == allOrders ? "demo" : realOrders == allOrders ? "real" : "mixed";
+
+        return new
+        {
+            from,
+            to,
+            timezone = "Asia/Ho_Chi_Minh",
+            includedStatuses = new[] { "paid", "completed" },
+            excludedStatuses = new[] { "cancelled" },
+            allOrders,
+            includedOrders,
+            grossRevenue,
+            refunds,
+            netRevenue,
+            currency = "VND",
+            dataMode
+        };
+    }
+
+
+    public object GetAdminOverview()
+    {
+        using var db = Open();
+        long grossRev = 0;
+        int incOrders = 0;
+        using (var cmd = db.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COALESCE(SUM(CAST(total AS BIGINT)), 0), COUNT(*) FROM customer_orders WHERE status IN ('paid', 'completed', 'delivered')";
+            using var r = cmd.ExecuteReader();
+            if (r.Read())
+            {
+                grossRev = r.IsDBNull(0) ? 0 : Convert.ToInt64(r.GetValue(0));
+                incOrders = r.IsDBNull(1) ? 0 : Convert.ToInt32(r.GetValue(1));
+            }
+        }
+
+        var revenueByDay = new List<object>();
+        using (var cmd = db.CreateCommand())
+        {
+            cmd.CommandText = """
+                SELECT SUBSTRING(COALESCE(paid_at, created_at), 1, 10) AS dt,
+                       COALESCE(SUM(CAST(total AS BIGINT)), 0) AS rev,
+                       COUNT(*) AS ords
+                FROM customer_orders
+                WHERE status IN ('paid', 'completed', 'delivered')
+                GROUP BY SUBSTRING(COALESCE(paid_at, created_at), 1, 10)
+                ORDER BY dt ASC
+                """;
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                revenueByDay.Add(new
+                {
+                    date = r.IsDBNull(0) ? "" : r.GetString(0),
+                    revenue = r.IsDBNull(1) ? 0 : Convert.ToInt64(r.GetValue(1)),
+                    orders = r.IsDBNull(2) ? 0 : Convert.ToInt32(r.GetValue(2))
+                });
+            }
+        }
+
+        var orderStatus = new List<object>();
+        using (var cmd = db.CreateCommand())
+        {
+            cmd.CommandText = "SELECT status, COUNT(*) FROM customer_orders GROUP BY status";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                orderStatus.Add(new
+                {
+                    status = r.GetString(0),
+                    count = Convert.ToInt32(r.GetValue(1))
+                });
+            }
+        }
+
+        return new
+        {
+            products = ProductCount(),
+            customers = CustomerCount(),
+            orders = OrderCount(),
+            totalViews = TotalViews(),
+            favorites = ListAdminFavorites().Count,
+            records = ListAdminRecords().Count,
+            revenue = grossRev,
+            includedOrders = incOrders,
+            revenueByDay,
+            orderStatus
+        };
+    }
+
+
 }

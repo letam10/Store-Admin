@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Net;
-using System.Net.Mail;
 using System.Text;
 using System.Threading.Tasks;
+using MailKit.Net.Smtp;
+using MailKit.Security;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
+using MimeKit;
 
 namespace StoreApi.Services;
 
@@ -66,6 +67,14 @@ public sealed class EmailService
         return await SendOrLogEmailAsync(toEmail, subject, html, "invoice_" + invoice.OrderId, invoice.Recipient);
     }
 
+    public async Task<bool> SendGoogleLoginEmailAsync(string toEmail, string username)
+    {
+        var subject = "[Store] Thông báo đăng nhập - Bạn vừa đăng nhập thành công bằng Google";
+        var createdAt = DateTimeOffset.Now.ToString("dd/MM/yyyy HH:mm");
+        var html = EmailTemplates.BuildGoogleLoginEmailHtml(username, toEmail, createdAt, FrontendUrl);
+        return await SendOrLogEmailAsync(toEmail, subject, html, "google_login", username);
+    }
+
     private async Task<bool> SendOrLogEmailAsync(string toEmail, string subject, string htmlBody, string logPrefix, string recipientName)
     {
         var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
@@ -100,29 +109,42 @@ public sealed class EmailService
         try
         {
             int port = int.TryParse(smtpPortStr, out var p) ? p : 587;
-            using var client = new SmtpClient(smtpHost, port)
-            {
-                EnableSsl = port == 587 || port == 465,
-                Timeout = 12000
-            };
+            var message = new MimeMessage();
 
-            if (!string.IsNullOrWhiteSpace(smtpUser) && !string.IsNullOrWhiteSpace(smtpPass))
+            if (!string.IsNullOrWhiteSpace(smtpFrom) && smtpFrom.Contains('<') && smtpFrom.Contains('>'))
             {
-                client.Credentials = new NetworkCredential(smtpUser, smtpPass);
+                message.From.Add(MailboxAddress.Parse(smtpFrom));
+            }
+            else
+            {
+                var addr = !string.IsNullOrWhiteSpace(smtpFrom) ? smtpFrom : (!string.IsNullOrWhiteSpace(smtpUser) ? smtpUser : "no-reply@store.local");
+                message.From.Add(new MailboxAddress("Store Official", addr));
             }
 
-            using var mail = new MailMessage
-            {
-                From = new MailAddress(smtpFrom, "Store Official"),
-                Subject = subject,
-                Body = htmlBody,
-                IsBodyHtml = true,
-                BodyEncoding = Encoding.UTF8,
-                SubjectEncoding = Encoding.UTF8
-            };
-            mail.To.Add(new MailAddress(toEmail, recipientName));
+            message.To.Add(new MailboxAddress(recipientName ?? toEmail, toEmail));
+            message.Subject = subject;
 
-            await client.SendMailAsync(mail);
+            var bodyBuilder = new BodyBuilder { HtmlBody = htmlBody };
+            message.Body = bodyBuilder.ToMessageBody();
+
+            using var client = new MailKit.Net.Smtp.SmtpClient();
+            client.Timeout = 15000;
+
+            var secureOption = port == 465 
+                ? SecureSocketOptions.SslOnConnect 
+                : (port == 587 ? SecureSocketOptions.StartTls : SecureSocketOptions.Auto);
+
+            await client.ConnectAsync(smtpHost, port, secureOption);
+
+            var cleanPass = smtpPass.Replace(" ", "");
+            if (!string.IsNullOrWhiteSpace(smtpUser) && !string.IsNullOrWhiteSpace(cleanPass))
+            {
+                await client.AuthenticateAsync(smtpUser, cleanPass);
+            }
+
+            await client.SendAsync(message);
+            await client.DisconnectAsync(true);
+
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"[Store Mailer] Đã gửi email thành công qua SMTP ({smtpHost}) tới {toEmail} ('{subject}')");
             Console.ResetColor();
@@ -131,7 +153,8 @@ public sealed class EmailService
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"[Store Mailer] Gửi SMTP lỗi ({ex.Message}). Email đã lưu tại: {logFilePath}");
+            var innerMsg = ex.InnerException != null ? $" -> {ex.InnerException.Message}" : "";
+            Console.WriteLine($"[Store Mailer] Gửi SMTP lỗi ({ex.Message}{innerMsg}). Email đã lưu tại: {logFilePath}");
             Console.ResetColor();
             return false;
         }

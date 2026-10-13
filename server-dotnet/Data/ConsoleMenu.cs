@@ -209,7 +209,7 @@ public static class ConsoleMenu
         }
         while (true)
         {
-            Console.Clear();
+            try { Console.Clear(); } catch { }
             TitleBar();
 
             // Panel trang thai live: API / Store / Admin / DB – kiem tra port that, khong phu thuoc flag.

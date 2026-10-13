@@ -60,3 +60,28 @@ public sealed record CreateOrderRequest(
     string? Phone,
     string? Address);
 
+
+public sealed record AdminProductRequest(
+    string? Id, string? Name, string? Category, long? Price, string? Description,
+    string? Image, string? Symbol, string? Label, string? Tags, string? Badge,
+    List<string>? Features, int? StockCount);
+
+public sealed record AdminVoucherRequest(
+    string? Code, long? CustomerId, string? Label, string? Type, int? Value,
+    string? Scope, string? ExpiresAt, bool? Active);
+
+public sealed record ReviewReplyRequest(string? Reply);
+
+public sealed record OrderPaidRequest(string? Reference, bool? CounterConfirmed, bool? ReceivedConfirmed);
+
+public sealed record OrderFulfillmentRequest(string? Status);
+
+public sealed record AfterSalesActionRequest(
+    string? Action, string? Note, string? Reference,
+    bool? Received, bool? CounterConfirmed, bool? RefundConfirmed, string? RefundReference);
+
+public sealed record PaymentSettingsRequest(
+    string? Mode, string? BankName, string? BankBin, string? AccountNumber, string? AccountName);
+
+public sealed record AdminSettingsRequest(int? ContextSize);
+

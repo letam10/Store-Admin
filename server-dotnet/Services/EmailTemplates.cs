@@ -143,4 +143,46 @@ public static class EmailTemplates
 """;
     }
 
+    public static string BuildGoogleLoginEmailHtml(string username, string email, string loginAt, string frontendUrl)
+    {
+        var u = WebUtility.HtmlEncode(username);
+        var e = WebUtility.HtmlEncode(email);
+        return $"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Store Login Notification</title></head>
+<body style="margin:0;padding:24px;background:#f3f6f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1e2922;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #dbe6dd;box-shadow:0 8px 24px rgba(0,0,0,0.06);">
+    <div style="background:#1b3d2f;padding:28px;text-align:center;color:#fff;">
+      <h1 style="margin:0;font-size:30px;letter-spacing:-1px;">store<span style="color:#6be092;">.</span></h1>
+      <p style="margin:4px 0 0;font-size:13px;color:#c9e7d3;text-transform:uppercase;letter-spacing:1px;">Thông báo đăng nhập</p>
+    </div>
+    <div style="padding:28px 24px;">
+      <div style="text-align:center;margin-bottom:20px;">
+        <span style="display:inline-block;background:#e3f5e9;color:#217743;padding:6px 14px;border-radius:99px;font-size:12px;font-weight:700;">✓ ĐĂNG NHẬP THÀNH CÔNG</span>
+        <h2 style="margin:12px 0 6px;color:#152c21;font-size:22px;">Xin chào {u}!</h2>
+        <p style="margin:0;color:#55695e;font-size:14px;">Bạn vừa đăng nhập thành công vào tài khoản Store bằng Google.</p>
+      </div>
+      <div style="background:#f7faf8;border:1px solid #e1ebe3;border-radius:12px;padding:16px;margin-bottom:20px;font-size:14px;">
+        <div style="font-weight:700;color:#2d4a3b;margin-bottom:8px;text-transform:uppercase;font-size:12px;">Chi tiết đăng nhập:</div>
+        <div style="padding:4px 0;">👤 <strong>Tài khoản:</strong> {u}</div>
+        <div style="padding:4px 0;">✉ <strong>Email:</strong> {e}</div>
+        <div style="padding:4px 0;">🕒 <strong>Thời gian đăng nhập:</strong> {loginAt}</div>
+        <div style="padding:4px 0;">🔐 <strong>Phương thức:</strong> <span style="background:#d5ebf7;color:#0d47a1;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;">GOOGLE OAUTH</span></div>
+      </div>
+      <div style="background:#fef3e0;border-left:4px solid #f57c00;padding:14px;border-radius:6px;margin-bottom:20px;font-size:13px;color:#e65100;">
+        <strong>⚠️ Lưu ý bảo mật:</strong> Nếu bạn không thực hiện đăng nhập này, vui lòng <a href="{frontendUrl}/account/security" style="color:#d84315;text-decoration:underline;">kiểm tra tài khoản ngay</a> hoặc liên hệ hỗ trợ.
+      </div>
+      <div style="text-align:center;margin:24px 0 10px;">
+        <a href="{frontendUrl}" style="display:inline-block;background:#205e3e;color:#fff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 30px;border-radius:10px;">Quay Lại Store →</a>
+      </div>
+    </div>
+    <div style="background:#f8faf8;border-top:1px solid #e7efe9;padding:16px;text-align:center;font-size:11px;color:#809487;">
+      © 2026 Store. Đây là thư tự động, vui lòng không trả lời thư này.
+    </div>
+  </div>
+</body>
+</html>
+""";
+    }
 }
