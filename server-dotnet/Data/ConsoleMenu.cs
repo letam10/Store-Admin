@@ -159,13 +159,13 @@ public static class ConsoleMenu
                 Console.WriteLine("  [3/3] Admin Dashboard :5174-> Da chay san.");
             }
 
-            await WaitForPortAsync(5000, TimeSpan.FromSeconds(8));
-            await WaitForPortAsync(5173, TimeSpan.FromSeconds(8));
-            await WaitForPortAsync(5174, TimeSpan.FromSeconds(8));
+            await WaitForPortAsync(5000, TimeSpan.FromSeconds(12));
+            await WaitForPortAsync(5173, TimeSpan.FromSeconds(12));
+            await WaitForPortAsync(5174, TimeSpan.FromSeconds(12));
 
-            OpenUrl("http://127.0.0.1:5000/swagger");
-            OpenUrl("http://127.0.0.1:5173");
-            OpenUrl("http://127.0.0.1:5174");
+            if (IsPortInUse(5000)) OpenUrl("http://127.0.0.1:5000/swagger");
+            if (IsPortInUse(5173)) OpenUrl("http://127.0.0.1:5173");
+            if (IsPortInUse(5174)) OpenUrl("http://127.0.0.1:5174");
 
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine("\n[OK] DA BAT TOAN BO HE THONG VA MO 3 TRANG WEB!");
@@ -366,6 +366,23 @@ public static class ConsoleMenu
         }
     }
 
+    private static string GetWorkspaceRoot()
+    {
+        foreach (var baseDir in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+        {
+            var cur = new DirectoryInfo(baseDir);
+            while (cur != null)
+            {
+                if (Directory.Exists(Path.Combine(cur.FullName, "Store")) && Directory.Exists(Path.Combine(cur.FullName, "Store-Admin")))
+                {
+                    return cur.FullName;
+                }
+                cur = cur.Parent;
+            }
+        }
+        return @"D:\Web";
+    }
+
     private static void StartApiConsole()
     {
         if (IsPortInUse(5000))
@@ -376,10 +393,12 @@ public static class ConsoleMenu
 
         try
         {
+            var root = GetWorkspaceRoot();
+            var proj = Path.Combine(root, "Store-Admin", "server-dotnet", "server-dotnet.csproj");
             Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = "/k cd /d \"D:\\Web\\Store-Admin\" && dotnet run --project server-dotnet\\server-dotnet.csproj --urls http://127.0.0.1:5000",
+                Arguments = $"/k title API :5000 && dotnet run --project \"{proj}\" --urls http://127.0.0.1:5000",
                 UseShellExecute = true
             });
             Console.WriteLine("Da mo cua so API moi cho http://127.0.0.1:5000.");
@@ -396,10 +415,12 @@ public static class ConsoleMenu
     {
         try
         {
+            var root = GetWorkspaceRoot();
+            var dir = Path.Combine(root, "Store");
             var cmd = Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = "/k cd /d \"D:\\Web\\Store\" && npm.cmd run dev",
+                Arguments = $"/k title Store Frontend :5173 && cd /d \"{dir}\" && npm.cmd run dev",
                 UseShellExecute = true
             });
             if (cmd != null) _storeFrontendCmdPid = cmd.Id;
@@ -416,10 +437,12 @@ public static class ConsoleMenu
     {
         try
         {
+            var root = GetWorkspaceRoot();
+            var dir = Path.Combine(root, "Store-Admin");
             var cmd = Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = "/k cd /d \"D:\\Web\\Store-Admin\" && npm.cmd run dev",
+                Arguments = $"/k title Admin Dashboard :5174 && cd /d \"{dir}\" && npm.cmd run dev",
                 UseShellExecute = true
             });
             if (cmd != null) _adminFrontendCmdPid = cmd.Id;

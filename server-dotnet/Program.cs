@@ -139,11 +139,8 @@ builder.Services.AddCors(options => options.AddPolicy("local-frontends", policy 
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI(options => options.SwaggerEndpoint("/swagger/v1/swagger.json", "Store API v1"));
-}
+app.UseSwagger();
+app.UseSwaggerUI(options => options.SwaggerEndpoint("/swagger/v1/swagger.json", "Store API v1"));
 
 app.UseCors("local-frontends");
 app.MapControllers();

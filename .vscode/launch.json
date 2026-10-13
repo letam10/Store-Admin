@@ -11,7 +11,7 @@
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
       "stopAtEntry": false,
-      "launchBrowser": true,
+      "launchBrowser": false,
       "launchUrl": "http://127.0.0.1:5000/swagger"
     }
   ]
