@@ -1,0 +1,139 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net;
+using System.Net.Mail;
+using System.Text;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
+
+namespace StoreApi.Services;
+
+public sealed record OrderInvoiceItem(string Name, int Quantity, long Price, long TotalPrice);
+
+public sealed record OrderInvoiceData(
+    string OrderId,
+    string CustomerEmail,
+    string Recipient,
+    string Phone,
+    string Address,
+    string Fulfillment,
+    string PaymentMethod,
+    IReadOnlyList<OrderInvoiceItem> Items,
+    int Subtotal,
+    int Discount,
+    int ShippingFee,
+    int Total,
+    string Tier,
+    string CreatedAt,
+    string? ScheduledAt);
+
+public sealed class EmailService
+{
+    private readonly IConfiguration _configuration;
+    private readonly string _logsDirectory;
+
+    public EmailService(IConfiguration configuration, IWebHostEnvironment environment)
+    {
+        _configuration = configuration;
+        _logsDirectory = Path.Combine(Directory.GetCurrentDirectory(), "logs", "emails");
+        try
+        {
+            if (!Directory.Exists(_logsDirectory))
+            {
+                Directory.CreateDirectory(_logsDirectory);
+            }
+        }
+        catch { }
+    }
+
+    private string FrontendUrl =>
+        (_configuration["FRONTEND_URL"] ?? Environment.GetEnvironmentVariable("FRONTEND_URL") ?? "http://127.0.0.1:5173").TrimEnd('/');
+
+    public async Task<bool> SendWelcomeEmailAsync(string toEmail, string username)
+    {
+        var subject = "[Store] Chào mừng bạn gia nhập Store - Đăng ký tài khoản thành công";
+        var createdAt = DateTimeOffset.Now.ToString("dd/MM/yyyy HH:mm");
+        var html = EmailTemplates.BuildWelcomeEmailHtml(username, toEmail, createdAt, FrontendUrl);
+        return await SendOrLogEmailAsync(toEmail, subject, html, "welcome", username);
+    }
+
+    public async Task<bool> SendOrderInvoiceEmailAsync(string toEmail, OrderInvoiceData invoice)
+    {
+        var subject = $"[Store] Hóa đơn điện tử - Xác nhận đơn hàng #{invoice.OrderId}";
+        var html = EmailTemplates.BuildInvoiceEmailHtml(invoice, FrontendUrl);
+        return await SendOrLogEmailAsync(toEmail, subject, html, "invoice_" + invoice.OrderId, invoice.Recipient);
+    }
+
+    private async Task<bool> SendOrLogEmailAsync(string toEmail, string subject, string htmlBody, string logPrefix, string recipientName)
+    {
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var sanitizedEmail = toEmail.Replace("@", "_at_").Replace(".", "_");
+        var fileName = $"{timestamp}_{logPrefix}_{sanitizedEmail}.html";
+        var logFilePath = Path.Combine(_logsDirectory, fileName);
+
+        try
+        {
+            await File.WriteAllTextAsync(logFilePath, htmlBody, Encoding.UTF8);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Store Mailer] Không thể lưu file HTML log: {ex.Message}");
+        }
+
+        var smtpHost = (_configuration["SMTP_HOST"] ?? Environment.GetEnvironmentVariable("SMTP_HOST") ?? "").Trim();
+        var smtpPortStr = (_configuration["SMTP_PORT"] ?? Environment.GetEnvironmentVariable("SMTP_PORT") ?? "587").Trim();
+        var smtpUser = (_configuration["SMTP_USER"] ?? Environment.GetEnvironmentVariable("SMTP_USER") ?? "").Trim();
+        var smtpPass = (_configuration["SMTP_PASS"] ?? Environment.GetEnvironmentVariable("SMTP_PASS") ?? "").Trim();
+        var smtpFrom = (_configuration["SMTP_FROM"] ?? Environment.GetEnvironmentVariable("SMTP_FROM") ?? "Store <no-reply@store.local>").Trim();
+
+        if (string.IsNullOrWhiteSpace(smtpHost))
+        {
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine($"[Store Mailer] [Offline/Dev] Đã tạo email cho {toEmail} ('{subject}')");
+            Console.WriteLine($"[Store Mailer] File HTML xem trước: {logFilePath}");
+            Console.ResetColor();
+            return true;
+        }
+
+        try
+        {
+            int port = int.TryParse(smtpPortStr, out var p) ? p : 587;
+            using var client = new SmtpClient(smtpHost, port)
+            {
+                EnableSsl = port == 587 || port == 465,
+                Timeout = 12000
+            };
+
+            if (!string.IsNullOrWhiteSpace(smtpUser) && !string.IsNullOrWhiteSpace(smtpPass))
+            {
+                client.Credentials = new NetworkCredential(smtpUser, smtpPass);
+            }
+
+            using var mail = new MailMessage
+            {
+                From = new MailAddress(smtpFrom, "Store Official"),
+                Subject = subject,
+                Body = htmlBody,
+                IsBodyHtml = true,
+                BodyEncoding = Encoding.UTF8,
+                SubjectEncoding = Encoding.UTF8
+            };
+            mail.To.Add(new MailAddress(toEmail, recipientName));
+
+            await client.SendMailAsync(mail);
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"[Store Mailer] Đã gửi email thành công qua SMTP ({smtpHost}) tới {toEmail} ('{subject}')");
+            Console.ResetColor();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"[Store Mailer] Gửi SMTP lỗi ({ex.Message}). Email đã lưu tại: {logFilePath}");
+            Console.ResetColor();
+            return false;
+        }
+    }
+}

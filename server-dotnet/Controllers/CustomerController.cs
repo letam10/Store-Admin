@@ -14,13 +14,14 @@ using Microsoft.AspNetCore.Mvc;
 using StoreApi.Data;
 using StoreApi.Models;
 using StoreApi.Security;
+using StoreApi.Services;
 
 namespace StoreApi.Controllers;
 
 [ApiController]
 [Route("api/customer")]
 // Vai trò kiểu CustomerController: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
-public sealed class CustomerController(StoreDb db, IConfiguration configuration) : ControllerBase
+public sealed class CustomerController(StoreDb db, IConfiguration configuration, EmailService emailService) : ControllerBase
 {
     private const string Cookie = "store_customer_session";
 
@@ -45,6 +46,11 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration)
         try
         {
             var id = db.CreateCustomer(request.Username.Trim(), request.Email.Trim(), salt, hash);
+            _ = Task.Run(async () =>
+            {
+                try { await emailService.SendWelcomeEmailAsync(request.Email.Trim(), request.Username.Trim()); }
+                catch (Exception ex) { Console.WriteLine($"[Store Mailer] Welcome email exception: {ex.Message}"); }
+            });
             return LoginInternal(request.Username.Trim(), id);
         }
         // Nhánh lỗi: chuyển ngoại lệ thành phản hồi an toàn, không làm lộ dữ liệu nhạy cảm.
@@ -274,6 +280,149 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration)
     // Đơn hàng: backend dotnet chưa full workflow nên trả danh sách rỗng để giữ phiên/avatar.
     public IActionResult Orders() => RequireAccount(out var customer) ? Ok(new { orders = db.Orders(customer.Id) }) : Unauthorized(new { error = "LOGIN_REQUIRED" });
 
+    [HttpPost("quote")]
+    public IActionResult Quote(OrderQuoteRequest request)
+    {
+        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        try
+        {
+            var q = ComputeQuote(customer, request);
+            return Ok(new
+            {
+                items = q.Items.Select(i => new { id = i.Id, name = i.Name, quantity = i.Quantity, price = i.Price }).ToList(),
+                subtotal = q.Subtotal,
+                discount = q.Discount,
+                goodsTotal = q.GoodsTotal,
+                shippingFee = q.ShippingFee,
+                shippingFeeBeforeDiscount = q.ShippingFeeBeforeDiscount,
+                shippingDiscount = q.ShippingDiscount,
+                total = q.Total,
+                tier = q.Tier,
+                voucherCodes = q.VoucherCodes,
+                fulfillment = q.Fulfillment,
+                region = q.Region,
+                distanceKm = q.DistanceKm,
+                weightKg = q.WeightKg
+            });
+        }
+        catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+    }
+
+    [HttpPost("orders")]
+    public IActionResult CreateOrder(CreateOrderRequest request)
+    {
+        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+
+        var recipient = (request.Recipient ?? "").Trim();
+        var phone = (request.Phone ?? "").Trim();
+        var address = (request.Address ?? "").Trim();
+        if (recipient.Length < 2 || phone.Length < 8) return BadRequest(new { error = "INVALID_ORDER" });
+        if (request.Fulfillment == "delivery" && address.Length < 5) return BadRequest(new { error = "INVALID_ORDER" });
+
+        var quoteRequest = new OrderQuoteRequest(request.Items, request.Fulfillment, request.Region, request.DistanceKm, request.WeightKg, request.VoucherCodes);
+        var q = ComputeQuote(customer, quoteRequest);
+        if (request.ExpectedTotal > 0 && request.ExpectedTotal != q.Total) return Conflict(new { error = "QUOTE_CHANGED" });
+
+        var orderId = "ST-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        var method = request.PaymentMethod ?? (q.Fulfillment == "pickup" ? "cash" : "cod");
+        var createdAt = DateTimeOffset.Now.ToString("dd/MM/yyyy HH:mm");
+        var itemsJson = JsonSerializer.Serialize(q.Items.Select(i => new { id = i.Id, name = i.Name, quantity = i.Quantity, price = i.Price }));
+        var voucherJson = JsonSerializer.Serialize(q.VoucherCodes);
+        var pointsEarned = Math.Max(1, q.Total / 10000);
+
+        db.CreateCustomerOrder(
+            orderId, customer.Id, itemsJson, recipient, phone,
+            q.Fulfillment == "pickup" ? "Nhận tại cửa hàng" : address,
+            q.Fulfillment, q.Region, q.DistanceKm, q.WeightKg,
+            q.Subtotal, q.Discount, q.GoodsTotal, q.ShippingFee, q.Total,
+            voucherJson, q.Tier, method, request.ScheduledAt, createdAt, pointsEarned);
+
+        if (q.VoucherCodes.Count > 0) db.ConsumeCustomerVouchers(customer.Id, q.VoucherCodes);
+        db.AddCustomerPoints(customer.Id, pointsEarned);
+
+        // Gửi hóa đơn điện tử về email của khách hàng
+        var invoiceItems = q.Items.Select(i => new OrderInvoiceItem(i.Name, i.Quantity, i.Price, i.Price * i.Quantity)).ToList();
+        var invoice = new OrderInvoiceData(
+            orderId, customer.Email, recipient, phone,
+            q.Fulfillment == "pickup" ? "Nhận tại cửa hàng" : address,
+            q.Fulfillment, method, invoiceItems,
+            q.Subtotal, q.Discount, q.ShippingFee, q.Total, q.Tier,
+            createdAt, request.ScheduledAt);
+
+        _ = Task.Run(async () =>
+        {
+            try { await emailService.SendOrderInvoiceEmailAsync(customer.Email, invoice); }
+            catch (Exception ex) { Console.WriteLine($"[Store Mailer] Invoice mail exception: {ex.Message}"); }
+        });
+
+        var createdOrder = db.FindCustomerOrder(orderId, customer.Id);
+        return StatusCode(StatusCodes.Status201Created, new { order = createdOrder });
+    }
+    [HttpGet("orders/{id}/receipt")]
+    public IActionResult OrderReceipt(string id)
+    {
+        if (!RequireAccount(out var customer)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        var order = db.FindCustomerOrder(id, customer.Id);
+        if (order is null) return NotFound(new { error = "ORDER_NOT_FOUND" });
+        return Ok(new
+        {
+            order,
+            afterSales = Array.Empty<object>(),
+            events = Array.Empty<object>(),
+            store = new { name = "Store Mini Mart", address = "TP. Hồ Chí Minh", demo = true }
+        });
+    }
+
+    [HttpGet("orders/{id}/payment-info")]
+    public IActionResult OrderPaymentInfo(string id)
+    {
+        if (!RequireAccount(out var customer)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        var order = db.FindCustomerOrder(id, customer.Id);
+        if (order is null) return NotFound(new { error = "ORDER_NOT_FOUND" });
+        var json = JsonSerializer.Serialize(order);
+        var doc = JsonDocument.Parse(json);
+        var total = doc.RootElement.GetProperty("total").GetInt32();
+        var status = doc.RootElement.GetProperty("status").GetString();
+        var payment = new
+        {
+            amount = total,
+            reference = id,
+            bankName = "MB Bank",
+            accountNumber = "0912345678",
+            accountName = "STORE MINI MART",
+            purpose = "Thanh toan don hang " + id,
+            mode = "demo",
+            qrImage = $"https://img.vietqr.io/image/970422-0912345678-compact2.png?amount={total}&addInfo={id}&accountName=STORE%20MINI%20MART"
+        };
+        return Ok(new { order, payment, orderId = id, amount = total, currency = "VND", status });
+    }
+
+    [HttpPost("orders/{id}/demo-paid")]
+    [HttpPost("orders/{id}/simulate-pay")]
+    public IActionResult SimulatePay(string id)
+    {
+        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        var order = db.FindCustomerOrder(id, customer.Id);
+        if (order is null) return NotFound(new { error = "ORDER_NOT_FOUND" });
+        db.UpdateOrderStatus(id, "paid", DateTimeOffset.UtcNow.ToString("o"));
+        return Ok(new { success = true, orderId = id, status = "paid" });
+    }
+
+    [HttpPost("orders/{id}/cancel-unpaid")]
+    public IActionResult CancelUnpaid(string id)
+    {
+        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        var order = db.FindCustomerOrder(id, customer.Id);
+        if (order is null) return NotFound(new { error = "ORDER_NOT_FOUND" });
+        db.UpdateOrderStatus(id, "cancelled");
+        return Ok(new { success = true, orderId = id, status = "cancelled" });
+    }
+
+
     [HttpPut("favorites/{id}")]
     public IActionResult SetFavorite(string id)
     {
@@ -328,4 +477,110 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration)
         if (totpEnabled == 1) methods.Add("totp");
         return new { id = c.Id, username = c.Username, email = c.Email, points = c.Points, tier = Tier(c.Points), spinCredits = c.SpinCredits, csrfToken = csrf, googleLinked = !string.IsNullOrEmpty(googleSub), twoFactorEnabled = totpEnabled == 1, authMethods = methods.ToArray() };
     }
+    private record QuoteItemResult(string Id, string Name, int Quantity, long Price);
+    private record QuoteComputation(
+        List<QuoteItemResult> Items,
+        int Subtotal,
+        int Discount,
+        int GoodsTotal,
+        int ShippingFee,
+        int ShippingFeeBeforeDiscount,
+        int ShippingDiscount,
+        int Total,
+        string Tier,
+        List<string> VoucherCodes,
+        string Fulfillment,
+        string Region,
+        int DistanceKm,
+        double WeightKg);
+
+    private QuoteComputation ComputeQuote((long Id, string Username, string Email, int Points, int SpinCredits) customer, OrderQuoteRequest req)
+    {
+        var fulfillment = req.Fulfillment == "pickup" ? "pickup" : "delivery";
+        var region = fulfillment == "pickup" ? "pickup" : (req.Region ?? "hcm");
+        var distanceKm = req.DistanceKm;
+        var weightKg = req.WeightKg > 0 ? req.WeightKg : 1.0;
+        var catalog = db.Catalog();
+        var catalogMap = catalog.ToDictionary(p => p.Id, p => p);
+
+        var items = new List<QuoteItemResult>();
+        foreach (var line in req.Items ?? [])
+        {
+            if (string.IsNullOrEmpty(line.Id) || !catalogMap.TryGetValue(line.Id, out var prod) || line.Quantity < 1) continue;
+            var price = (long)Math.Round(prod.Price * (100 - prod.DiscountPercent) / 1000.0) * 10;
+            items.Add(new QuoteItemResult(prod.Id, prod.Name, line.Quantity, price));
+        }
+
+        var subtotal = (int)items.Sum(i => i.Price * i.Quantity);
+        var tier = Tier(customer.Points);
+        var voucherCodes = req.VoucherCodes ?? [];
+
+        var customerVouchers = db.Vouchers(customer.Id);
+        var validVouchers = new Dictionary<string, (string Type, int Value, string Scope)>();
+        foreach (var v in customerVouchers)
+        {
+            var json = JsonSerializer.Serialize(v);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            var code = root.GetProperty("code").GetString() ?? "";
+            var type = root.GetProperty("type").GetString() ?? "amount";
+            var val = root.GetProperty("value").GetInt32();
+            var scope = root.GetProperty("scope").GetString() ?? "goods";
+            validVouchers[code] = (type, val, scope);
+        }
+
+        int remainingGoods = subtotal;
+        var appliedCodes = new List<string>();
+        var shippingVouchers = new List<(string Type, int Value)>();
+
+        foreach (var code in voucherCodes)
+        {
+            if (!validVouchers.TryGetValue(code, out var v)) continue;
+            appliedCodes.Add(code);
+            if (v.Scope == "shipping")
+            {
+                shippingVouchers.Add((v.Type, v.Value));
+            }
+            else
+            {
+                var discountAmount = v.Type == "percent" ? (int)(remainingGoods * v.Value / 100) : v.Value;
+                remainingGoods = Math.Max(0, remainingGoods - discountAmount);
+            }
+        }
+
+        int tierRate = tier switch { "diamond" => 5, "gold" => 2, "silver" => 1, _ => 0 };
+        if (tierRate > 0)
+        {
+            int tierDiscount = (int)(remainingGoods * tierRate / 100);
+            remainingGoods = Math.Max(0, remainingGoods - tierDiscount);
+        }
+
+        int originalShippingFee = CalculateShippingFee(fulfillment, region, weightKg, distanceKm);
+        int finalShippingFee = originalShippingFee;
+        foreach (var sv in shippingVouchers)
+        {
+            int shipDiscount = sv.Type == "percent" ? (int)(finalShippingFee * sv.Value / 100) : sv.Value;
+            finalShippingFee = Math.Max(0, finalShippingFee - shipDiscount);
+        }
+
+        int totalDiscount = (subtotal - remainingGoods) + (originalShippingFee - finalShippingFee);
+        int total = remainingGoods + finalShippingFee;
+
+        return new QuoteComputation(
+            items, subtotal, totalDiscount, remainingGoods, finalShippingFee,
+            originalShippingFee, originalShippingFee - finalShippingFee, total,
+            tier, appliedCodes, fulfillment, region, distanceKm, weightKg);
+    }
+
+    private static int CalculateShippingFee(string fulfillment, string region, double weightKg, int distanceKm)
+    {
+        if (fulfillment == "pickup") return 0;
+        var w = weightKg > 0 ? weightKg : 1.0;
+        if (region == "international") return w <= 1.0 ? 200000 : (int)Math.Ceiling(w / 5.0) * 400000;
+        if (region == "hcm" || region == "binh-duong" || region == "ba-ria-vung-tau") return 30000;
+        if (region == "nearby" || (region != null && region.StartsWith("province:"))) return 60000;
+        if (region == "far") return 60000 + distanceKm * 1000;
+        return 60000;
+    }
+
 }

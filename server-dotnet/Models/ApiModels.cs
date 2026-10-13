@@ -36,3 +36,27 @@ public sealed record TwoFactorCodeRequest(string? Code);
 public sealed record TwoFactorDisableRequest(string? Password);
 // Vai trò kiểu RecordRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
 public sealed record RecordRequest(string? Title, string? Status, Dictionary<string, object?>? Data);
+
+public sealed record QuoteItemRequest(string? Id, int Quantity);
+public sealed record OrderQuoteRequest(
+    List<QuoteItemRequest>? Items,
+    string? Fulfillment,
+    string? Region,
+    int DistanceKm,
+    double WeightKg,
+    List<string>? VoucherCodes);
+
+public sealed record CreateOrderRequest(
+    List<QuoteItemRequest>? Items,
+    string? Fulfillment,
+    string? Region,
+    int DistanceKm,
+    double WeightKg,
+    List<string>? VoucherCodes,
+    int ExpectedTotal,
+    string? PaymentMethod,
+    string? ScheduledAt,
+    string? Recipient,
+    string? Phone,
+    string? Address);
+

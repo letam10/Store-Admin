@@ -100,6 +100,8 @@ builder.Services.AddSwaggerGen(options => options.SwaggerDoc("v1", new OpenApiIn
 }));
 
 builder.Services.AddSingleton<StoreDb>();
+builder.Services.AddSingleton<StoreApi.Services.EmailService>();
+
 builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddCors(options => options.AddPolicy("local-frontends", policy => policy

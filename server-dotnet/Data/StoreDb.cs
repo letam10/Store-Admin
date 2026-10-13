@@ -251,6 +251,15 @@ public sealed class StoreDb
                   status NVARCHAR(50) NOT NULL DEFAULT 'pending', points_earned INT NOT NULL DEFAULT 0,
                   created_at NVARCHAR(100) NOT NULL, paid_at NVARCHAR(100) NULL
                 );
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('customer_orders') AND name = 'payment_method')
+                ALTER TABLE customer_orders ADD payment_method NVARCHAR(100) NOT NULL DEFAULT 'bank_transfer';
+
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('customer_orders') AND name = 'scheduled_at')
+                ALTER TABLE customer_orders ADD scheduled_at NVARCHAR(100) NULL;
+
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('customer_orders') AND name = 'weight_kg')
+                ALTER TABLE customer_orders ADD weight_kg FLOAT NOT NULL DEFAULT 1;
+
 
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Products')
                 CREATE TABLE Products (
@@ -536,41 +545,161 @@ public sealed class StoreDb
         command.ExecuteNonQuery();
     }
 
+    public void CreateCustomerOrder(
+        string id, long customerId, string itemsJson, string recipient, string phone, string address,
+        string fulfillment, string region, int distanceKm, double weightKg,
+        int subtotal, int discount, int goodsTotal, int shippingFee, int total,
+        string voucherCodesJson, string tier, string paymentMethod, string? scheduledAt, string createdAt, int pointsEarned)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = """
+            INSERT INTO customer_orders
+            (id, customer_id, items_json, recipient, phone, address, fulfillment, region, distance_km, weight_kg,
+             subtotal, discount, goods_total, shipping_fee, total, voucher_codes_json, tier, status, points_earned,
+             created_at, payment_method, scheduled_at)
+            VALUES
+            (@id, @customerId, @itemsJson, @recipient, @phone, @address, @fulfillment, @region, @distanceKm, @weightKg,
+             @subtotal, @discount, @goodsTotal, @shippingFee, @total, @voucherCodesJson, @tier, 'pending', @pointsEarned,
+             @createdAt, @paymentMethod, @scheduledAt);
+            """;
+        command.Parameters.AddWithValue("@id", id);
+        command.Parameters.AddWithValue("@customerId", customerId);
+        command.Parameters.AddWithValue("@itemsJson", itemsJson);
+        command.Parameters.AddWithValue("@recipient", recipient);
+        command.Parameters.AddWithValue("@phone", phone);
+        command.Parameters.AddWithValue("@address", address);
+        command.Parameters.AddWithValue("@fulfillment", fulfillment);
+        command.Parameters.AddWithValue("@region", region);
+        command.Parameters.AddWithValue("@distanceKm", distanceKm);
+        command.Parameters.AddWithValue("@weightKg", weightKg);
+        command.Parameters.AddWithValue("@subtotal", subtotal);
+        command.Parameters.AddWithValue("@discount", discount);
+        command.Parameters.AddWithValue("@goodsTotal", goodsTotal);
+        command.Parameters.AddWithValue("@shippingFee", shippingFee);
+        command.Parameters.AddWithValue("@total", total);
+        command.Parameters.AddWithValue("@voucherCodesJson", voucherCodesJson);
+        command.Parameters.AddWithValue("@tier", tier);
+        command.Parameters.AddWithValue("@pointsEarned", pointsEarned);
+        command.Parameters.AddWithValue("@createdAt", createdAt);
+        command.Parameters.AddWithValue("@paymentMethod", paymentMethod);
+        command.Parameters.AddWithValue("@scheduledAt", (object?)scheduledAt ?? DBNull.Value);
+        command.ExecuteNonQuery();
+    }
+
+    public void ConsumeCustomerVouchers(long customerId, IEnumerable<string> codes)
+    {
+        using var db = Open();
+        foreach (var code in codes)
+        {
+            using var cmd = db.CreateCommand();
+            cmd.CommandText = "DELETE FROM customer_vouchers WHERE code = @code AND customer_id = @customerId";
+            cmd.Parameters.AddWithValue("@code", code);
+            cmd.Parameters.AddWithValue("@customerId", customerId);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    public void AddCustomerPoints(long customerId, int points)
+    {
+        if (points <= 0) return;
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "UPDATE customers SET points = points + @points WHERE id = @customerId";
+        cmd.Parameters.AddWithValue("@points", points);
+        cmd.Parameters.AddWithValue("@customerId", customerId);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void UpdateOrderStatus(string orderId, string status, string? paidAt = null)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "UPDATE customer_orders SET status = @status, paid_at = COALESCE(@paidAt, paid_at) WHERE id = @id";
+        cmd.Parameters.AddWithValue("@status", status);
+        cmd.Parameters.AddWithValue("@paidAt", (object?)paidAt ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@id", orderId);
+        cmd.ExecuteNonQuery();
+    }
+
+    public object? FindCustomerOrder(string orderId, long? customerId = null)
+    {
+        try
+        {
+            using var db = Open();
+            using var command = db.CreateCommand();
+            command.CommandText = customerId.HasValue
+                ? "SELECT id,items_json,recipient,phone,address,fulfillment,region,subtotal,discount,goods_total,shipping_fee,total,tier,status,payment_method,scheduled_at,created_at,paid_at FROM customer_orders WHERE id=@id AND customer_id=@customerId"
+                : "SELECT id,items_json,recipient,phone,address,fulfillment,region,subtotal,discount,goods_total,shipping_fee,total,tier,status,payment_method,scheduled_at,created_at,paid_at FROM customer_orders WHERE id=@id";
+            command.Parameters.AddWithValue("@id", orderId);
+            if (customerId.HasValue) command.Parameters.AddWithValue("@customerId", customerId.Value);
+
+            using var reader = command.ExecuteReader();
+            if (!reader.Read()) return null;
+            return ReadOrderObject(reader);
+        }
+        catch { return null; }
+    }
+
     public IReadOnlyList<object> Orders(long customerId)
     {
         try
         {
             using var db = Open();
             using var command = db.CreateCommand();
-            command.CommandText = "SELECT id,items_json,recipient,phone,address,fulfillment,region,subtotal,discount,goods_total,shipping_fee,total,tier,status,created_at FROM customer_orders WHERE customer_id=@id ORDER BY created_at DESC";
+            command.CommandText = "SELECT id,items_json,recipient,phone,address,fulfillment,region,subtotal,discount,goods_total,shipping_fee,total,tier,status,payment_method,scheduled_at,created_at,paid_at FROM customer_orders WHERE customer_id=@id ORDER BY created_at DESC";
             command.Parameters.AddWithValue("@id", customerId);
             using var reader = command.ExecuteReader();
             var result = new List<object>();
             while (reader.Read())
             {
-                string S(int i) => reader.IsDBNull(i) ? "" : reader.GetString(i);
-                result.Add(new
-                {
-                    id = S(0),
-                    items = S(1),
-                    recipient = S(2),
-                    phone = S(3),
-                    address = S(4),
-                    fulfillment = S(5),
-                    region = S(6),
-                    subtotal = Convert.ToInt32(reader.GetValue(7)),
-                    discount = Convert.ToInt32(reader.GetValue(8)),
-                    goodsTotal = Convert.ToInt32(reader.GetValue(9)),
-                    shippingFee = Convert.ToInt32(reader.GetValue(10)),
-                    total = Convert.ToInt32(reader.GetValue(11)),
-                    tier = S(12),
-                    status = S(13),
-                    createdAt = S(14),
-                });
+                result.Add(ReadOrderObject(reader));
             }
             return result;
         }
         catch { return Array.Empty<object>(); }
+    }
+
+    private static object ReadOrderObject(SqlDataReader reader)
+    {
+        string S(int i) => reader.IsDBNull(i) ? "" : reader.GetString(i);
+        var itemsJson = S(1);
+        object items = Array.Empty<object>();
+        int itemCount = 0;
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson);
+            items = JsonSerializer.Deserialize<List<object>>(itemsJson) ?? [];
+            itemCount = doc.RootElement.GetArrayLength();
+        }
+        catch { }
+
+        return new
+        {
+            id = S(0),
+            items,
+            itemCount,
+            recipient = S(2),
+            phone = S(3),
+            address = S(4),
+            fulfillment = S(5),
+            region = S(6),
+            subtotal = Convert.ToInt32(reader.GetValue(7)),
+            discount = Convert.ToInt32(reader.GetValue(8)),
+            goodsTotal = Convert.ToInt32(reader.GetValue(9)),
+            shippingFee = Convert.ToInt32(reader.GetValue(10)),
+            total = Convert.ToInt32(reader.GetValue(11)),
+            tier = S(12),
+            status = S(13),
+            deliveryStatus = S(13) == "cancelled" ? "cancelled" : S(13) == "completed" ? "delivered" : "processing",
+            paymentMethod = S(14),
+            paymentMode = "demo",
+            scheduledAt = reader.IsDBNull(15) ? null : reader.GetString(15),
+            createdAt = S(16),
+            paidAt = reader.IsDBNull(17) ? null : reader.GetString(17),
+            extraPaid = 0,
+            refundAmount = 0
+        };
     }
 
     public IReadOnlyList<string> Favorites(long customerId)
