@@ -1,6 +1,6 @@
 ﻿-- =========================================================
 -- Store & Store-Admin - Database Seed / Sync Data
--- Exported on: 2026-10-13 12:28:50
+-- Exported on: 2026-10-13 20:40:34
 -- =========================================================
 USE [StoreDb];
 GO
@@ -4089,9 +4089,9 @@ SET IDENTITY_INSERT [customers] ON;
 INSERT INTO [customers] ([id], [username], [email], [password_salt], [password_hash], [points], [paid_goods_total], [spin_credits], [created_at], [google_sub], [totp_secret], [totp_enabled], [totp_pending_secret], [totp_verified_at])
 SELECT src.[id], src.[username], src.[email], src.[password_salt], src.[password_hash], src.[points], src.[paid_goods_total], src.[spin_credits], src.[created_at], src.[google_sub], src.[totp_secret], src.[totp_enabled], src.[totp_pending_secret], src.[totp_verified_at]
 FROM (VALUES
-  (1, N'Việt Nguyễn', N'vietlun091@gmail.com', N'2377e04613226382add71b436c277c58', N'0c93bfc9f5b6044ffab5e625b6d7d5cea84f7c281d3b09c549201dc55bdc37795b21890c9fcc416f6562b9a9f22d0fb16b2d4f874d6c20b816a8b7bc09833854', 0, 0, 0, N'2026-10-11T14:26:01.2334543+00:00', N'113609223702519560726', NULL, 0, NULL, NULL),
+  (1, N'Việt Nguyễn', N'vietlun091@gmail.com', N'2377e04613226382add71b436c277c58', N'0c93bfc9f5b6044ffab5e625b6d7d5cea84f7c281d3b09c549201dc55bdc37795b21890c9fcc416f6562b9a9f22d0fb16b2d4f874d6c20b816a8b7bc09833854', 0, 0, 0, N'2026-10-11T14:26:01.2334543+00:00', N'113609223702519560726', N'7X4D5ZGTSGUNELGBGO4RQV2KH5YBDTTH', 1, N'', N'2026-10-13T13:32:43.0910574+00:00'),
   (2, N't219839cb', N't219839cb@test.local', N'2d0c0b515ddd226ac30cff1e9d08697a', N'e3dcd3796e4b1cf06f9a5973ab7d4403cc6ccd9070ad4260168e892ebded0e23861624626f5f38d86773bcd35e3b0bc54878593f7079b07f704da62752731b12', 0, 0, 0, N'2026-10-11T15:21:35.1639398+00:00', NULL, NULL, 0, NULL, NULL),
-  (3, N'dokasi', N'dangketn9@gmail.com', N'928ad58655fb6a47ee5849087e69ec55', N'323aec12b9be57c9eefd2a41050cbc71499568acd70430dd482462ec6a823d8b9507796b8e09021223c1a8855af2b76bbd59e1794552c23d1f2f42d5c376e477', 0, 0, 0, N'2026-10-11T15:28:23.6805342+00:00', NULL, NULL, 0, NULL, NULL),
+  (3, N'dokasi', N'dangketn9@gmail.com', N'928ad58655fb6a47ee5849087e69ec55', N'323aec12b9be57c9eefd2a41050cbc71499568acd70430dd482462ec6a823d8b9507796b8e09021223c1a8855af2b76bbd59e1794552c23d1f2f42d5c376e477', 0, 0, 0, N'2026-10-11T15:28:23.6805342+00:00', N'103667869017037017024', NULL, 0, NULL, NULL),
   (4, N't3500edf9', N't3500edf9@test.local', N'ba7dd38fad49574723a8bcbafd448109', N'aa6cdefd2ce8ab84d2e11e3cd4ec89b97ee671e0960ef22e4cf988142c01572cabbbfa0984fd2a8345acd11021ac595bdc86cb2a60c2719d0ad6c3ae09c3dae8', 0, 0, 0, N'2026-10-11T15:33:06.3563608+00:00', NULL, NULL, 0, NULL, NULL),
   (5, N'u11fb5a3e', N'u11fb5a3e@test.local', N'b1739bf654afad1ddd360925c06dbd40', N'6b686bde43c29f2896879ce3b523bd6398e9bf3957cc23e14696ef5c561ea2d2400702b3a18f65269b6320de4437fc4f4876e11ccfd05082d5826dbb6da6181a', 0, 0, 0, N'2026-10-11T16:58:37.4818291+00:00', NULL, NULL, 0, NULL, NULL),
   (6, N'uacb4ccc3', N'uacb4ccc3@test.local', N'223a1fbe2771cdf980919ff4c51f28dd', N'c1a48b2860490eeb0fe50fd8a4820bd7b2f8e0bed59db9ad52b79516a33da3a5c06be7155acc57707ce20b6e0eab8b796b3d558626edf193c93b1170f251feaa', 0, 0, 0, N'2026-10-11T16:59:47.5330888+00:00', NULL, NULL, 0, NULL, NULL),
@@ -4103,10 +4103,11 @@ GO
 SET IDENTITY_INSERT [customers] OFF;
 GO
 
--- Table: product_views (3 rows)
+-- Table: product_views (4 rows)
 INSERT INTO [product_views] ([product_id], [view_count])
 SELECT src.[product_id], src.[view_count]
 FROM (VALUES
+  (N'1', 1),
   (N'2', 1),
   (N'dummyjson-85', 1),
   (N'dummyjson-97', 1)
