@@ -19,7 +19,6 @@ public static class ConsoleMenu
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         Console.InputEncoding = System.Text.Encoding.UTF8;
 
-        bool isServerRunning = false;
         bool apiHostWasStopped = false;
         bool IsApiRunning() => IsPortInUse(5000);
 
@@ -101,36 +100,112 @@ public static class ConsoleMenu
                 await Task.Delay(400);
             }
         }
-        async Task StartFullstackAsync(WebApplication webApp)
+        async Task StartAllAsync()
         {
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("\n[+] FULLSTACK: API :5000 -> Store :5173 -> Admin :5174 ...");
+            Console.WriteLine("\n[+] DANG KHOI DONG TOAN BO HE THONG (API + Store + Admin)...");
             Console.ResetColor();
+
+            // 1. API 5000
             try
             {
                 if (!IsApiRunning())
                 {
-                    await webApp.StartAsync();
-                    isServerRunning = true;
-                    Console.WriteLine("  [1/3] API :5000 OK - http://127.0.0.1:5000/swagger");
+                    if (apiHostWasStopped)
+                    {
+                        StartApiConsole();
+                        await WaitForPortAsync(5000, TimeSpan.FromSeconds(10));
+                    }
+                    else
+                    {
+                        await app.StartAsync();
+                        await WaitForPortAsync(5000, TimeSpan.FromSeconds(8));
+                    }
+                    Console.WriteLine("  [1/3] API :5000          -> OK (http://127.0.0.1:5000/swagger)");
                 }
                 else
                 {
-                    isServerRunning = true;
-                    Console.WriteLine("  [1/3] API :5000 da chay - bo qua.");
+                    Console.WriteLine("  [1/3] API :5000          -> Da chay san.");
                 }
             }
-            catch (Exception ex) { Console.WriteLine($"  [1/3] API loi: {ex.Message}"); }
-            if (!IsPortInUse(5173)) StartFrontendStore(); else Console.WriteLine("  [2/3] Store :5173 da chay - bo qua.");
-            if (!IsPortInUse(5174)) StartFrontendAdmin(); else Console.WriteLine("  [3/3] Admin :5174 da chay - bo qua.");
-            await WaitForPortAsync(5000, TimeSpan.FromSeconds(12));
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"  [1/3] API :5000 gap loi ({ex.Message}), thu mo cua so console moi...");
+                Console.ResetColor();
+                StartApiConsole();
+                await WaitForPortAsync(5000, TimeSpan.FromSeconds(10));
+            }
+
+            // 2. Store 5173
+            if (!IsPortInUse(5173))
+            {
+                LaunchStoreProcess();
+                Console.WriteLine("  [2/3] Store Frontend :5173 -> Dang khoi dong...");
+            }
+            else
+            {
+                Console.WriteLine("  [2/3] Store Frontend :5173 -> Da chay san.");
+            }
+
+            // 3. Admin 5174
+            if (!IsPortInUse(5174))
+            {
+                LaunchAdminProcess();
+                Console.WriteLine("  [3/3] Admin Dashboard :5174-> Dang khoi dong...");
+            }
+            else
+            {
+                Console.WriteLine("  [3/3] Admin Dashboard :5174-> Da chay san.");
+            }
+
+            await WaitForPortAsync(5000, TimeSpan.FromSeconds(8));
+            await WaitForPortAsync(5173, TimeSpan.FromSeconds(8));
+            await WaitForPortAsync(5174, TimeSpan.FromSeconds(8));
+
             OpenUrl("http://127.0.0.1:5000/swagger");
             OpenUrl("http://127.0.0.1:5173");
             OpenUrl("http://127.0.0.1:5174");
+
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("[OK] Mo 3 web: Swagger / Store / Admin. Kiem tra /api/health/db neu frontend bao loi fetch.");
+            Console.WriteLine("\n[OK] DA BAT TOAN BO HE THONG VA MO 3 TRANG WEB!");
             Console.ResetColor();
             WaitKey();
+        }
+
+        async Task StopAllCoreAsync()
+        {
+            // 1. API 5000
+            if (IsApiRunning())
+            {
+                try
+                {
+                    await app.StopAsync();
+                    apiHostWasStopped = true;
+                    await WaitForPortClosedAsync(5000, TimeSpan.FromSeconds(3));
+                }
+                catch { }
+                if (IsApiRunning())
+                {
+                    StopPort(5000);
+                    await WaitForPortClosedAsync(5000, TimeSpan.FromSeconds(3));
+                }
+                Console.WriteLine("  [1/3] API :5000          -> Da tat.");
+            }
+            else
+            {
+                Console.WriteLine("  [1/3] API :5000          -> Dang tat.");
+            }
+
+            // 2 & 3. Frontends 5173 & 5174
+            KillProcessTree(_storeFrontendCmdPid, "Store CMD :5173");
+            KillProcessTree(_adminFrontendCmdPid, "Admin CMD :5174");
+            _storeFrontendCmdPid = null;
+            _adminFrontendCmdPid = null;
+            StopPort(5173);
+            StopPort(5174);
+            Console.WriteLine("  [2/3] Store Frontend :5173 -> Da tat.");
+            Console.WriteLine("  [3/3] Admin Dashboard :5174-> Da tat.");
         }
         while (true)
         {
@@ -157,45 +232,51 @@ public static class ConsoleMenu
             Console.ForegroundColor = ConsoleColor.White;
             Console.WriteLine(" TRANG THAI HE THONG (live)");
             Console.ResetColor();
-            StatusRow("API 5000 ", apiLive, apiLive ? "http://127.0.0.1:5000/swagger" : "dang tat – bam [1] de bat");
-            StatusRow("Store 5173", s5173, s5173 ? "http://127.0.0.1:5173" : "dang tat – bam [8] de bat");
-            StatusRow("Admin 5174", s5174, s5174 ? "http://127.0.0.1:5174" : "dang tat – bam [9] de bat");
+            StatusRow("API 5000 ", apiLive, apiLive ? "http://127.0.0.1:5000/swagger" : "dang tat");
+            StatusRow("Store 5173", s5173, s5173 ? "http://127.0.0.1:5173" : "dang tat");
+            StatusRow("Admin 5174", s5174, s5174 ? "http://127.0.0.1:5174" : "dang tat");
             DbRow(dbLine);
             Hr();
 
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine(" ▶ DIEU KHIEN (bat API truoc → bat 5173/5174 → mo web)");
+            Console.WriteLine(" ▶ DIEU KHIEN HE THONG");
             Console.ResetColor();
-            PrintMenuItem("F ", "★ Chay FULLSTACK 1-click (API + 2 Frontend + mo 3 web)", ConsoleColor.Green);
-            if (!apiLive)
-                PrintMenuItem("1 ", "Bat Web API Server :5000 (mo Swagger)", ConsoleColor.Green);
-            else
-                PrintMenuItem("1 ", "Tat Web API Server :5000", ConsoleColor.Yellow);
-            PrintMenuItem("8 ", s5173 ? "Tat / Khoi dong lai Store Khach hang :5173" : "Bat Giao dien Store Khach hang :5173");
-            PrintMenuItem("9 ", s5174 ? "Tat / Khoi dong lai Admin Dashboard :5174" : "Bat Giao dien Admin Dashboard :5174");
-            PrintMenuItem("W ", "Mo nhanh Web (Swagger / Store / Admin / Health)");
-            PrintMenuItem("10", "Tat ca hai Frontend (5173 + 5174)", ConsoleColor.Red);
+            PrintMenuItem("1 ", "★ BAT TOAN BO  (API :5000 + Store :5173 + Admin :5174 + Mo Web)", ConsoleColor.Green);
+            PrintMenuItem("2 ", "■ TAT TOAN BO  (Dung API :5000 + Dong ca hai Frontend)", ConsoleColor.Red);
+            PrintMenuItem("W ", "Mo lai Web     (Swagger / Store / Admin / Health)");
             Hr();
 
             Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine(" QUAN TRI DU LIEU");
+            Console.WriteLine(" ⚙ QUAN TRI DU LIEU");
             Console.ResetColor();
-            // In 2 cot cho gon: 2/3/4 tren 1 dong, 5/6/7 tren 1 dong.
-            PrintTwoCol(("2", "Tao Admin"), ("3", "Doi pass Admin"));
-            PrintTwoCol(("4", "Tao KH mau"), ("5", "Seed san pham"));
-            PrintTwoCol(("6", "Thong ke"), ("7", "Reset DB"));
-            PrintMenuItem("0 ", "Thoat (tu tat Frontend + dung API)", ConsoleColor.DarkGray);
+            PrintTwoCol(("3", "Tao Admin"), ("4", "Doi pass Admin"));
+            PrintTwoCol(("5", "Tao KH mau"), ("6", "Seed san pham"));
+            PrintTwoCol(("7", "Thong ke DB"), ("R", "Reset Database"));
+            PrintMenuItem("0 ", "Thoat (Tat toan bo he thong va dong)", ConsoleColor.DarkGray);
 
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine(" └" + Line('─') + "┘");
             Console.ResetColor();
-            Console.Write("Chon [F/W/0-10]: ");
+            Console.Write("Chon [1/2/W/3-7/R/0]: ");
 
             var choice = (Console.ReadLine()?.Trim() ?? "").ToUpperInvariant();
             switch (choice)
             {
+                case "1":
                 case "F":
-                    await StartFullstackAsync(app);
+                    await StartAllAsync();
+                    break;
+
+                case "2":
+                case "10":
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("\n[-] Dang tat toan bo he thong...");
+                    Console.ResetColor();
+                    await StopAllCoreAsync();
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("\n[OK] Da tat toan bo he thong thanh cong!");
+                    Console.ResetColor();
+                    WaitKey();
                     break;
 
                 case "W":
@@ -209,150 +290,48 @@ public static class ConsoleMenu
                     WaitKey();
                     break;
 
-                case "1":
-                    if (IsApiRunning())
-                    {
-                        Console.ForegroundColor = ConsoleColor.Yellow;
-                        Console.WriteLine("\n[-] Dang dung Web API Server :5000...");
-                        Console.ResetColor();
-                        try
-                        {
-                            await app.StopAsync();
-                            isServerRunning = false;
-                            apiHostWasStopped = true;
-                            await WaitForPortClosedAsync(5000, TimeSpan.FromSeconds(5));
-
-                            if (IsApiRunning())
-                            {
-                                Console.ForegroundColor = ConsoleColor.Yellow;
-                                Console.WriteLine("CANH BAO - StopAsync xong nhung port 5000 van mo. Dang kill process giu port 5000...");
-                                Console.ResetColor();
-                                StopPort(5000);
-                                await WaitForPortClosedAsync(5000, TimeSpan.FromSeconds(5));
-                            }
-
-                            Console.ForegroundColor = IsApiRunning() ? ConsoleColor.Red : ConsoleColor.Green;
-                            Console.WriteLine(IsApiRunning()
-                                ? "LOI - Port 5000 van ON. Hay chay CMD Admin: netstat -ano | findstr :5000  roi taskkill /PID <PID> /T /F"
-                                : "OK - Da dung Web API Server, port 5000 da OFF.");
-                            Console.ResetColor();
-                        }
-                        catch (Exception ex)
-                        {
-                            isServerRunning = IsPortInUse(5000);
-                            Console.ForegroundColor = ConsoleColor.Red;
-                            Console.WriteLine($"LOI - Khong dung duoc API: {ex.Message}");
-                            Console.ResetColor();
-                        }
-                    }
-                    else
-                    {
-                        Console.ForegroundColor = ConsoleColor.Green;
-                        Console.WriteLine("\n[+] Dang khoi dong Web API Server :5000...");
-                        Console.ResetColor();
-                        try
-                        {
-                            if (apiHostWasStopped)
-                            {
-                                StartApiConsole();
-                                await WaitForPortAsync(5000, TimeSpan.FromSeconds(15));
-                                isServerRunning = IsApiRunning();
-                            }
-                            else
-                            {
-                                await app.StartAsync();
-                                isServerRunning = true;
-                                await WaitForPortAsync(5000, TimeSpan.FromSeconds(10));
-                            }
-
-                            Console.ForegroundColor = IsApiRunning() ? ConsoleColor.Green : ConsoleColor.Yellow;
-                            Console.WriteLine(IsApiRunning()
-                                ? "OK - Server da bat tai http://127.0.0.1:5000/swagger"
-                                : "CANH BAO - Da mo console API moi nhung port 5000 chua ON. Hay xem cua so API moi de biet loi.");
-                            Console.WriteLine("Ban co the bam [8] Store, [9] Admin hoac [W] mo web nhanh.");
-                            Console.ResetColor();
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            StartApiConsole();
-                            await WaitForPortAsync(5000, TimeSpan.FromSeconds(15));
-                            isServerRunning = IsApiRunning();
-                            Console.ForegroundColor = IsApiRunning() ? ConsoleColor.Green : ConsoleColor.Yellow;
-                            Console.WriteLine(IsApiRunning()
-                                ? "OK - Host cu da bi huy, da mo API bang console moi tai :5000."
-                                : "CANH BAO - Da mo console API moi nhung port 5000 chua ON. Hay xem cua so API moi de biet loi.");
-                            Console.ResetColor();
-                        }
-                        catch (InvalidOperationException ex) when (ex.Message.Contains("already started", StringComparison.OrdinalIgnoreCase))
-                        {
-                            isServerRunning = true;
-                            Console.ForegroundColor = ConsoleColor.Yellow;
-                            Console.WriteLine("API thuc te da dang chay. Da dong bo trang thai, khong khoi dong lai.");
-                            Console.ResetColor();
-                        }
-                        catch (Exception ex)
-                        {
-                            isServerRunning = IsPortInUse(5000);
-                            Console.ForegroundColor = ConsoleColor.Red;
-                            Console.WriteLine($"LOI - Khoi dong API that bai: {ex.Message}");
-                            Console.ResetColor();
-                        }
-                    }
-                    WaitKey();
-                    break;
-
-                case "2":
+                case "3":
                     CreateAdmin(db);
                     break;
 
-                case "3":
+                case "4":
                     UpdateAdminPassword(db);
                     break;
 
-                case "4":
+                case "5":
                     CreateSampleCustomer(db);
                     break;
 
-                case "5":
+                case "6":
                     SeedProducts(db);
                     break;
 
-                case "6":
+                case "7":
                     ShowStats(db);
                     break;
 
-                case "7":
+                case "R":
                     ResetDatabase(db);
                     break;
 
                 case "8":
-                    StartFrontendStore();
-                    break;
-
                 case "9":
-                    StartFrontendAdmin();
-                    break;
-
-                case "10":
-                    StopFrontends();
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                    Console.WriteLine("\n[!] Phím [8] & [9] đã bỏ! Bấm [1] để chạy cả 3 hoặc [2] để tắt cả 3.");
+                    Console.ResetColor();
+                    WaitKey();
                     break;
 
                 case "0":
-                    StopFrontendsCore();
-                    if (IsApiRunning())
-                    {
-                        try { await app.StopAsync(); } catch { }
-                        isServerRunning = false;
-                        await WaitForPortClosedAsync(5000, TimeSpan.FromSeconds(3));
-                        if (IsApiRunning()) StopPort(5000);
-                    }
-                    Console.WriteLine("\nDa tat Frontend + dung API. Hen gap lai!");
+                    Console.WriteLine("\n[-] Đang tắt toàn bộ hệ thống trước khi thoát...");
+                    await StopAllCoreAsync();
+                    Console.WriteLine("\nĐã tắt toàn bộ. Hẹn gặp lại!");
                     Environment.Exit(0);
                     return;
 
                 default:
                     Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine("\nLựa chọn không hợp lệ! Vui lòng thử lại.");
+                    Console.WriteLine("\nLựa chọn không hợp lệ! Vui lòng chọn [1/2/W/3-7/R/0].");
                     Console.ResetColor();
                     WaitKey();
                     break;
@@ -413,21 +392,8 @@ public static class ConsoleMenu
         }
     }
 
-    private static void StartFrontendStore()
+    private static void LaunchStoreProcess()
     {
-        if (IsPortInUse(5173))
-        {
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("Cong 5173 dang chay Vite roi - mo lai trinh duyet thay vi khoi dong moi.");
-            Console.ResetColor();
-            try { Process.Start(new ProcessStartInfo { FileName = "http://localhost:5173", UseShellExecute = true }); } catch { }
-            Console.WriteLine("Da mo lai Frontend Store.");
-            WaitKey();
-            return;
-        }
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine("\n[+] Đang mở cửa sổ chạy Frontend Store (http://localhost:5173)...");
-        Console.ResetColor();
         try
         {
             var cmd = Process.Start(new ProcessStartInfo
@@ -437,33 +403,17 @@ public static class ConsoleMenu
                 UseShellExecute = true
             });
             if (cmd != null) _storeFrontendCmdPid = cmd.Id;
-            try { Process.Start(new ProcessStartInfo { FileName = "http://localhost:5173", UseShellExecute = true }); } catch { }
-            Console.WriteLine("✅ Đã mở Frontend Store thành công!");
         }
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"❌ Lỗi mở Store: {ex.Message}");
+            Console.WriteLine($"  [Store] Loi mo tien trinh: {ex.Message}");
             Console.ResetColor();
         }
-        WaitKey();
     }
 
-    private static void StartFrontendAdmin()
+    private static void LaunchAdminProcess()
     {
-        if (IsPortInUse(5174))
-        {
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("Cong 5174 dang chay Vite roi - mo lai trinh duyet thay vi khoi dong moi.");
-            Console.ResetColor();
-            try { Process.Start(new ProcessStartInfo { FileName = "http://localhost:5174", UseShellExecute = true }); } catch { }
-            Console.WriteLine("Da mo lai Admin Dashboard.");
-            WaitKey();
-            return;
-        }
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine("\n[+] Đang mở cửa sổ chạy Admin Dashboard (http://localhost:5174)...");
-        Console.ResetColor();
         try
         {
             var cmd = Process.Start(new ProcessStartInfo
@@ -473,38 +423,13 @@ public static class ConsoleMenu
                 UseShellExecute = true
             });
             if (cmd != null) _adminFrontendCmdPid = cmd.Id;
-            try { Process.Start(new ProcessStartInfo { FileName = "http://localhost:5174", UseShellExecute = true }); } catch { }
-            Console.WriteLine("✅ Đã mở Admin Dashboard thành công!");
         }
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"❌ Lỗi mở Admin Dashboard: {ex.Message}");
+            Console.WriteLine($"  [Admin] Loi mo tien trinh: {ex.Message}");
             Console.ResetColor();
         }
-        WaitKey();
-    }
-
-    private static void StopFrontends()
-    {
-        StopFrontendsCore();
-        WaitKey();
-    }
-
-    private static void StopFrontendsCore()
-    {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("\n[-] Dang tat ca hai Frontend (5173 & 5174) va dong cua so CMD Vite...");
-        Console.ResetColor();
-
-        KillProcessTree(_storeFrontendCmdPid, "Store CMD :5173");
-        KillProcessTree(_adminFrontendCmdPid, "Admin CMD :5174");
-        _storeFrontendCmdPid = null;
-        _adminFrontendCmdPid = null;
-
-        // Fallback: neu PID cua so cmd khong con luu duoc, kill process dang giu port.
-        StopPort(5173);
-        StopPort(5174);
     }
 
     private static void KillProcessTree(int? pid, string label)
