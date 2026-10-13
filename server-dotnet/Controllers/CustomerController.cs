@@ -242,7 +242,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         var secret = Totp.GenerateSecret();
         db.BeginTotpSetup(customer.Id, secret);
         var url = Totp.OtpauthUrl(secret, customer.Email);
-        return Ok(new { otpauthUrl = url, qrImage = (string?)null, secretHint = secret[..4] + "…" + secret[^4..] });
+        return Ok(new { otpauthUrl = url, secret, qrImage = (string?)null, secretHint = secret[..4] + "…" + secret[^4..] });
     }
 
     [HttpPost("2fa/verify")]
