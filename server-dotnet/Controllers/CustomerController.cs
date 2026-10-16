@@ -69,7 +69,11 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
             db.CreateLoginChallenge(challenge, found.Value.Id, DateTimeOffset.UtcNow.AddMinutes(5));
             return StatusCode(202, new { twoFactorRequired = true, challengeId = challenge });
         }
-        return LoginInternal(found.Value.Username, found.Value.Id);
+        var email = found.Value.Email;
+        var username = found.Value.Username;
+        var res = LoginInternal(username, found.Value.Id);
+        SendLoginNotificationAsync(email, username, "Mật khẩu");
+        return res;
     }
 
     [HttpPost("login/2fa")]
@@ -90,7 +94,19 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         if (!ok && db.ConsumeBackupCode(full.Value.Id, code.ToUpperInvariant())) ok = true;
         if (!ok) return Unauthorized(new { error = "INVALID_2FA_CODE" });
         db.DeleteLoginChallenge(challengeId);
-        return LoginInternal(full.Value.Username, full.Value.Id);
+        var email = full.Value.Email;
+        var username = full.Value.Username;
+        var res = LoginInternal(username, full.Value.Id);
+        SendLoginNotificationAsync(email, username, "Xác thực 2 bước (2FA)");
+        return res;
+    }
+
+    [HttpGet("test-email")]
+    public async Task<IActionResult> TestEmail([FromQuery] string? email)
+    {
+        var target = string.IsNullOrWhiteSpace(email) ? "vietlun091@gmail.com" : email.Trim();
+        var success = await emailService.SendGoogleLoginEmailAsync(target, "Viet Lun");
+        return Ok(new { success, target });
     }
 
     [HttpGet("auth/status")]
@@ -204,14 +220,10 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
             }
             var raw = Tokens.RandomToken();
             db.CreateSession(Tokens.Sha256(raw), id, DateTimeOffset.UtcNow.AddDays(30));
-            Response.Cookies.Append(Cookie, raw, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, MaxAge = TimeSpan.FromDays(30), Path = "/" });
+            Response.Cookies.Append(Cookie, raw, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Lax, MaxAge = TimeSpan.FromDays(30), Path = "/" });
             
             // Gửi email thông báo đăng nhập Google
-            _ = Task.Run(async () =>
-            {
-                try { await emailService.SendGoogleLoginEmailAsync(email, auth?.Username ?? email); }
-                catch (Exception ex) { Console.WriteLine($"[Store Mailer] Google login email exception: {ex.Message}"); }
-            });
+            SendLoginNotificationAsync(email, auth?.Username ?? email, "Google OAuth");
             
             return Redirect(frontend + nextUrl);
         }
@@ -271,13 +283,33 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         return Ok(new { disabled = true });
     }
 
+    [HttpGet("logout")]
     [HttpPost("logout")]
     public IActionResult Logout()
     {
         var raw = Request.Cookies[Cookie];
-        if (string.IsNullOrWhiteSpace(raw)) return Ok(new { ok = true });
-        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        db.DeleteSession(Tokens.Sha256(raw)); Response.Cookies.Delete(Cookie); return Ok(new { ok = true });
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+            db.DeleteSession(Tokens.Sha256(raw));
+        }
+
+        Response.Cookies.Delete(Cookie, new CookieOptions
+        {
+            Path = "/",
+            SameSite = SameSiteMode.Lax,
+            Secure = Request.IsHttps,
+            HttpOnly = true
+        });
+        Response.Cookies.Delete(Cookie, new CookieOptions
+        {
+            Path = "/",
+            SameSite = SameSiteMode.Strict,
+            Secure = Request.IsHttps,
+            HttpOnly = true
+        });
+        Response.Cookies.Delete(Cookie);
+
+        return Ok(new { ok = true, loggedOut = true });
     }
 
     [HttpGet("favorites")]
@@ -369,17 +401,192 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         return StatusCode(StatusCodes.Status201Created, new { order = createdOrder });
     }
     [HttpGet("orders/{id}/receipt")]
+    [HttpGet("orders/{id}/receipt.html")]
     public IActionResult OrderReceipt(string id)
     {
         if (!RequireAccount(out var customer)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
         var order = db.FindCustomerOrder(id, customer.Id);
         if (order is null) return NotFound(new { error = "ORDER_NOT_FOUND" });
+
+        if (Request.Path.Value?.EndsWith(".html") == true || Request.Query["format"] == "html")
+        {
+            return Content(RenderReceiptHtml(order), "text/html; charset=utf-8");
+        }
+
         return Ok(new
         {
             order,
             afterSales = Array.Empty<object>(),
             events = Array.Empty<object>(),
             store = new { name = "Store Mini Mart", address = "TP. Hồ Chí Minh", demo = true }
+        });
+    }
+
+    [HttpPost("payment-sessions")]
+    public IActionResult CreatePaymentSession(CreateOrderRequest request)
+    {
+        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+
+        var recipient = (request.Recipient ?? "").Trim();
+        var phone = (request.Phone ?? "").Trim();
+        var address = (request.Address ?? "").Trim();
+        if (recipient.Length < 2 || phone.Length < 8) return BadRequest(new { error = "INVALID_ORDER" });
+        if (request.Fulfillment == "delivery" && address.Length < 5) return BadRequest(new { error = "INVALID_ORDER" });
+
+        var quoteRequest = new OrderQuoteRequest(request.Items, request.Fulfillment, request.Region, request.DistanceKm, request.WeightKg, request.VoucherCodes);
+        var q = ComputeQuote(customer, quoteRequest);
+        if (request.ExpectedTotal > 0 && request.ExpectedTotal != q.Total) return Conflict(new { error = "QUOTE_CHANGED" });
+
+        var orderId = "ST-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        var method = "bank_transfer";
+        var createdAt = DateTimeOffset.Now.ToString("dd/MM/yyyy HH:mm");
+        var itemsJson = JsonSerializer.Serialize(q.Items.Select(i => new { id = i.Id, name = i.Name, quantity = i.Quantity, price = i.Price }));
+        var voucherJson = JsonSerializer.Serialize(q.VoucherCodes);
+        var pointsEarned = Math.Max(1, q.Total / 10000);
+
+        db.CreateCustomerOrder(
+            orderId, customer.Id, itemsJson, recipient, phone,
+            q.Fulfillment == "pickup" ? "Nhận tại cửa hàng" : address,
+            q.Fulfillment, q.Region, q.DistanceKm, q.WeightKg,
+            q.Subtotal, q.Discount, q.GoodsTotal, q.ShippingFee, q.Total,
+            voucherJson, q.Tier, method, request.ScheduledAt, createdAt, pointsEarned);
+
+        if (q.VoucherCodes.Count > 0) db.ConsumeCustomerVouchers(customer.Id, q.VoucherCodes);
+        db.AddCustomerPoints(customer.Id, pointsEarned);
+
+        var createdOrder = db.FindCustomerOrder(orderId, customer.Id);
+        var expiresAt = DateTimeOffset.UtcNow.AddMinutes(2).ToString("o");
+        var payment = BuildPaymentInfo(orderId, q.Total);
+
+        return StatusCode(StatusCodes.Status201Created, new
+        {
+            sessionId = orderId,
+            expiresAt,
+            order = createdOrder,
+            payment
+        });
+    }
+
+    [HttpGet("payment-sessions/{id}")]
+    public IActionResult GetPaymentSession(string id)
+    {
+        if (!RequireAccount(out var customer)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        var order = db.FindCustomerOrder(id, customer.Id);
+        if (order is null) return NotFound(new { error = "PAYMENT_SESSION_NOT_FOUND" });
+
+        var json = JsonSerializer.Serialize(order);
+        using var doc = JsonDocument.Parse(json);
+        var total = doc.RootElement.GetProperty("total").GetInt32();
+        var status = doc.RootElement.GetProperty("status").GetString();
+        var expiresAt = DateTimeOffset.UtcNow.AddMinutes(2).ToString("o");
+
+        return Ok(new
+        {
+            sessionId = id,
+            order,
+            expiresAt,
+            status,
+            amount = total,
+            payment = BuildPaymentInfo(id, total)
+        });
+    }
+
+    [HttpDelete("payment-sessions/{id}")]
+    public IActionResult DeletePaymentSession(string id)
+    {
+        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        var order = db.FindCustomerOrder(id, customer.Id);
+        if (order is null) return NotFound(new { error = "PAYMENT_SESSION_NOT_FOUND" });
+
+        db.UpdateOrderStatus(id, "cancelled");
+        return Ok(new { ok = true, success = true, cancelled = true, sessionId = id });
+    }
+
+    [HttpPost("payment-sessions/{id}/simulate-pay")]
+    [HttpPost("payment-sessions/{id}/demo-paid")]
+    public IActionResult SimulatePaymentSessionPay(string id)
+    {
+        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        var order = db.FindCustomerOrder(id, customer.Id);
+        if (order is null) return NotFound(new { error = "PAYMENT_SESSION_NOT_FOUND" });
+
+        var now = DateTimeOffset.UtcNow.ToString("o");
+        db.UpdateOrderStatus(id, "paid", now);
+        var updatedOrder = db.FindCustomerOrder(id, customer.Id);
+        return Ok(new { success = true, orderId = id, order = updatedOrder, status = "paid" });
+    }
+
+    [HttpPost("payment-sessions/{id}/payment-report")]
+    public IActionResult ReportPaymentSession(string id, PaymentReportRequest? req)
+    {
+        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        var order = db.FindCustomerOrder(id, customer.Id);
+        if (order is null) return NotFound(new { error = "PAYMENT_SESSION_NOT_FOUND" });
+
+        var updatedOrder = db.FindCustomerOrder(id, customer.Id);
+        return Ok(new { success = true, orderId = id, order = updatedOrder, status = "pending" });
+    }
+
+    [HttpPost("spin")]
+    public IActionResult Spin(CustomerSpinRequest request)
+    {
+        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+
+        var currentCredits = customer.SpinCredits;
+        if (currentCredits < 1)
+        {
+            return BadRequest(new { error = "NO_SPIN_CREDITS" });
+        }
+
+        var wheel = (request.Wheel ?? "goods").Trim().ToLowerInvariant();
+        if (wheel != "goods" && wheel != "shipping") wheel = "goods";
+
+        var remainingCredits = db.DeductSpinCredit(customer.Id);
+        var rnd = Random.Shared.Next(0, 10);
+        object? voucher = null;
+
+        if (wheel == "goods")
+        {
+            if (rnd == 2 || rnd == 6 || rnd == 8)
+            {
+                var code = "LUCKY100K-" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+                var exp = DateTimeOffset.UtcNow.AddDays(14).ToString("yyyy-MM-dd");
+                voucher = db.CreateAdminVoucher(code, customer.Id, "Voucher may mắn 100K", "amount", 100000, "goods", exp, "spin");
+            }
+            else if (rnd == 4)
+            {
+                var code = "LUCKY20-" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+                var exp = DateTimeOffset.UtcNow.AddDays(14).ToString("yyyy-MM-dd");
+                voucher = db.CreateAdminVoucher(code, customer.Id, "Voucher may mắn 20%", "percent", 20, "goods", exp, "spin");
+            }
+        }
+        else
+        {
+            if (rnd == 2 || rnd == 6 || rnd == 8)
+            {
+                var code = "SHIP50-" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+                var exp = DateTimeOffset.UtcNow.AddDays(14).ToString("yyyy-MM-dd");
+                voucher = db.CreateAdminVoucher(code, customer.Id, "Giảm 50% phí ship", "percent", 50, "shipping", exp, "spin");
+            }
+            else if (rnd == 4)
+            {
+                var code = "FREESHIP-" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+                var exp = DateTimeOffset.UtcNow.AddDays(14).ToString("yyyy-MM-dd");
+                voucher = db.CreateAdminVoucher(code, customer.Id, "Miễn phí vận chuyển", "percent", 100, "shipping", exp, "spin");
+            }
+        }
+
+        return Ok(new
+        {
+            wheel,
+            spinCredits = remainingCredits,
+            index = rnd,
+            voucher
         });
     }
 
@@ -393,17 +600,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         var doc = JsonDocument.Parse(json);
         var total = doc.RootElement.GetProperty("total").GetInt32();
         var status = doc.RootElement.GetProperty("status").GetString();
-        var payment = new
-        {
-            amount = total,
-            reference = id,
-            bankName = "MB Bank",
-            accountNumber = "0912345678",
-            accountName = "STORE MINI MART",
-            purpose = "Thanh toan don hang " + id,
-            mode = "demo",
-            qrImage = $"https://img.vietqr.io/image/970422-0912345678-compact2.png?amount={total}&addInfo={id}&accountName=STORE%20MINI%20MART"
-        };
+        var payment = BuildPaymentInfo(id, total);
         return Ok(new { order, payment, orderId = id, amount = total, currency = "VND", status });
     }
 
@@ -430,6 +627,96 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         return Ok(new { success = true, orderId = id, status = "cancelled" });
     }
 
+    private object BuildPaymentInfo(string orderId, int total)
+    {
+        var rawSettings = db.GetPaymentSettings();
+        string mode = "demo";
+        string bankName = "MB Bank";
+        string bankBin = "970422";
+        string accountNumber = "0912345678";
+        string accountName = "STORE MINI MART";
+
+        if (rawSettings != null)
+        {
+            try
+            {
+                var json = JsonSerializer.Serialize(rawSettings);
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("mode", out var m)) mode = m.GetString() ?? "demo";
+                if (doc.RootElement.TryGetProperty("bankName", out var bn)) bankName = bn.GetString() ?? "MB Bank";
+                if (doc.RootElement.TryGetProperty("bankBin", out var bb)) bankBin = bb.GetString() ?? "970422";
+                if (doc.RootElement.TryGetProperty("accountNumber", out var an)) accountNumber = an.GetString() ?? "0912345678";
+                if (doc.RootElement.TryGetProperty("accountName", out var acn)) accountName = acn.GetString() ?? "STORE MINI MART";
+            }
+            catch { }
+        }
+
+        var encodedAccName = Uri.EscapeDataString(accountName);
+        var qrImage = $"https://img.vietqr.io/image/{bankBin}-{accountNumber}-compact2.png?amount={total}&addInfo={orderId}&accountName={encodedAccName}";
+
+        return new
+        {
+            amount = total,
+            reference = orderId,
+            bankName,
+            accountNumber,
+            accountName,
+            purpose = "Thanh toan don hang " + orderId,
+            mode,
+            qrImage
+        };
+    }
+
+    private static string RenderReceiptHtml(object order)
+    {
+        var json = JsonSerializer.Serialize(order);
+        return $$"""
+        <!DOCTYPE html>
+        <html lang="vi">
+        <head>
+            <meta charset="utf-8" />
+            <title>Biên nhận đơn hàng</title>
+            <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; color: #1e293b; max-width: 600px; margin: auto; }
+                h1 { font-size: 20px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+                .meta { margin-bottom: 16px; font-size: 14px; color: #64748b; line-height: 1.6; }
+                .items { width: 100%; border-collapse: collapse; margin-top: 16px; }
+                .items th, .items td { text-align: left; padding: 8px; border-bottom: 1px solid #e2e8f0; }
+                .total { text-align: right; font-weight: bold; font-size: 18px; margin-top: 16px; }
+                @media print { button { display: none; } }
+            </style>
+        </head>
+        <body>
+            <button onclick="window.print()">In biên nhận (PDF)</button>
+            <h1>STORE MINI MART — BIÊN NHẬN ĐƠN HÀNG</h1>
+            <pre style="display:none;" id="data">{{json}}</pre>
+            <div id="content"></div>
+            <script>
+                try {
+                    const o = JSON.parse(document.getElementById('data').textContent);
+                    document.getElementById('content').innerHTML = `
+                        <div class="meta">
+                            <p>Mã đơn: <strong>${o.id || ''}</strong></p>
+                            <p>Khách hàng: <strong>${o.recipient || o.username || 'Khách'}</strong> (${o.phone || ''})</p>
+                            <p>Địa chỉ: ${o.address || 'Tại quầy'}</p>
+                            <p>Ngày tạo: ${o.createdAt || ''}</p>
+                            <p>Trạng thái: <strong>${o.status || ''}</strong> (${o.paymentMethod || ''})</p>
+                        </div>
+                        <table class="items">
+                            <thead><tr><th>Sản phẩm</th><th>SL</th><th>Giá</th></tr></thead>
+                            <tbody>
+                                ${(o.items || []).map(i => `<tr><td>${i.name || i.id}</td><td>${i.quantity || 1}</td><td>${(i.price || 0).toLocaleString('vi-VN')} ₫</td></tr>`).join('')}
+                            </tbody>
+                        </table>
+                        <div class="total">Tổng tiền: ${(o.total || 0).toLocaleString('vi-VN')} ₫</div>
+                    `;
+                } catch(e) {}
+            </script>
+        </body>
+        </html>
+        """;
+    }
+
 
     [HttpPut("favorites/{id}")]
     public IActionResult SetFavorite(string id)
@@ -453,10 +740,28 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
     private IActionResult LoginInternal(string username, long id)
     {
         var raw = Tokens.RandomToken(); var expires = DateTimeOffset.UtcNow.AddDays(30); db.CreateSession(Tokens.Sha256(raw), id, expires);
-        Response.Cookies.Append(Cookie, raw, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, MaxAge = TimeSpan.FromDays(30), Path = "/" });
+        Response.Cookies.Append(Cookie, raw, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Lax, MaxAge = TimeSpan.FromDays(30), Path = "/" });
         var customer = db.FindCustomer(username)!; var csrf = Tokens.Sha256("customer-csrf:" + raw);
         var full = db.FindCustomerFull(id);
         return Ok(new { account = AccountEx((customer.Value.Id, customer.Value.Username, customer.Value.Email, customer.Value.Points, customer.Value.SpinCredits), full?.GoogleSub ?? "", full?.TotpEnabled ?? 0, csrf) });
+    }
+
+    private void SendLoginNotificationAsync(string email, string username, string method)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await emailService.SendLoginNotificationEmailAsync(email, username, method);
+            }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"[Store Mailer] Lỗi gửi thông báo đăng nhập ({method}) tới {email}: {ex.Message}");
+                Console.ResetColor();
+            }
+        });
     }
 
     private (long Id, string Username, string Email, int Points, int SpinCredits)? Current()

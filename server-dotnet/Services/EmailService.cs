@@ -67,13 +67,16 @@ public sealed class EmailService
         return await SendOrLogEmailAsync(toEmail, subject, html, "invoice_" + invoice.OrderId, invoice.Recipient);
     }
 
-    public async Task<bool> SendGoogleLoginEmailAsync(string toEmail, string username)
+    public async Task<bool> SendLoginNotificationEmailAsync(string toEmail, string username, string method = "Google OAuth")
     {
-        var subject = "[Store] Thông báo đăng nhập - Bạn vừa đăng nhập thành công bằng Google";
+        var subject = $"[Store] Thông báo đăng nhập - Bạn vừa đăng nhập thành công ({method})";
         var createdAt = DateTimeOffset.Now.ToString("dd/MM/yyyy HH:mm");
-        var html = EmailTemplates.BuildGoogleLoginEmailHtml(username, toEmail, createdAt, FrontendUrl);
-        return await SendOrLogEmailAsync(toEmail, subject, html, "google_login", username);
+        var html = EmailTemplates.BuildLoginNotificationEmailHtml(username, toEmail, createdAt, method, FrontendUrl);
+        return await SendOrLogEmailAsync(toEmail, subject, html, "login_" + method.Replace(" ", "_").ToLowerInvariant(), username);
     }
+
+    public Task<bool> SendGoogleLoginEmailAsync(string toEmail, string username)
+        => SendLoginNotificationEmailAsync(toEmail, username, "Google OAuth");
 
     private async Task<bool> SendOrLogEmailAsync(string toEmail, string subject, string htmlBody, string logPrefix, string recipientName)
     {
@@ -129,6 +132,8 @@ public sealed class EmailService
 
             using var client = new MailKit.Net.Smtp.SmtpClient();
             client.Timeout = 15000;
+            client.CheckCertificateRevocation = false;
+            client.ServerCertificateValidationCallback = (s, c, h, e) => true;
 
             var secureOption = port == 465 
                 ? SecureSocketOptions.SslOnConnect 

@@ -85,3 +85,11 @@ public sealed record PaymentSettingsRequest(
 
 public sealed record AdminSettingsRequest(int? ContextSize);
 
+public sealed record CustomerSpinRequest(string? Wheel);
+
+public sealed record StorefrontContactRequest(string? Name, string? Email, string? Topic, string? Message);
+
+public sealed record ProductReviewRequest(int Rating, string? Comment);
+
+public sealed record PaymentReportRequest(string? Reference);
+

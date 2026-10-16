@@ -252,9 +252,13 @@ public static class EmailTemplates
     }
 
     public static string BuildGoogleLoginEmailHtml(string username, string email, string loginAt, string frontendUrl)
+        => BuildLoginNotificationEmailHtml(username, email, loginAt, "Google OAuth", frontendUrl);
+
+    public static string BuildLoginNotificationEmailHtml(string username, string email, string loginAt, string method, string frontendUrl)
     {
         var u = WebUtility.HtmlEncode(username);
         var e = WebUtility.HtmlEncode(email);
+        var m = WebUtility.HtmlEncode(method);
         return $"""
 <!DOCTYPE html>
 <html lang="vi">
@@ -285,7 +289,7 @@ public static class EmailTemplates
                 </span>
                 <h1 style="margin:16px 0 8px;font-size:23px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">Xin chào {u}!</h1>
                 <p style="margin:0;font-size:14px;color:#64748b;line-height:1.6;">
-                  Tài khoản của bạn vừa có một phiên đăng nhập thành công qua Google OAuth.
+                  Tài khoản của bạn vừa có một phiên đăng nhập thành công vào Store ({m}).
                 </p>
               </div>
 
@@ -305,7 +309,7 @@ public static class EmailTemplates
                 <tr>
                   <td style="padding:13px 18px;font-size:13px;color:#64748b;font-weight:600;">🔐 Phương thức</td>
                   <td align="right" style="padding:13px 18px;">
-                    <span style="background:#e0f2fe;border:1px solid #bae6fd;color:#0284c7;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:800;">GOOGLE OAUTH</span>
+                    <span style="background:#e0f2fe;border:1px solid #bae6fd;color:#0284c7;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:800;text-transform:uppercase;">{m}</span>
                   </td>
                 </tr>
               </table>

@@ -689,6 +689,16 @@ public sealed class StoreDb
         cmd.ExecuteNonQuery();
     }
 
+    public int DeductSpinCredit(long customerId)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "UPDATE customers SET spin_credits = CASE WHEN spin_credits > 0 THEN spin_credits - 1 ELSE 0 END WHERE id = @id; SELECT spin_credits FROM customers WHERE id = @id;";
+        cmd.Parameters.AddWithValue("@id", customerId);
+        var res = cmd.ExecuteScalar();
+        return res != null && res != DBNull.Value ? Convert.ToInt32(res) : 0;
+    }
+
     public void UpdateOrderStatus(string orderId, string status, string? paidAt = null)
     {
         using var db = Open();
@@ -1561,6 +1571,58 @@ public sealed class StoreDb
         cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
         cmd.Parameters.AddWithValue("@id", id);
         return cmd.ExecuteNonQuery() > 0;
+    }
+
+    public IReadOnlyList<object> ListProductReviews(string productId)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            SELECT r.id, r.product_id, r.customer_id, r.customer_name, r.rating, r.comment, r.admin_reply, r.created_at, r.replied_at
+            FROM product_reviews r
+            WHERE r.product_id = @pid
+            ORDER BY r.created_at DESC
+            """;
+        cmd.Parameters.AddWithValue("@pid", productId);
+        using var reader = cmd.ExecuteReader();
+        var list = new List<object>();
+        while (reader.Read())
+        {
+            list.Add(new
+            {
+                id = Convert.ToInt64(reader.GetValue(0)),
+                productId = reader.GetString(1),
+                customerId = Convert.ToInt64(reader.GetValue(2)),
+                customerName = reader.GetString(3),
+                rating = Convert.ToInt32(reader.GetValue(4)),
+                comment = reader.GetString(5),
+                adminReply = reader.IsDBNull(6) ? "" : reader.GetString(6),
+                createdAt = reader.GetString(7),
+                repliedAt = reader.IsDBNull(8) ? null : reader.GetString(8)
+            });
+        }
+        return list;
+    }
+
+    public void UpsertProductReview(string productId, long customerId, string customerName, int rating, string comment)
+    {
+        var now = DateTimeOffset.UtcNow.ToString("O");
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = """
+            IF EXISTS (SELECT 1 FROM product_reviews WHERE product_id = @pid AND customer_id = @cid)
+                UPDATE product_reviews SET rating = @rating, comment = @comment, customer_name = @cname WHERE product_id = @pid AND customer_id = @cid;
+            ELSE
+                INSERT INTO product_reviews(product_id, customer_id, customer_name, rating, comment, admin_reply, created_at)
+                VALUES(@pid, @cid, @cname, @rating, @comment, '', @now);
+            """;
+        cmd.Parameters.AddWithValue("@pid", productId);
+        cmd.Parameters.AddWithValue("@cid", customerId);
+        cmd.Parameters.AddWithValue("@cname", customerName);
+        cmd.Parameters.AddWithValue("@rating", rating);
+        cmd.Parameters.AddWithValue("@comment", comment);
+        cmd.Parameters.AddWithValue("@now", now);
+        cmd.ExecuteNonQuery();
     }
 
     public IReadOnlyList<object> ListAllAdminOrders()
