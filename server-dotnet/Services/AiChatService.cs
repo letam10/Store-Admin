@@ -28,11 +28,16 @@ public sealed class AiChatService
         _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
     }
 
-    private string OllamaHost =>
-        (_configuration["OLLAMA_HOST"] ?? Environment.GetEnvironmentVariable("OLLAMA_HOST") ?? "http://127.0.0.1:11434").TrimEnd('/');
+    private string GetConfig(string key, string fallback = "")
+    {
+        var val = _configuration[key];
+        if (string.IsNullOrWhiteSpace(val)) val = Environment.GetEnvironmentVariable(key);
+        return string.IsNullOrWhiteSpace(val) ? fallback : val.Trim();
+    }
 
-    private string OllamaModel =>
-        _configuration["OLLAMA_MODEL"] ?? Environment.GetEnvironmentVariable("OLLAMA_MODEL") ?? "qwen3.5:4b";
+    private string OllamaHost => GetConfig("OLLAMA_HOST", "http://127.0.0.1:11434").TrimEnd('/');
+
+    private string OllamaModel => GetConfig("OLLAMA_MODEL", "qwen3.5:4b");
 
     public async Task<AiChatResponse> ProcessAdminChatAsync(string message, StoreDb db, CancellationToken cancellationToken)
     {

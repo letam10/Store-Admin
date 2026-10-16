@@ -112,9 +112,9 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
     [HttpGet("auth/status")]
     public IActionResult AuthStatus()
     {
-        var googleId = configuration["GOOGLE_CLIENT_ID"] ?? Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID") ?? "";
-        var googleSecret = configuration["GOOGLE_CLIENT_SECRET"] ?? Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET") ?? "";
-        var smtpHost = configuration["SMTP_HOST"] ?? Environment.GetEnvironmentVariable("SMTP_HOST") ?? "";
+        var googleId = GetConfig("GOOGLE_CLIENT_ID");
+        var googleSecret = GetConfig("GOOGLE_CLIENT_SECRET");
+        var smtpHost = GetConfig("SMTP_HOST");
         return Ok(new { google = new { configured = !string.IsNullOrWhiteSpace(googleId) && !string.IsNullOrWhiteSpace(googleSecret) }, mailer = new { configured = !string.IsNullOrWhiteSpace(smtpHost), host = smtpHost } });
     }
 
@@ -150,9 +150,9 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
     [HttpGet("google/start")]
     public IActionResult GoogleStart([FromQuery] string? next)
     {
-        var clientId = configuration["GOOGLE_CLIENT_ID"] ?? Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID") ?? "";
-        var redirect = configuration["GOOGLE_REDIRECT_URI"] ?? Environment.GetEnvironmentVariable("GOOGLE_REDIRECT_URI") ?? "";
-        var secret = configuration["GOOGLE_CLIENT_SECRET"] ?? Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET") ?? "";
+        var clientId = GetConfig("GOOGLE_CLIENT_ID");
+        var redirect = GetConfig("GOOGLE_REDIRECT_URI");
+        var secret = GetConfig("GOOGLE_CLIENT_SECRET");
         if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(secret)) return StatusCode(501, new { error = "GOOGLE_NOT_CONFIGURED" });
         var safeNext = (!string.IsNullOrEmpty(next) && next.StartsWith("/") && !next.StartsWith("//") && next.Length <= 200) ? next : "/";
         var state = Tokens.RandomToken(16);
@@ -164,16 +164,16 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
     [HttpGet("google/callback")]
     public async Task<IActionResult> GoogleCallback([FromQuery] string? code, [FromQuery] string? state)
     {
-        var frontend = (configuration["FRONTEND_URL"] ?? Environment.GetEnvironmentVariable("FRONTEND_URL") ?? "http://127.0.0.1:5173").TrimEnd('/');
+        var frontend = GetConfig("FRONTEND_URL", "http://127.0.0.1:5173").TrimEnd('/');
         IActionResult Fail(string msg) => Redirect(frontend + "/login?googleError=" + Uri.EscapeDataString(msg));
         if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(state)) return Fail("GOOGLE_CANCELLED");
         var nextUrl = db.ConsumeOAuthState(state);
         if (nextUrl is null) return Fail("GOOGLE_STATE_EXPIRED");
         try
         {
-            var clientId = configuration["GOOGLE_CLIENT_ID"] ?? Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID") ?? "";
-            var secret = configuration["GOOGLE_CLIENT_SECRET"] ?? Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET") ?? "";
-            var redirect = configuration["GOOGLE_REDIRECT_URI"] ?? Environment.GetEnvironmentVariable("GOOGLE_REDIRECT_URI") ?? "";
+            var clientId = GetConfig("GOOGLE_CLIENT_ID");
+            var secret = GetConfig("GOOGLE_CLIENT_SECRET");
+            var redirect = GetConfig("GOOGLE_REDIRECT_URI");
             using var http = new HttpClient();
             var tokenRes = await http.PostAsync("https://oauth2.googleapis.com/token", new FormUrlEncodedContent(new Dictionary<string, string> { ["code"] = code, ["client_id"] = clientId, ["client_secret"] = secret, ["redirect_uri"] = redirect, ["grant_type"] = "authorization_code" }));
             var tokenJson = await tokenRes.Content.ReadAsStringAsync();
@@ -240,7 +240,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
             twoFactorEnabled = full?.TotpEnabled == 1,
             googleLinked = full is not null && !string.IsNullOrEmpty(full.Value.GoogleSub),
             backupCodesLeft = db.BackupCodesLeft(customer.Id),
-            google = new { configured = !string.IsNullOrWhiteSpace(configuration["GOOGLE_CLIENT_ID"] ?? Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID") ?? "") }
+            google = new { configured = !string.IsNullOrWhiteSpace(GetConfig("GOOGLE_CLIENT_ID")) }
         });
     }
 
@@ -896,4 +896,10 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         return 60000;
     }
 
+    private string GetConfig(string key, string fallback = "")
+    {
+        var val = configuration[key];
+        if (string.IsNullOrWhiteSpace(val)) val = Environment.GetEnvironmentVariable(key);
+        return string.IsNullOrWhiteSpace(val) ? fallback : val.Trim();
+    }
 }

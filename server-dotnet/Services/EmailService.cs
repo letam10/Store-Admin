@@ -49,8 +49,14 @@ public sealed class EmailService
         catch { }
     }
 
-    private string FrontendUrl =>
-        (_configuration["FRONTEND_URL"] ?? Environment.GetEnvironmentVariable("FRONTEND_URL") ?? "http://127.0.0.1:5173").TrimEnd('/');
+    private string GetConfig(string key, string fallback = "")
+    {
+        var val = _configuration[key];
+        if (string.IsNullOrWhiteSpace(val)) val = Environment.GetEnvironmentVariable(key);
+        return string.IsNullOrWhiteSpace(val) ? fallback : val.Trim();
+    }
+
+    private string FrontendUrl => GetConfig("FRONTEND_URL", "http://127.0.0.1:5173").TrimEnd('/');
 
     public async Task<bool> SendWelcomeEmailAsync(string toEmail, string username)
     {
@@ -94,11 +100,11 @@ public sealed class EmailService
             Console.WriteLine($"[Store Mailer] Không thể lưu file HTML log: {ex.Message}");
         }
 
-        var smtpHost = (_configuration["SMTP_HOST"] ?? Environment.GetEnvironmentVariable("SMTP_HOST") ?? "").Trim();
-        var smtpPortStr = (_configuration["SMTP_PORT"] ?? Environment.GetEnvironmentVariable("SMTP_PORT") ?? "587").Trim();
-        var smtpUser = (_configuration["SMTP_USER"] ?? Environment.GetEnvironmentVariable("SMTP_USER") ?? "").Trim();
-        var smtpPass = (_configuration["SMTP_PASS"] ?? Environment.GetEnvironmentVariable("SMTP_PASS") ?? "").Trim();
-        var smtpFrom = (_configuration["SMTP_FROM"] ?? Environment.GetEnvironmentVariable("SMTP_FROM") ?? "Store <no-reply@store.local>").Trim();
+        var smtpHost = GetConfig("SMTP_HOST");
+        var smtpPortStr = GetConfig("SMTP_PORT", "587");
+        var smtpUser = GetConfig("SMTP_USER");
+        var smtpPass = GetConfig("SMTP_PASS");
+        var smtpFrom = GetConfig("SMTP_FROM", "Store <no-reply@store.local>");
 
         if (string.IsNullOrWhiteSpace(smtpHost))
         {
