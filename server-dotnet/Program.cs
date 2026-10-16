@@ -128,11 +128,23 @@ builder.Services.AddSwaggerGen(options => options.SwaggerDoc("v1", new OpenApiIn
 
 builder.Services.AddSingleton<StoreDb>();
 builder.Services.AddSingleton<StoreApi.Services.EmailService>();
+builder.Services.AddSingleton<StoreApi.Services.AiChatService>();
 
 builder.Services.AddHttpContextAccessor();
 
+var frontendUrl = (builder.Configuration["FRONTEND_URL"] ?? Environment.GetEnvironmentVariable("FRONTEND_URL") ?? "http://127.0.0.1:5173").TrimEnd('/');
+
 builder.Services.AddCors(options => options.AddPolicy("local-frontends", policy => policy
-    .WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174", "http://localhost:3000", "http://127.0.0.1:3000")
+    .SetIsOriginAllowed(origin =>
+    {
+        if (string.IsNullOrWhiteSpace(origin)) return false;
+        try
+        {
+            var uri = new Uri(origin);
+            return uri.Host is "localhost" or "127.0.0.1" || origin.Equals(frontendUrl, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    })
     .AllowAnyHeader()
     .AllowAnyMethod()
     .AllowCredentials()));

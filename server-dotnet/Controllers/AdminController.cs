@@ -12,13 +12,14 @@ using Microsoft.AspNetCore.Mvc;
 using StoreApi.Data;
 using StoreApi.Models;
 using StoreApi.Security;
+using StoreApi.Services;
 
 namespace StoreApi.Controllers;
 
 [ApiController]
 [Route("api/admin")]
 // Vai trò kiểu AdminController: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
-public sealed class AdminController(StoreDb db) : ControllerBase
+public sealed class AdminController(StoreDb db, AiChatService aiChatService) : ControllerBase
 {
     private const string Cookie = "store_admin_session";
 
@@ -353,6 +354,84 @@ public sealed class AdminController(StoreDb db) : ControllerBase
             await Response.WriteAsync(": keepalive\n\n", cancellationToken);
             await Response.Body.FlushAsync(cancellationToken);
         }
+    }
+
+    [HttpPost("chat")]
+    public async Task Chat(ChatStreamRequest request, CancellationToken cancellationToken)
+    {
+        if (RequireAdmin() is null)
+        {
+            Response.StatusCode = StatusCodes.Status401Unauthorized;
+            Response.ContentType = "application/json";
+            await Response.WriteAsync("{\"error\":\"UNAUTHENTICATED\"}", cancellationToken);
+            return;
+        }
+
+        if (!CsrfValid())
+        {
+            Response.StatusCode = StatusCodes.Status403Forbidden;
+            Response.ContentType = "application/json";
+            await Response.WriteAsync("{\"error\":\"CSRF_INVALID\"}", cancellationToken);
+            return;
+        }
+
+        var message = (request.Message ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            Response.StatusCode = StatusCodes.Status400BadRequest;
+            Response.ContentType = "application/json";
+            await Response.WriteAsync("{\"error\":\"EMPTY_MESSAGE\"}", cancellationToken);
+            return;
+        }
+
+        var convId = string.IsNullOrWhiteSpace(request.ConversationId)
+            ? "admin-conv-" + Guid.NewGuid().ToString("N")[..8]
+            : request.ConversationId.Trim();
+
+        Response.ContentType = "application/x-ndjson; charset=utf-8";
+        Response.Headers.CacheControl = "no-cache";
+        Response.Headers.Append("X-Accel-Buffering", "no");
+
+        // 1. conversation event
+        await WriteNdjsonAsync(Response, new { type = "conversation", conversationId = convId, compactStatus = "not_needed" }, cancellationToken);
+
+        // 2. status event
+        await WriteNdjsonAsync(Response, new { type = "status", label = "Đang phân tích dữ liệu..." }, cancellationToken);
+
+        var chatRes = await aiChatService.ProcessAdminChatAsync(message, db, cancellationToken);
+
+        // 3. sources event
+        if (chatRes.Sources.Count > 0)
+        {
+            await WriteNdjsonAsync(Response, new { type = "sources", sources = chatRes.Sources }, cancellationToken);
+        }
+
+        // 4. report event if available
+        if (chatRes.Report != null)
+        {
+            await WriteNdjsonAsync(Response, new { type = "report", report = chatRes.Report }, cancellationToken);
+        }
+
+        // 5. verified event
+        await WriteNdjsonAsync(Response, new { type = "verified", verified = chatRes.Verified }, cancellationToken);
+
+        // 6. delta events
+        foreach (var chunk in chatRes.Chunks)
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+            await WriteNdjsonAsync(Response, new { type = "delta", content = chunk }, cancellationToken);
+            await Task.Delay(25, cancellationToken);
+        }
+
+        // 7. done event
+        await WriteNdjsonAsync(Response, new { type = "done", conversationId = convId, compactStatus = "not_needed" }, cancellationToken);
+    }
+
+    private static async Task WriteNdjsonAsync(HttpResponse response, object data, CancellationToken ct)
+    {
+        var json = JsonSerializer.Serialize(data);
+        await response.WriteAsync(json + "\n", ct);
+        await response.Body.FlushAsync(ct);
     }
 
     private static string RenderReceiptHtml(object order)

@@ -93,3 +93,5 @@ public sealed record ProductReviewRequest(int Rating, string? Comment);
 
 public sealed record PaymentReportRequest(string? Reference);
 
+public sealed record ChatStreamRequest(string? Message, string? ConversationId, string? RequestId);
+
