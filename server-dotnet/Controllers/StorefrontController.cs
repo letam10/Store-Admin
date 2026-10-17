@@ -36,6 +36,15 @@ public sealed class StorefrontController(StoreDb db) : ControllerBase
     [HttpPost("contact")]
     public IActionResult Contact(StorefrontContactRequest request)
     {
+        var raw = Request.Cookies[Cookie];
+        if (string.IsNullOrWhiteSpace(raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        var customer = db.FindCustomerBySession(Tokens.Sha256(raw));
+        if (customer is null) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        if (!Request.Headers.TryGetValue("x-csrf-token", out var csrf) || csrf != Tokens.Sha256("customer-csrf:" + raw))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        }
+
         var name = (request.Name ?? "").Trim();
         var email = (request.Email ?? "").Trim();
         var topic = (request.Topic ?? "Hỗ trợ mua hàng").Trim();
@@ -50,6 +59,7 @@ public sealed class StorefrontController(StoreDb db) : ControllerBase
         var data = new Dictionary<string, object?>
         {
             ["customer"] = name,
+            ["customerId"] = customer.Value.Id,
             ["topic"] = topic,
             ["email"] = email,
             ["message"] = message,
