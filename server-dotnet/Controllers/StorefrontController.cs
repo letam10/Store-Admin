@@ -27,7 +27,7 @@ public sealed class StorefrontController(StoreDb db) : ControllerBase
 
     [HttpGet("appearance")]
     // Chức năng Appearance: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.
-    public IActionResult Appearance() => Ok(new { appearance = db.Appearance() });
+    public IActionResult Appearance() => Ok(new { appearance = db.Appearance(), theme = db.Theme() });
 
     [HttpPost("products/{id}/view")]
     // Chức năng ViewProduct: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.

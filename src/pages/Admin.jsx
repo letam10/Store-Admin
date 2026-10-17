@@ -14,8 +14,10 @@ import { mapServerMessages } from '../components/ui/customerSupportState'
 import AdminModule from './AdminModules'
 import { adminModules } from './adminModuleData'
 import { normalizeSearch } from '../storefront/state'
+import { DEFAULT_THEME, THEME_MODES, normalizeTheme, themeVariables } from '../../shared/theme.js'
 import './Admin.css'
 import './AdminPolish.css'
+import './AdminTheme.css'
 
 const moduleGroups = [
   { title: 'Tổng quan', ids: ['dashboard', 'statistics', 'ai-local'] },
@@ -46,7 +48,8 @@ function formatMoney(value) {
 // Chức năng Admin: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export default function Admin() {
   const today = useMemo(() => businessToday(), [])
-  const [theme, setTheme] = useState(() => localStorage.getItem('store_admin_theme') || 'light')
+  const [theme, setTheme] = useState(() => THEME_MODES.includes(localStorage.getItem('store_admin_theme')) ? localStorage.getItem('store_admin_theme') : 'light')
+  const [themeConfig, setThemeConfig] = useState(() => normalizeTheme(DEFAULT_THEME))
   const [language, setLanguage] = useState(() => localStorage.getItem('store_admin_language') || 'vi')
   const [session, setSession] = useState(null)
   const [credentials, setCredentials] = useState({ username: '', password: '' })
@@ -77,8 +80,9 @@ export default function Admin() {
 
   useEffect(() => {
     document.documentElement.dataset.adminTheme = theme === 'dark' ? 'dark' : 'light'
+    Object.entries(themeVariables(themeConfig, theme)).forEach(([name, value]) => document.documentElement.style.setProperty(name, value))
     localStorage.setItem('store_admin_theme', theme === 'dark' ? 'dark' : 'light')
-  }, [theme])
+  }, [theme, themeConfig])
 
   useEffect(() => {
     document.documentElement.lang = language === 'en' ? 'en' : 'vi'
@@ -158,6 +162,14 @@ export default function Admin() {
         if (epoch !== loadEpochRef.current || settingsEpoch !== settingsEpochRef.current) return
         setSettings(payload); setContextSize(payload.contextSize)
       })
+
+    apiJson('/api/admin/appearance')
+      .then((payload) => {
+        const nextTheme = normalizeTheme(payload.theme || payload.appearance?.theme)
+        setThemeConfig(nextTheme)
+        if (!localStorage.getItem('store_admin_theme')) setTheme(nextTheme.defaultMode)
+      })
+      .catch(() => {})
       .catch((error) => {
         if (epoch !== loadEpochRef.current || settingsEpoch !== settingsEpochRef.current) return
         // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.

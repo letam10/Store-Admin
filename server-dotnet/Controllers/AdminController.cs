@@ -115,15 +115,37 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
     }
 
     [HttpGet("appearance")]
-    public IActionResult Appearance() => RequireAdmin() is null ? Unauthorized(new { error = "UNAUTHENTICATED" }) : Ok(new { appearance = db.Appearance() });
+    public IActionResult Appearance() => RequireAdmin() is null ? Unauthorized(new { error = "UNAUTHENTICATED" }) : Ok(new { appearance = db.Appearance(), theme = db.Theme() });
 
     [HttpPut("appearance")]
-    public IActionResult UpdateAppearance([FromBody] Dictionary<string, string> request)
+    public IActionResult UpdateAppearance([FromBody] JsonElement request)
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        db.SaveAppearance(request);
-        return Ok(new { appearance = db.Appearance() });
+        var source = request;
+        var wrappedAppearance = Property(source, "appearance");
+        if (wrappedAppearance.ValueKind == JsonValueKind.Object) source = wrappedAppearance;
+
+        var legacy = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        JsonElement? theme = null;
+        var hasThemeShape = false;
+        if (source.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in source.EnumerateObject())
+            {
+                if (property.Name.Equals("theme", StringComparison.OrdinalIgnoreCase))
+                {
+                    theme = property.Value.Clone();
+                    continue;
+                }
+                if (property.Name is "schemaVersion" or "defaultMode" or "presetId" or "light" or "dark") hasThemeShape = true;
+                if (property.Value.ValueKind == JsonValueKind.String) legacy[property.Name] = property.Value.GetString() ?? "";
+            }
+            if (!theme.HasValue && hasThemeShape) theme = source.Clone();
+        }
+
+        db.SaveAppearance(legacy, theme);
+        return Ok(new { appearance = db.Appearance(), theme = db.Theme() });
     }
 
     [HttpGet("records")]
@@ -488,6 +510,16 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
     private (long Id, string Username)? RequireAdmin()
     {
         var raw = Request.Cookies[Cookie]; return string.IsNullOrWhiteSpace(raw) ? null : db.FindAdminBySession(Tokens.Sha256(raw));
+    }
+
+    private static JsonElement Property(JsonElement source, string name)
+    {
+        if (source.ValueKind != JsonValueKind.Object) return default;
+        foreach (var property in source.EnumerateObject())
+        {
+            if (property.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) return property.Value;
+        }
+        return default;
     }
 
     private bool CsrfValid()

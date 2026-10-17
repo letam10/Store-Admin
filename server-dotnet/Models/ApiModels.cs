@@ -95,3 +95,14 @@ public sealed record PaymentReportRequest(string? Reference);
 
 public sealed record ChatStreamRequest(string? Message, string? ConversationId, string? RequestId);
 
+public sealed record ThemeColors(
+    string Page, string Surface, string SurfaceAlt, string Text, string Muted, string Border,
+    string Accent, string AccentStrong, string AccentSoft, string Control, string ControlActive,
+    string Danger, string Success);
+
+public sealed record ThemeRadius(int Card, int Control, int Panel);
+
+public sealed record ThemeVariant(ThemeColors Colors, ThemeRadius Radius, int ShadowStrength);
+
+public sealed record StoreTheme(int SchemaVersion, string DefaultMode, string PresetId, ThemeVariant Light, ThemeVariant Dark);
+

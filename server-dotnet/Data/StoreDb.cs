@@ -3,6 +3,7 @@
  * Mục đích: Lớp truy cập Microsoft SQL Server bằng Microsoft.Data.SqlClient cho API C#.
  */
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using StoreApi.Models;
 using StoreApi.Security;
@@ -494,7 +495,113 @@ public sealed class StoreDb
         ["contactHours"] = "08:00 - 21:00 mỗi ngày"
     };
 
-    public IReadOnlyDictionary<string, string> Appearance()
+    private static readonly JsonSerializerOptions ThemeJsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly Regex HexColor = new("^#[0-9a-f]{6}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static StoreTheme DefaultTheme() => new(
+        1,
+        "light",
+        "forest",
+        new ThemeVariant(
+            new ThemeColors("#f5f8f4", "#ffffff", "#edf4ed", "#183227", "#617268", "#d6e3d8", "#4f8b67", "#2f6949", "#d8eadc", "#ffffff", "#eaf4eb", "#b33f3f", "#3d8a59"),
+            new ThemeRadius(18, 10, 24),
+            14),
+        new ThemeVariant(
+            new ThemeColors("#0e1c15", "#14281f", "#1d3528", "#edf7ef", "#a8c4af", "#355943", "#76b98a", "#9bd3a8", "#254b31", "#193127", "#28543a", "#ee8b83", "#75c995"),
+            new ThemeRadius(18, 10, 24),
+            32));
+
+    private static JsonElement Property(JsonElement source, string name)
+    {
+        if (source.ValueKind != JsonValueKind.Object) return default;
+        foreach (var property in source.EnumerateObject())
+        {
+            if (property.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) return property.Value;
+        }
+        return default;
+    }
+
+    private static string ReadString(JsonElement source, string name, string fallback)
+    {
+        var value = Property(source, name);
+        return value.ValueKind == JsonValueKind.String ? value.GetString() ?? fallback : fallback;
+    }
+
+    private static int ReadInt(JsonElement source, string name, int fallback, int minimum, int maximum)
+    {
+        var value = Property(source, name);
+        return value.ValueKind == JsonValueKind.Number
+            && value.TryGetInt32(out var parsed)
+            && parsed >= minimum
+            && parsed <= maximum
+            ? parsed
+            : fallback;
+    }
+
+    private static string ReadColor(JsonElement source, string name, string fallback)
+    {
+        var value = ReadString(source, name, fallback);
+        return HexColor.IsMatch(value) ? value.ToLowerInvariant() : fallback;
+    }
+
+    private static ThemeColors NormalizeColors(JsonElement source, ThemeColors fallback) => new(
+        ReadColor(source, "page", fallback.Page),
+        ReadColor(source, "surface", fallback.Surface),
+        ReadColor(source, "surfaceAlt", fallback.SurfaceAlt),
+        ReadColor(source, "text", fallback.Text),
+        ReadColor(source, "muted", fallback.Muted),
+        ReadColor(source, "border", fallback.Border),
+        ReadColor(source, "accent", fallback.Accent),
+        ReadColor(source, "accentStrong", fallback.AccentStrong),
+        ReadColor(source, "accentSoft", fallback.AccentSoft),
+        ReadColor(source, "control", fallback.Control),
+        ReadColor(source, "controlActive", fallback.ControlActive),
+        ReadColor(source, "danger", fallback.Danger),
+        ReadColor(source, "success", fallback.Success));
+
+    private static ThemeVariant NormalizeVariant(JsonElement source, ThemeVariant fallback)
+    {
+        var colors = NormalizeColors(Property(source, "colors"), fallback.Colors);
+        var radius = Property(source, "radius");
+        return new ThemeVariant(
+            colors,
+            new ThemeRadius(
+                ReadInt(radius, "card", fallback.Radius.Card, 0, 24),
+                ReadInt(radius, "control", fallback.Radius.Control, 0, 24),
+                ReadInt(radius, "panel", fallback.Radius.Panel, 0, 24)),
+            ReadInt(source, "shadowStrength", fallback.ShadowStrength, 0, 100));
+    }
+
+    private static StoreTheme NormalizeThemeJson(JsonElement source)
+    {
+        var fallback = DefaultTheme();
+        var mode = ReadString(source, "defaultMode", fallback.DefaultMode).ToLowerInvariant();
+        var preset = ReadString(source, "presetId", fallback.PresetId).ToLowerInvariant();
+        var presetId = preset is "forest" or "terracotta" or "olive" ? preset : fallback.PresetId;
+        return new StoreTheme(
+            1,
+            mode is "light" or "dark" ? mode : fallback.DefaultMode,
+            presetId,
+            NormalizeVariant(Property(source, "light"), fallback.Light),
+            NormalizeVariant(Property(source, "dark"), fallback.Dark));
+    }
+
+    public StoreTheme Theme()
+    {
+        var raw = GetSetting("appearance.theme");
+        if (string.IsNullOrWhiteSpace(raw)) return DefaultTheme();
+        try
+        {
+            using var document = JsonDocument.Parse(raw);
+            return NormalizeThemeJson(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return DefaultTheme();
+        }
+    }
+
+    private IReadOnlyDictionary<string, string> LegacyAppearance()
     {
         var result = new Dictionary<string, string>(DefaultAppearance, StringComparer.OrdinalIgnoreCase);
         using var db = Open();
@@ -519,18 +626,29 @@ public sealed class StoreDb
             }
             else if (k.StartsWith("appearance.", StringComparison.OrdinalIgnoreCase))
             {
-                result[k[11..]] = v;
+                var key = k[11..];
+                if (!key.Equals("theme", StringComparison.OrdinalIgnoreCase)) result[key] = v;
             }
         }
         return result;
     }
 
-    public void SaveAppearance(IReadOnlyDictionary<string, string> dict)
+    public IReadOnlyDictionary<string, object?> Appearance()
     {
-        var merged = new Dictionary<string, string>(Appearance(), StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in LegacyAppearance()) result[key] = value;
+        result["theme"] = Theme();
+        return result;
+    }
+
+    public void SaveAppearance(IReadOnlyDictionary<string, string> dict, JsonElement? theme = null)
+    {
+        var merged = new Dictionary<string, string>(LegacyAppearance(), StringComparer.OrdinalIgnoreCase);
         foreach (var (k, v) in dict) merged[k] = v ?? "";
         var json = JsonSerializer.Serialize(merged);
         SetSetting("storefront_appearance", json);
+        var normalizedTheme = theme.HasValue ? NormalizeThemeJson(theme.Value) : Theme();
+        SetSetting("appearance.theme", JsonSerializer.Serialize(normalizedTheme, ThemeJsonOptions));
         using var db = Open();
         foreach (var (k, v) in merged)
         {
