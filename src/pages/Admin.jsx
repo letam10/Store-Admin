@@ -15,6 +15,7 @@ import AdminModule from './AdminModules'
 import { adminModules } from './adminModuleData'
 import { normalizeSearch } from '../storefront/state'
 import { DEFAULT_THEME, THEME_MODES, normalizeTheme, themeVariables } from '../../shared/theme.js'
+import DropdownMenu from '../components/ui/DropdownMenu'
 import './Admin.css'
 import './AdminPolish.css'
 import './AdminTheme.css'
@@ -104,7 +105,7 @@ export default function Admin() {
   // Chức năng ThemeLanguageControls: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   function ThemeLanguageControls({ compact = false }) {
     return <div className={'admin-preferences' + (compact ? ' admin-preferences--compact' : '')}>
-      <label className="admin-language-control"><span className="sr-only">{copy.language}</span><select value={language} onChange={(event) => setLanguage(event.target.value)} aria-label={copy.language}><option value="vi">VI</option><option value="en">EN</option></select></label>
+      <label className="admin-language-control"><span className="sr-only">{copy.language}</span><DropdownMenu value={language} options={[['vi', 'VI'], ['en', 'EN']]} onChange={setLanguage} ariaLabel={copy.language} /></label>
       <button type="button" className="admin-theme-toggle" onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? copy.themeLight : copy.themeDark} title={theme === 'dark' ? copy.themeLight : copy.themeDark}>{theme === 'dark' ? '☀' : '☾'}<span>{theme === 'dark' ? 'Light' : 'Dark'}</span></button>
     </div>
   }
@@ -462,7 +463,7 @@ export default function Admin() {
             <div><small>Model</small><strong>{settings?.model || 'qwen3.5:4b'}</strong></div>
             <div><small>Thinking</small><strong>Bật · khóa tại backend</strong></div>
             <div><small>Rút gọn</small><strong>{compactStatus}</strong></div>
-            <div className="admin-context"><label>Context<select value={contextSize} onChange={(event) => setContextSize(Number(event.target.value))}>{(settings?.allowedContextSizes || [8192,16384,32768,65536]).map((size) => <option key={size} value={size}>{size === 65536 ? '64K · thử nghiệm' : (size / 1024) + 'K'}</option>)}</select></label><button type="button" onClick={saveContext}>Lưu</button></div>
+            <div className="admin-context"><label>Context<DropdownMenu value={contextSize} options={(settings?.allowedContextSizes || [8192, 16384, 32768, 65536]).map((size) => [size, size === 65536 ? '64K · thử nghiệm' : (size / 1024) + 'K'])} onChange={(value) => setContextSize(Number(value))} ariaLabel="Kích thước context" /></label><button type="button" onClick={saveContext}>Lưu</button></div>
           </section>
           <p className="admin-warning">64K chỉ là cấu hình thử nghiệm; chưa xác minh tải thực tế; tác vụ vừa/nặng phải chọn RTX 4060 trước khi chạy.</p>
           <div className="admin-grid">

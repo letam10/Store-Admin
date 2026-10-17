@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
 import { AdminOrders as OrderManager } from './AdminOrderWorkflow'
+import DropdownMenu from '../components/ui/DropdownMenu'
 import './AdminCommerce.css'
 
 const money = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' })
@@ -125,9 +126,9 @@ export function AdminVouchers({ csrfToken }) {
     {error && <p role="alert">{error}</p>}
     <div className="voucher-editor-head"><h3>{editing ? 'Sửa voucher ' + editing : 'Cấp voucher mới'}</h3><div><button type="button" disabled={busy} onClick={() => { setScope('shipping'); setType('percent'); setValue(50) }}>Giảm 50% ship</button><button type="button" disabled={busy} onClick={() => { setScope('shipping'); setType('free'); setValue(100) }}>Miễn phí ship</button></div></div>
     <form id="voucher-editor" className="admin-commerce-form" onSubmit={submit}>
-      <label>Khách hàng<select required disabled={Boolean(editing) || busy} value={customerId} onChange={event => setCustomerId(event.target.value)}><option value="">Chọn khách</option>{data?.customers.map(item => <option key={item.id} value={item.id}>{item.username}</option>)}</select></label>
-      <label>Áp dụng cho<select disabled={busy} value={scope} onChange={event => { setScope(event.target.value); if (type === 'free') { setType('percent'); setValue(20) } }}><option value="goods">Hàng hóa</option><option value="shipping">Phí vận chuyển</option></select></label>
-      <label>Loại ưu đãi<select disabled={busy} value={type} onChange={event => { setType(event.target.value); setValue(event.target.value === 'amount' ? 30000 : event.target.value === 'free' ? 100 : 50) }}><option value="amount">Giảm số tiền</option><option value="percent">Giảm phần trăm</option>{scope === 'shipping' && <option value="free">Miễn phí ship</option>}</select></label>
+      <label>Khách hàng<DropdownMenu value={customerId} options={[['', 'Chọn khách'], ...(data?.customers || []).map(item => [String(item.id), item.username])]} onChange={setCustomerId} ariaLabel="Khách hàng" disabled={Boolean(editing) || busy} /></label>
+      <label>Áp dụng cho<DropdownMenu value={scope} options={[['goods', 'Hàng hóa'], ['shipping', 'Phí vận chuyển']]} onChange={value => { setScope(value); if (type === 'free') { setType('percent'); setValue(20) } }} ariaLabel="Áp dụng cho" disabled={busy} /></label>
+      <label>Loại ưu đãi<DropdownMenu value={type} options={[['amount', 'Giảm số tiền'], ['percent', 'Giảm phần trăm'], ...(scope === 'shipping' ? [['free', 'Miễn phí ship']] : [])]} onChange={value => { setType(value); setValue(value === 'amount' ? 30000 : value === 'free' ? 100 : 50) }} ariaLabel="Loại ưu đãi" disabled={busy} /></label>
       {type !== 'free' && <label>Giá trị {type === 'percent' ? '(%)' : '(₫)'}<input disabled={busy} type="number" min="1" max={type === 'amount' ? '10000000' : '100'} step="1" value={value} onChange={event => setValue(event.target.value)} required /></label>}
       <label>Hạn sử dụng<input disabled={busy} type="date" value={expiresOn} min={today} onChange={event => setExpiresOn(event.target.value)} required /></label>
       <div className="voucher-editor-actions"><button type="submit" disabled={busy || !customerId}>{busy ? 'Đang lưu…' : editing ? 'Lưu thay đổi' : 'Cấp voucher'}</button>{editing && <button type="button" disabled={busy} onClick={() => { setEditing(null); setCustomerId('') }}>Hủy sửa</button>}</div>

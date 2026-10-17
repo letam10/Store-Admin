@@ -47,6 +47,29 @@ public sealed class AiChatService
 
     private string OllamaModel => GetConfig("OLLAMA_MODEL", "qwen3.5:4b");
 
+    private static (string Context, IReadOnlyList<object> Sources) BuildVerifiedAppearanceContext(StoreDb db)
+    {
+        IReadOnlyDictionary<string, object?> appearance;
+        try
+        {
+            appearance = db.Appearance();
+        }
+        catch
+        {
+            appearance = new Dictionary<string, object?>();
+        }
+
+        var keys = new[] { "brandName", "brandTagline", "footerInfo", "footerSupport", "contactAddress", "contactPhone", "contactEmail", "contactHours" };
+        var lines = keys
+            .Where(key => appearance.TryGetValue(key, out var value) && value is not null && !string.IsNullOrWhiteSpace(Convert.ToString(value)))
+            .Select(key => $"{key}: {appearance[key]}")
+            .ToArray();
+        var context = lines.Length == 0
+            ? "Không có nội dung appearance đã xác minh phù hợp."
+            : string.Join("\n", lines);
+        return (context, new object[] { new { id = "appearance", label = "Nội dung storefront đã xác minh" } });
+    }
+
     public async Task<AiProviderStatus> GetProviderStatusAsync(CancellationToken cancellationToken)
     {
         try
@@ -133,13 +156,16 @@ public sealed class AiChatService
                 true);
         }
 
-        var ollamaResult = await TryOllamaGenerateAsync(message, "Bạn là trợ lý AI quản trị kinh doanh cho hệ thống siêu thị Store Mini Mart. Hãy trả lời ngắn gọn, chuyên nghiệp, bằng tiếng Việt.", cancellationToken);
+        var retrieval = BuildCustomerRetrieval(message, db);
+        var adminSystemPrompt = "Bạn là trợ lý AI quản trị kinh doanh cho Store. Chỉ dùng dữ liệu trong phần NGUỒN ĐÃ XÁC MINH. Không tự bịa giá, tồn kho, danh mục, chính sách, trạng thái đơn hoặc số liệu. Nếu nguồn không có câu trả lời, nói rõ chưa có dữ liệu được xác minh. Trả lời tiếng Việt ngắn gọn và kết thúc bằng mục Nguồn, nêu đúng mã nguồn đã dùng.";
+        var adminPrompt = $"Câu hỏi quản trị: {message}\n\nNGUỒN ĐÃ XÁC MINH:\n{retrieval.Context}";
+        var ollamaResult = await TryOllamaGenerateAsync(adminPrompt, adminSystemPrompt, cancellationToken);
         if (!string.IsNullOrWhiteSpace(ollamaResult))
         {
             return new AiChatResponse(
                 SplitIntoChunks(ollamaResult),
                 null,
-                new object[] { new { id = "ollama", label = $"AI Local ({OllamaModel})" } },
+                retrieval.Sources.Append(new { id = "ollama", label = $"AI Local ({OllamaModel})" }).ToArray(),
                 true);
         }
 
@@ -152,7 +178,7 @@ public sealed class AiChatService
         return new AiChatResponse(
             SplitIntoChunks(fallbackText),
             null,
-            new object[] { new { id = "assistant-local", label = "Hệ thống Quản trị Store" } },
+            retrieval.Sources.Append(new { id = "assistant-local", label = "Fallback dữ liệu Store" }).ToArray(),
             true);
     }
 
@@ -182,7 +208,7 @@ public sealed class AiChatService
             return MissingPolicyResponse(name, "voucher và khuyến mãi", retrieval.Sources);
         }
 
-        var systemPrompt = "Bạn là trợ lý hỗ trợ Store. Chỉ dùng dữ liệu trong phần NGUỒN ĐÃ XÁC MINH. Không tự bịa giá, tồn kho, chính sách, trạng thái đơn hoặc cam kết giao hàng. Nếu nguồn không có câu trả lời, nói rõ Store chưa cung cấp thông tin được xác minh. Trả lời tiếng Việt ngắn gọn và nêu mã nguồn sản phẩm khi có.";
+        var systemPrompt = "Bạn là trợ lý hỗ trợ Store. Chỉ dùng dữ liệu trong phần NGUỒN ĐÃ XÁC MINH. Không tự bịa giá, tồn kho, danh mục, chính sách, trạng thái đơn hoặc cam kết giao hàng. Nếu nguồn không có câu trả lời, nói rõ Store chưa cung cấp thông tin được xác minh. Trả lời tiếng Việt ngắn gọn và kết thúc bằng mục Nguồn, nêu đúng mã nguồn sản phẩm khi có.";
         var ollamaResult = await TryOllamaGenerateAsync($"Câu hỏi: {message}\n\nNGUỒN ĐÃ XÁC MINH:\n{retrieval.Context}", systemPrompt, cancellationToken);
         if (!string.IsNullOrWhiteSpace(ollamaResult))
         {
@@ -234,10 +260,20 @@ public sealed class AiChatService
             .Take(8)
             .Select(item => item.Product)
             .ToArray();
-        var context = matched.Length == 0
+        var appearance = BuildVerifiedAppearanceContext(db);
+        var categories = catalog
+            .GroupBy(product => product.Category, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => $"{group.Key}: {group.Count()}")
+            .ToArray();
+        var catalogContext = matched.Length == 0
             ? "Không có sản phẩm trong catalog khớp câu hỏi."
-            : string.Join("\n", matched.Select(product => $"[{product.Id}] {product.Name} | danh mục: {product.Category} | giá: {product.Price:N0} VND | tồn kho: {product.StockCount} | mô tả: {product.Description}"));
-        var sources = matched.Select(product => (object)new { id = "catalog-" + product.Id, label = $"Catalog sản phẩm {product.Id}" }).ToArray();
+            : string.Join("\n", matched.Select(product => $"[catalog-{product.Id}] {product.Name} | danh mục: {product.Category} | giá: {product.Price:N0} VND | tồn kho: {product.StockCount} | mô tả: {product.Description}"));
+        var context = $"[appearance]\n{appearance.Context}\n\n[catalog-summary]\nTổng số sản phẩm: {catalog.Count}. Danh mục: {string.Join(", ", categories)}.\n\n{catalogContext}";
+        var sources = appearance.Sources
+            .Concat(new object[] { new { id = "catalog-summary", label = "Catalog và danh mục đã xác minh" } })
+            .Concat(matched.Select(product => (object)new { id = "catalog-" + product.Id, label = $"Catalog sản phẩm {product.Id}" }))
+            .ToArray();
         return (context, sources, matched);
     }
 

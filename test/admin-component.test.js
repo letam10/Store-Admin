@@ -90,7 +90,9 @@ test('real Admin ignores late stats/settings from A after B logs in', async () =
     })
     assert.match(document.body.textContent, /bob/)
     assert.doesNotMatch(document.body.textContent, /SECRET-ALICE|999\.999/)
-    assert.equal(document.querySelector('.admin-context select').value, '8192')
+    const contextTrigger = document.querySelector('.admin-context [role="combobox"]')
+    assert.ok(contextTrigger)
+    assert.match(contextTrigger.textContent, /8K/)
   })
 })
 
