@@ -17,7 +17,19 @@ public sealed class SupportController(StoreDb db, AiChatService aiChatService) :
     private const string CustomerCookie = "store_customer_session";
 
     [HttpGet("status")]
-    public IActionResult Status() => Ok(new { ok = true, service = "support", model = "local-assistant" });
+    public async Task<IActionResult> Status(CancellationToken cancellationToken)
+    {
+        var status = await aiChatService.GetProviderStatusAsync(cancellationToken);
+        return Ok(new { ok = true, service = "support", provider = status.Provider, model = status.Model, reachable = status.Reachable, modelAvailable = status.ModelAvailable });
+    }
+
+    [HttpGet("conversations/{conversationId}")]
+    public IActionResult Conversation(string conversationId)
+    {
+        var id = (conversationId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(id) || id.Length > 255) return BadRequest(new { error = "INVALID_CONVERSATION" });
+        return Ok(new { conversationId = id, messages = Array.Empty<object>() });
+    }
 
     [HttpPost("chat")]
     public async Task Chat(ChatStreamRequest request, CancellationToken cancellationToken)

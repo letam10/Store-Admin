@@ -1,4 +1,6 @@
 # Store Admin
+
+Backend nghiệm thu chính là ASP.NET Core tại server-dotnet, cổng 5000. Backend Node cũ chỉ giữ để rollback và không làm nguồn catalog hoặc AI Local chính.
 Ứng dụng quản trị riêng với React; backend Express/SQLite và AI local nằm trong dự án này. Không phụ thuộc đường dẫn sang Store.
 
 ## Chạy

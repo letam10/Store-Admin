@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using StoreApi.Data;
+using StoreApi.Models;
 
 namespace StoreApi.Services;
 
@@ -17,10 +18,17 @@ public sealed record AiChatResponse(
     IReadOnlyList<object> Sources,
     bool Verified);
 
+public sealed record AiProviderStatus(
+    string Provider,
+    string Model,
+    bool Reachable,
+    bool ModelAvailable);
+
 public sealed class AiChatService
 {
     private readonly IConfiguration _configuration;
     private readonly HttpClient _httpClient;
+    private readonly SemaphoreSlim _ollamaGate = new(1, 1);
 
     public AiChatService(IConfiguration configuration)
     {
@@ -38,6 +46,26 @@ public sealed class AiChatService
     private string OllamaHost => GetConfig("OLLAMA_HOST", "http://127.0.0.1:11434").TrimEnd('/');
 
     private string OllamaModel => GetConfig("OLLAMA_MODEL", "qwen3.5:4b");
+
+    public async Task<AiProviderStatus> GetProviderStatusAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(2));
+            using var response = await _httpClient.GetAsync($"{OllamaHost}/api/tags", cts.Token);
+            if (!response.IsSuccessStatusCode) return new("ollama", OllamaModel, false, false);
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cts.Token));
+            var available = document.RootElement.TryGetProperty("models", out var models)
+                && models.ValueKind == JsonValueKind.Array
+                && models.EnumerateArray().Any(item => string.Equals(item.TryGetProperty("name", out var name) ? name.GetString() : null, OllamaModel, StringComparison.OrdinalIgnoreCase));
+            return new("ollama", OllamaModel, true, available);
+        }
+        catch
+        {
+            return new("ollama", OllamaModel, false, false);
+        }
+    }
 
     public async Task<AiChatResponse> ProcessAdminChatAsync(string message, StoreDb db, CancellationToken cancellationToken)
     {
@@ -132,70 +160,90 @@ public sealed class AiChatService
     {
         var lower = message.ToLowerInvariant();
         var name = string.IsNullOrWhiteSpace(customerName) ? "quý khách" : customerName.Trim();
+        var retrieval = BuildCustomerRetrieval(message, db);
 
         if (lower.Contains("ship") || lower.Contains("vận chuyển") || lower.Contains("giao hàng") || lower.Contains("phí"))
         {
-            var text = $"Chào {name}! Chính sách vận chuyển của Store Mini Mart như sau:\n\n" +
-                       "• **Nội thành TP.HCM & Bình Dương:** 30.000 ₫ (Giao trong 24h - 48h)\n" +
-                       "• **Tỉnh lân cận / Toàn quốc:** 60.000 ₫ (Giao trong 2 - 4 ngày)\n" +
-                       "• **Nhận tại quầy:** Hoàn toàn **Miễn phí**\n" +
-                       "• **Ưu đãi FreeShip:** Đổi voucher tại Vòng quay may mắn hoặc áp dụng voucher thành viên để được giảm 50% đến 100% phí ship!";
-            return new AiChatResponse(SplitIntoChunks(text), null, new object[] { new { id = "shipping-policy", label = "Chính sách vận chuyển Store" } }, true);
+            return MissingPolicyResponse(name, "vận chuyển", retrieval.Sources);
         }
 
         if (lower.Contains("thanh toán") || lower.Contains("chuyển khoản") || lower.Contains("vietqr") || lower.Contains("ngân hàng"))
         {
-            var text = $"Dạ {name}, Store hỗ trợ các hình thức thanh toán tiện lợi:\n\n" +
-                       "1. **Chuyển khoản VietQR tự động:** Khi đặt hàng, mã QR sẽ hiển thị kèm số tiền và nội dung chính xác. Sau khi chuyển khoản, hệ thống tự động xác nhận trong vòng 2 phút.\n" +
-                       "2. **Thanh toán khi nhận hàng (COD):** Áp dụng cho các đơn giao tận nơi.\n" +
-                       "Mọi giao dịch đều được bảo mật và lưu hóa đơn điện tử trong trang Cá nhân.";
-            return new AiChatResponse(SplitIntoChunks(text), null, new object[] { new { id = "payment-policy", label = "Chính sách thanh toán VietQR" } }, true);
+            return MissingPolicyResponse(name, "thanh toán", retrieval.Sources);
         }
 
         if (lower.Contains("đổi trả") || lower.Contains("bảo hành") || lower.Contains("hoàn tiền") || lower.Contains("hủy đơn"))
         {
-            var text = $"Dạ {name}, Store có chính sách bảo hành và đổi trả minh bạch:\n\n" +
-                       "• Đổi trả trong vòng **7 ngày** nếu sản phẩm bị lỗi do nhà sản xuất hoặc giao sai mẫu.\n" +
-                       "• Sản phẩm cần giữ nguyên hộp, tem mác và hóa đơn mua hàng.\n" +
-                       "• Để yêu cầu hỗ trợ sau bán hàng hoặc hoàn tiền, quý khách có thể gửi form tại trang Liên hệ hoặc chat trực tiếp với đội ngũ hỗ trợ.";
-            return new AiChatResponse(SplitIntoChunks(text), null, new object[] { new { id = "return-policy", label = "Chính sách đổi trả 7 ngày" } }, true);
+            return MissingPolicyResponse(name, "đổi trả và bảo hành", retrieval.Sources);
         }
 
         if (lower.Contains("voucher") || lower.Contains("vòng quay") || lower.Contains("khuyến mãi") || lower.Contains("giảm giá") || lower.Contains("xu") || lower.Contains("điểm"))
         {
-            var text = $"Dạ {name}! Hiện tại Store đang có các chương trình ưu đãi rất hấp dẫn:\n\n" +
-                       "🎡 **Vòng quay may mắn:** Nhận lượt quay mỗi khi tích điểm đơn hàng, cơ hội trúng voucher 100.000 ₫ hoặc FreeShip 100%!\n" +
-                       "🏅 **Hạng thành viên:** Tích điểm để nâng hạng Đồng ➔ Bạc ➔ Vàng ➔ Kim Cương và nhận chiết khấu trực tiếp trên mỗi đơn hàng.\n" +
-                       "Quý khách có thể vào mục **Ưu đãi & Đổi thưởng** để tham gia ngay!";
-            return new AiChatResponse(SplitIntoChunks(text), null, new object[] { new { id = "promo-policy", label = "Chương trình khuyến mãi Store" } }, true);
+            return MissingPolicyResponse(name, "voucher và khuyến mãi", retrieval.Sources);
         }
 
-        var ollamaResult = await TryOllamaGenerateAsync(message, "Bạn là nhân viên chăm sóc khách hàng thân thiện của siêu thị Store Mini Mart. Hãy tư vấn chu đáo, lịch sự, ngắn gọn bằng tiếng Việt.", cancellationToken);
+        var systemPrompt = "Bạn là trợ lý hỗ trợ Store. Chỉ dùng dữ liệu trong phần NGUỒN ĐÃ XÁC MINH. Không tự bịa giá, tồn kho, chính sách, trạng thái đơn hoặc cam kết giao hàng. Nếu nguồn không có câu trả lời, nói rõ Store chưa cung cấp thông tin được xác minh. Trả lời tiếng Việt ngắn gọn và nêu mã nguồn sản phẩm khi có.";
+        var ollamaResult = await TryOllamaGenerateAsync($"Câu hỏi: {message}\n\nNGUỒN ĐÃ XÁC MINH:\n{retrieval.Context}", systemPrompt, cancellationToken);
         if (!string.IsNullOrWhiteSpace(ollamaResult))
         {
             return new AiChatResponse(
                 SplitIntoChunks(ollamaResult),
                 null,
-                new object[] { new { id = "ollama", label = "Trợ lý ảo Store" } },
+                retrieval.Sources.Append(new { id = "ollama", label = $"Ollama {OllamaModel}" }).ToArray(),
                 true);
         }
 
-        var defaultText = $"Chào {name}! Em là Trợ lý ảo Store Mini Mart. Em có thể hỗ trợ quý khách về:\n\n" +
-                          "• Tìm kiếm thông tin sản phẩm và tư vấn mua hàng\n" +
-                          "• Biểu phí vận chuyển và thời gian giao nhận hàng\n" +
-                          "• Hướng dẫn thanh toán quét mã VietQR tự động\n" +
-                          "• Chính sách bảo hành, đổi trả và cách dùng voucher giảm giá\n\n" +
-                          "Quý khách đang quan tâm đến thông tin nào, hãy nhắn cho em nhé!";
+        var defaultText = retrieval.MatchedProducts.Count > 0
+            ? $"Chào {name}! Dữ liệu hiện có cho câu hỏi này:\n\n{retrieval.Context}\n\nStore chưa có thêm chính sách được xác minh cho yêu cầu này."
+            : $"Chào {name}! Store chưa có dữ liệu được xác minh để trả lời câu hỏi này. Quý khách có thể hỏi tên sản phẩm, danh mục hoặc giá để tôi tra trong catalog.";
 
         return new AiChatResponse(
             SplitIntoChunks(defaultText),
             null,
-            new object[] { new { id = "store-support", label = "Trung tâm hỗ trợ Store" } },
+            retrieval.Sources.Append(new { id = "local-fallback", label = "Fallback dữ liệu Store" }).ToArray(),
             true);
+    }
+
+    private static AiChatResponse MissingPolicyResponse(string name, string topic, IReadOnlyList<object> sources)
+    {
+        var text = $"Chào {name}! Store chưa cung cấp thông tin {topic} đã được xác minh trong dữ liệu hiện tại. Tôi không tự suy đoán nội dung chính sách; vui lòng gửi form Liên hệ để nhân viên xác nhận.";
+        return new AiChatResponse(SplitIntoChunks(text), null, sources.Append(new { id = "policy-missing", label = $"Chưa có chính sách {topic} được duyệt" }).ToArray(), true);
+    }
+
+    private static (string Context, IReadOnlyList<object> Sources, IReadOnlyList<CatalogProduct> MatchedProducts) BuildCustomerRetrieval(string message, StoreDb db)
+    {
+        var terms = message.Split([' ', '\t', '\r', '\n', ',', '.', ':', ';', '?', '!'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(term => term.Length >= 2)
+            .Select(term => term.ToLowerInvariant())
+            .Distinct()
+            .ToArray();
+        IReadOnlyList<CatalogProduct> catalog;
+        try
+        {
+            catalog = db.Catalog();
+        }
+        catch
+        {
+            catalog = Array.Empty<CatalogProduct>();
+        }
+        var matched = catalog
+            .Select(product => new { Product = product, Score = terms.Count(term => ($"{product.Name} {product.Category} {product.Description}").ToLowerInvariant().Contains(term)) })
+            .Where(item => item.Score > 0)
+            .OrderByDescending(item => item.Score)
+            .ThenBy(item => item.Product.Id, StringComparer.Ordinal)
+            .Take(8)
+            .Select(item => item.Product)
+            .ToArray();
+        var context = matched.Length == 0
+            ? "Không có sản phẩm trong catalog khớp câu hỏi."
+            : string.Join("\n", matched.Select(product => $"[{product.Id}] {product.Name} | danh mục: {product.Category} | giá: {product.Price:N0} VND | tồn kho: {product.StockCount} | mô tả: {product.Description}"));
+        var sources = matched.Select(product => (object)new { id = "catalog-" + product.Id, label = $"Catalog sản phẩm {product.Id}" }).ToArray();
+        return (context, sources, matched);
     }
 
     private async Task<string?> TryOllamaGenerateAsync(string prompt, string systemPrompt, CancellationToken cancellationToken)
     {
+        if (!await _ollamaGate.WaitAsync(0, cancellationToken)) return null;
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -206,7 +254,8 @@ public sealed class AiChatService
                 model = OllamaModel,
                 prompt,
                 system = systemPrompt,
-                stream = false
+                stream = false,
+                options = new { num_ctx = 4096, num_predict = 600, temperature = 0.15 }
             };
             var content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
             var response = await _httpClient.PostAsync($"{OllamaHost}/api/generate", content, cts.Token);
@@ -222,6 +271,10 @@ public sealed class AiChatService
         catch
         {
             // Ollama offline or unreachable
+        }
+        finally
+        {
+            _ollamaGate.Release();
         }
         return null;
     }

@@ -1,6 +1,6 @@
 # Store API bằng C# (cổng 5000)
 
-Backend ASP.NET Core chạy song song trong giai đoạn chuyển đổi. Backend Node cũ trong `../server` được giữ nguyên để rollback; Vite proxy chỉ đổi sau khi toàn bộ API contract được port và kiểm thử end-to-end.
+Backend ASP.NET Core là backend chính để chạy và nghiệm thu Store cùng Store-Admin trên cổng 5000. Backend Node cũ chỉ được giữ để rollback, không phải nguồn catalog hoặc nguồn kiểm thử chính.
 
 ## Máy mới pull về chạy thế nào? (nhóm 3 người)
 
@@ -56,7 +56,7 @@ Cấu hình bằng connection string `StoreDb` trong `appsettings.json`, hoặc 
 
 Không ghi mật khẩu vào source hoặc commit; xem `.env.example`. File `.env` local đã được `.gitignore` ở gốc bỏ qua.
 
-Các route C# giữ nguyên contract `/api/health`, `/api/health/db`, `/api/storefront/catalog`, `/api/storefront/appearance`, `/api/storefront/products/{id}/view`, `/api/customer/*` cơ bản và `/api/admin/login`. Backend Node cũ vẫn là đường chạy chính cho đến khi các route còn lại được port và kiểm thử.
+Các route C# chính gồm `/api/health`, `/api/health/db`, `/api/storefront/catalog`, `/api/storefront/appearance`, `/api/storefront/contact`, `/api/storefront/products/{id}/view`, `/api/customer/*`, `/api/admin/products`, `/api/admin/appearance`, `/api/support/status` và `/api/support/chat`. Catalog đọc từ `shared/catalog-manifest.json`, có đúng 1.000 ID dùng chung cho Store và Admin.
 
 Để thử frontend với C# mà không đổi cấu hình mặc định, chạy Vite bằng:
 
@@ -65,5 +65,4 @@ $env:VITE_API_TARGET = 'http://127.0.0.1:5000'
 npm run dev
 ```
 
-Khi không đặt biến này, hai frontend vẫn dùng backend Node cũ ở cổng `3001`.
-
+Khi kiểm thử C# cần đặt `VITE_API_TARGET=http://127.0.0.1:5000`; không dùng backend Node làm nguồn dữ liệu thay thế cho nghiệm thu catalog, appearance hoặc AI Local.

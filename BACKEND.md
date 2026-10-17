@@ -1,6 +1,6 @@
 # Store
 
-Store dùng React + Vite ở frontend và Node.js/Express + SQLite ở backend. AI chạy qua Ollama local; trình duyệt chỉ gọi `/api`, không gọi Ollama trực tiếp.
+Store dùng React + Vite ở frontend và ASP.NET Core server-dotnet ở backend nghiệm thu chính trên cổng 5000. Node.js/Express + SQLite là backend legacy để rollback. AI chạy qua Ollama local; trình duyệt chỉ gọi `/api`, không gọi Ollama trực tiếp.
 
 ## Runtime đã chốt
 

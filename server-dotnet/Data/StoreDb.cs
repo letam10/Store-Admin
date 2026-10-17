@@ -12,14 +12,6 @@ namespace StoreApi.Data;
 
 public sealed class StoreDb
 {
-    private static readonly IReadOnlyList<CatalogProduct> BaseProducts =
-    [
-        new("1", "Tai nghe Everyday", "Điện tử", 890000, "Tai nghe demo của Store.", "/products/headphones.svg", [], "electronic", "◉", "Được yêu thích", 0, 20, 0),
-        new("2", "Túi Everyday Tote", "Trang phục", 249000, "Túi Everyday dùng hằng ngày.", "/products/bag.svg", [], "apparel", "□", "Mới", 0, 20, 0),
-        new("3", "Đồng hồ Minimal", "Phụ kiện", 1290000, "Đồng hồ tối giản.", "/products/watch.svg", [], "accessories", "◷", "Tối giản", 0, 20, 0),
-        new("4", "Ly cà phê Morning", "Đồ gia dụng", 159000, "Ly cà phê dùng mỗi ngày.", "/products/cup.svg", [], "home", "◌", "Mỗi ngày", 0, 20, 0),
-    ];
-
     private readonly string _connectionString;
 
     public string ConnectionString => _connectionString;
@@ -350,11 +342,6 @@ public sealed class StoreDb
         var products = new List<CatalogProduct>();
         using var reader = command.ExecuteReader();
         while (reader.Read()) products.Add(ReadProduct(reader));
-        for (var index = BaseProducts.Count - 1; index >= 0; index--)
-        {
-            var baseProduct = BaseProducts[index];
-            if (products.All(product => product.Id != baseProduct.Id)) products.Insert(0, baseProduct);
-        }
         return products;
     }
 
@@ -1059,31 +1046,92 @@ public sealed class StoreDb
 
     public void SeedDefaultProducts()
     {
-        using var db = Open();
-        using var command = db.CreateCommand();
-        command.CommandText = """
-            IF NOT EXISTS (SELECT 1 FROM Products)
-            BEGIN
-                INSERT INTO Products (Name, Price, Category, Description, Image) VALUES
-                (N'Tai nghe Everyday', 890000, N'Điện tử', N'Tai nghe chống ồn công nghệ cao', N'/products/headphones.svg'),
-                (N'Túi Everyday Tote', 249000, N'Trang phục', N'Túi vải Canvas phong cách tối giản', N'/products/bag.svg'),
-                (N'Đồng hồ Minimal', 1290000, N'Phụ kiện', N'Đồng hồ đeo tay phong cách Bauhaus', N'/products/watch.svg'),
-                (N'Ly cà phê Morning', 159000, N'Đồ gia dụng', N'Ly sứ giữ nhiệt cao cấp', N'/products/cup.svg'),
-                (N'Bàn phím cơ Không Dây', 1450000, N'Điện tử', N'Bàn phím cơ layout 75% switch êm ái', N'/products/keyboard.svg'),
-                (N'Bình nước thể thao 1L', 180000, N'Đồ gia dụng', N'Bình giữ nhiệt inox 304', N'/products/bottle.svg');
-            END
+        var manifestPath = Environment.GetEnvironmentVariable("CATALOG_MANIFEST_PATH");
+        var candidates = new[]
+        {
+            manifestPath,
+            Path.Combine(Directory.GetCurrentDirectory(), "shared", "catalog-manifest.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "..", "shared", "catalog-manifest.json"),
+            Path.Combine(AppContext.BaseDirectory, "shared", "catalog-manifest.json"),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "shared", "catalog-manifest.json")
+        };
+        var resolved = candidates.FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path));
+        if (string.IsNullOrWhiteSpace(resolved)) throw new FileNotFoundException("Không tìm thấy shared/catalog-manifest.json");
 
-            IF NOT EXISTS (SELECT 1 FROM catalog_products WHERE id = '1')
-            BEGIN
-                INSERT INTO catalog_products (id, name, category, price, description, image, features_json, tone, symbol, label, source_url, source_price_cents, source_currency, imported_at, discount_percent, stock_count)
-                VALUES
-                ('1', N'Tai nghe Everyday', N'Điện tử', 890000, N'Tai nghe demo của Store.', '/products/headphones.svg', '["Chống ồn","Pin 30h"]', 'electronic', N'◉', N'Được yêu thích', '', 0, 'VND', '2026-10-08', 0, 20),
-                ('2', N'Túi Everyday Tote', N'Trang phục', 249000, N'Túi Everyday dùng hằng ngày.', '/products/bag.svg', '["Vải Canvas"]', 'apparel', N'□', N'Mới', '', 0, 'VND', '2026-10-08', 0, 20),
-                ('3', N'Đồng hồ Minimal', N'Phụ kiện', 1290000, N'Đồng hồ tối giản.', '/products/watch.svg', '["Dây da","Chống nước 5ATM"]', 'accessories', N'◷', N'Tối giản', '', 0, 'VND', '2026-10-08', 0, 20),
-                ('4', N'Ly cà phê Morning', N'Đồ gia dụng', 159000, N'Ly cà phê dùng mỗi ngày.', '/products/cup.svg', '["Gốm sứ"]', 'home', N'◌', N'Mỗi ngày', '', 0, 'VND', '2026-10-08', 0, 20);
-            END
-            """;
-        command.ExecuteNonQuery();
+        using var document = JsonDocument.Parse(File.ReadAllText(resolved));
+        if (!document.RootElement.TryGetProperty("products", out var productsElement) || productsElement.ValueKind != JsonValueKind.Array || productsElement.GetArrayLength() != 1000)
+        {
+            throw new InvalidOperationException("Manifest catalog phải có đúng 1000 sản phẩm.");
+        }
+
+        var manifest = productsElement.EnumerateArray().Select(product => new
+        {
+            Id = product.GetProperty("id").GetString() ?? "",
+            Name = product.GetProperty("name").GetString() ?? "",
+            Category = product.GetProperty("category").GetString() ?? "",
+            Price = product.GetProperty("price").GetInt64(),
+            Description = product.GetProperty("description").GetString() ?? "",
+            Image = product.GetProperty("image").GetString() ?? "",
+            Features = product.TryGetProperty("features", out var features) && features.ValueKind == JsonValueKind.Array ? features.EnumerateArray().Select(item => item.GetString() ?? "").ToList() : [],
+            Tone = product.TryGetProperty("tone", out var tone) ? tone.GetString() ?? "green" : "green",
+            Symbol = product.TryGetProperty("symbol", out var symbol) ? symbol.GetString() ?? "✦" : "✦",
+            Label = product.TryGetProperty("label", out var label) ? label.GetString() ?? "Nguồn mẫu" : "Nguồn mẫu",
+            Source = product.TryGetProperty("source", out var source) ? source.GetString() ?? "" : "",
+            SourceId = product.TryGetProperty("sourceId", out var sourceId) ? sourceId.GetString() ?? "" : "",
+            SourceUrl = product.TryGetProperty("sourceUrl", out var sourceUrl) ? sourceUrl.GetString() ?? "" : "",
+            SourcePriceCents = product.TryGetProperty("sourcePriceCents", out var cents) && cents.ValueKind == JsonValueKind.Number ? cents.GetInt64() : 0,
+            SourceCurrency = product.TryGetProperty("sourceCurrency", out var currency) ? currency.GetString() ?? "VND" : "VND",
+            ImportedAt = product.TryGetProperty("importedAt", out var importedAt) ? importedAt.GetString() ?? DateTimeOffset.UtcNow.ToString("O") : DateTimeOffset.UtcNow.ToString("O")
+        }).Where(product => !string.IsNullOrWhiteSpace(product.Id)).ToList();
+        var allowedIds = manifest.Select(product => product.Id).ToHashSet(StringComparer.Ordinal);
+
+        using var db = Open();
+        using var transaction = db.BeginTransaction();
+        using (var delete = db.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "SELECT id FROM catalog_products";
+            var existingIds = new List<string>();
+            using var reader = delete.ExecuteReader();
+            while (reader.Read()) existingIds.Add(reader.GetString(0));
+            reader.Close();
+            foreach (var id in existingIds.Where(id => !allowedIds.Contains(id)))
+            {
+                delete.CommandText = "DELETE FROM catalog_products WHERE id=@id";
+                delete.Parameters.Clear();
+                delete.Parameters.AddWithValue("@id", id);
+                delete.ExecuteNonQuery();
+            }
+        }
+
+        foreach (var product in manifest)
+        {
+            using var upsert = db.CreateCommand();
+            upsert.Transaction = transaction;
+            upsert.CommandText = """
+                IF NOT EXISTS (SELECT 1 FROM catalog_products WHERE id=@id)
+                INSERT INTO catalog_products (id,source,source_id,name,category,price,description,image,features_json,tone,symbol,label,source_url,source_price_cents,source_currency,imported_at,discount_percent,stock_count)
+                VALUES (@id,@source,@sourceId,@name,@category,@price,@description,@image,@features,@tone,@symbol,@label,@sourceUrl,@sourcePriceCents,@sourceCurrency,@importedAt,0,20);
+                """;
+            upsert.Parameters.AddWithValue("@id", product.Id);
+            upsert.Parameters.AddWithValue("@source", product.Source);
+            upsert.Parameters.AddWithValue("@sourceId", product.SourceId);
+            upsert.Parameters.AddWithValue("@name", product.Name);
+            upsert.Parameters.AddWithValue("@category", product.Category);
+            upsert.Parameters.AddWithValue("@price", product.Price);
+            upsert.Parameters.AddWithValue("@description", product.Description);
+            upsert.Parameters.AddWithValue("@image", product.Image);
+            upsert.Parameters.AddWithValue("@features", JsonSerializer.Serialize(product.Features));
+            upsert.Parameters.AddWithValue("@tone", product.Tone);
+            upsert.Parameters.AddWithValue("@symbol", product.Symbol);
+            upsert.Parameters.AddWithValue("@label", product.Label);
+            upsert.Parameters.AddWithValue("@sourceUrl", product.SourceUrl);
+            upsert.Parameters.AddWithValue("@sourcePriceCents", product.SourcePriceCents);
+            upsert.Parameters.AddWithValue("@sourceCurrency", product.SourceCurrency);
+            upsert.Parameters.AddWithValue("@importedAt", product.ImportedAt);
+            upsert.ExecuteNonQuery();
+        }
+        transaction.Commit();
     }
 
     public (long Id, string Username, string Email, string GoogleSub, string TotpSecret, int TotpEnabled, string PendingSecret)? FindCustomerFull(long id)

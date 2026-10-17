@@ -283,14 +283,6 @@ BEGIN
 END
 GO
 
--- Seed sample data vào catalog_products nếu bảng rỗng
-IF NOT EXISTS (SELECT 1 FROM catalog_products WHERE id = '1')
-BEGIN
-    INSERT INTO catalog_products (id, name, category, price, description, image, features_json, tone, symbol, label, source_url, source_price_cents, source_currency, imported_at, discount_percent, stock_count)
-    VALUES
-    ('1', N'Tai nghe Everyday', N'Điện tử', 890000, N'Tai nghe demo của Store.', '/products/headphones.svg', '["Chống ồn","Pin 30h"]', 'electronic', N'◉', N'Được yêu thích', '', 0, 'VND', '2026-10-08', 0, 20),
-    ('2', N'Túi Everyday Tote', N'Trang phục', 249000, N'Túi Everyday dùng hằng ngày.', '/products/bag.svg', '["Vải Canvas"]', 'apparel', N'□', N'Mới', '', 0, 'VND', '2026-10-08', 0, 20),
-    ('3', N'Đồng hồ Minimal', N'Phụ kiện', 1290000, N'Đồng hồ tối giản.', '/products/watch.svg', '["Dây da","Chống nước 5ATM"]', 'accessories', N'◷', N'Tối giản', '', 0, 'VND', '2026-10-08', 0, 20),
-    ('4', N'Ly cà phê Morning', N'Đồ gia dụng', 159000, N'Ly cà phê dùng mỗi ngày.', '/products/cup.svg', '["Gốm sứ"]', 'home', N'◌', N'Mỗi ngày', '', 0, 'VND', '2026-10-08', 0, 20);
-END
+-- catalog_products duoc dong bo tu shared/catalog-manifest.json boi StoreDb.SeedDefaultProducts.
+-- Khong seed ban ghi mau rieng de tranh tao catalog ngoai 1000 ID da curation.
 GO
