@@ -1,6 +1,6 @@
 ﻿-- =========================================================
 -- Store & Store-Admin - Database Seed / Sync Data
--- Exported on: 2026-10-13 20:40:34
+-- Exported on: 2026-10-17 21:16:32
 -- =========================================================
 USE [StoreDb];
 GO
@@ -3079,7 +3079,7 @@ SET IDENTITY_INSERT [customers] ON;
 INSERT INTO [customers] ([id], [username], [email], [password_salt], [password_hash], [points], [paid_goods_total], [spin_credits], [created_at], [google_sub], [totp_secret], [totp_enabled], [totp_pending_secret], [totp_verified_at])
 SELECT src.[id], src.[username], src.[email], src.[password_salt], src.[password_hash], src.[points], src.[paid_goods_total], src.[spin_credits], src.[created_at], src.[google_sub], src.[totp_secret], src.[totp_enabled], src.[totp_pending_secret], src.[totp_verified_at]
 FROM (VALUES
-  (1, N'Việt Nguyễn', N'vietlun091@gmail.com', N'2377e04613226382add71b436c277c58', N'0c93bfc9f5b6044ffab5e625b6d7d5cea84f7c281d3b09c549201dc55bdc37795b21890c9fcc416f6562b9a9f22d0fb16b2d4f874d6c20b816a8b7bc09833854', 0, 0, 0, N'2026-10-11T14:26:01.2334543+00:00', N'113609223702519560726', N'7X4D5ZGTSGUNELGBGO4RQV2KH5YBDTTH', 1, N'', N'2026-10-13T13:32:43.0910574+00:00'),
+  (1, N'Việt Nguyễn', N'vietlun091@gmail.com', N'2377e04613226382add71b436c277c58', N'0c93bfc9f5b6044ffab5e625b6d7d5cea84f7c281d3b09c549201dc55bdc37795b21890c9fcc416f6562b9a9f22d0fb16b2d4f874d6c20b816a8b7bc09833854', 73, 0, 0, N'2026-10-11T14:26:01.2334543+00:00', N'113609223702519560726', N'7X4D5ZGTSGUNELGBGO4RQV2KH5YBDTTH', 1, N'', N'2026-10-13T13:32:43.0910574+00:00'),
   (2, N't219839cb', N't219839cb@test.local', N'2d0c0b515ddd226ac30cff1e9d08697a', N'e3dcd3796e4b1cf06f9a5973ab7d4403cc6ccd9070ad4260168e892ebded0e23861624626f5f38d86773bcd35e3b0bc54878593f7079b07f704da62752731b12', 0, 0, 0, N'2026-10-11T15:21:35.1639398+00:00', NULL, NULL, 0, NULL, NULL),
   (3, N'dokasi', N'dangketn9@gmail.com', N'928ad58655fb6a47ee5849087e69ec55', N'323aec12b9be57c9eefd2a41050cbc71499568acd70430dd482462ec6a823d8b9507796b8e09021223c1a8855af2b76bbd59e1794552c23d1f2f42d5c376e477', 0, 0, 0, N'2026-10-11T15:28:23.6805342+00:00', N'103667869017037017024', NULL, 0, NULL, NULL),
   (4, N't3500edf9', N't3500edf9@test.local', N'ba7dd38fad49574723a8bcbafd448109', N'aa6cdefd2ce8ab84d2e11e3cd4ec89b97ee671e0960ef22e4cf988142c01572cabbbfa0984fd2a8345acd11021ac595bdc86cb2a60c2719d0ad6c3ae09c3dae8', 0, 0, 0, N'2026-10-11T15:33:06.3563608+00:00', NULL, NULL, 0, NULL, NULL),
@@ -3105,13 +3105,26 @@ FROM (VALUES
 WHERE NOT EXISTS (SELECT 1 FROM [product_views] target WHERE target.[product_id] = src.[product_id]);
 GO
 
--- Table: customer_orders (1 rows)
+-- Table: customer_orders (2 rows)
 INSERT INTO [customer_orders] ([id], [customer_id], [items_json], [recipient], [phone], [address], [fulfillment], [region], [distance_km], [weight_kg], [subtotal], [discount], [goods_total], [shipping_fee], [total], [voucher_codes_json], [tier], [status], [points_earned], [created_at], [paid_at], [payment_method], [scheduled_at])
 SELECT src.[id], src.[customer_id], src.[items_json], src.[recipient], src.[phone], src.[address], src.[fulfillment], src.[region], src.[distance_km], src.[weight_kg], src.[subtotal], src.[discount], src.[goods_total], src.[shipping_fee], src.[total], src.[voucher_codes_json], src.[tier], src.[status], src.[points_earned], src.[created_at], src.[paid_at], src.[payment_method], src.[scheduled_at]
 FROM (VALUES
-  (N'ST-5B6CEC21', 8, N'[{"id":"1","name":"Tai nghe Everyday","quantity":2,"price":890000},{"id":"2","name":"T\u00FAi Everyday Tote","quantity":1,"price":249000}]', N'Nguyen Van Test', N'0987654321', N'123 Duong Le Loi, Quan 1, TP.HCM', N'delivery', N'hcm', 0, 1.5, 2029000, 0, 2029000, 30000, 2059000, N'[]', N'bronze', N'pending', 205, N'13/10/2026 12:05', NULL, N'bank_transfer', NULL)
+  (N'ST-5B6CEC21', 8, N'[{"id":"1","name":"Tai nghe Everyday","quantity":2,"price":890000},{"id":"2","name":"T\u00FAi Everyday Tote","quantity":1,"price":249000}]', N'Nguyen Van Test', N'0987654321', N'123 Duong Le Loi, Quan 1, TP.HCM', N'delivery', N'hcm', 0, 1.5, 2029000, 0, 2029000, 30000, 2059000, N'[]', N'bronze', N'pending', 205, N'13/10/2026 12:05', NULL, N'bank_transfer', NULL),
+  (N'ST-F73E7975', 1, N'[{"id":"dummyjson-85","name":"Man Plaid Shirt","quantity":1,"price":700000}]', N'Việt Nguyễn', N'+84921896679', N'Hà Nội, Hà Nội', N'delivery', N'hcm', 0, 1, 700000, 0, 700000, 30000, 730000, N'[]', N'bronze', N'paid', 73, N'16/10/2026 21:34', N'2026-10-16T14:34:09.1142291+00:00', N'bank_transfer', N'2026-10-17T14:33:00.000Z')
 ) AS src([id], [customer_id], [items_json], [recipient], [phone], [address], [fulfillment], [region], [distance_km], [weight_kg], [subtotal], [discount], [goods_total], [shipping_fee], [total], [voucher_codes_json], [tier], [status], [points_earned], [created_at], [paid_at], [payment_method], [scheduled_at])
 WHERE NOT EXISTS (SELECT 1 FROM [customer_orders] target WHERE target.[id] = src.[id]);
+GO
+
+-- Table: admin_records (1 rows)
+SET IDENTITY_INSERT [admin_records] ON;
+INSERT INTO [admin_records] ([id], [module], [title], [data_json], [status], [created_at], [updated_at])
+SELECT src.[id], src.[module], src.[title], src.[data_json], src.[status], src.[created_at], src.[updated_at]
+FROM (VALUES
+  (1, N'support', N'#CS-EB0274 - Nguyen Van A (order)', N'{"customer":"Nguyen Van A","topic":"order","email":"a@gmail.com","message":"Don hang cua toi can ho tro","assignee":"Ch\u01B0a ph\u00E2n c\u00F4ng"}', N'Chờ duyệt', N'2026-10-16T02:11:16.6460911+00:00', N'2026-10-16T02:11:16.6460911+00:00')
+) AS src([id], [module], [title], [data_json], [status], [created_at], [updated_at])
+WHERE NOT EXISTS (SELECT 1 FROM [admin_records] target WHERE target.[id] = src.[id]);
+GO
+SET IDENTITY_INSERT [admin_records] OFF;
 GO
 
 -- Bat lai toan bo kiem tra khoa ngoai
