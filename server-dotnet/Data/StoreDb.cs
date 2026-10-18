@@ -1027,7 +1027,8 @@ public sealed class StoreDb
     {
         using var db = Open();
         using var command = db.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM Products";
+        // Catalog SQLite/SQL Server source is catalog_products; Products is only the legacy coursework table.
+        command.CommandText = "SELECT COUNT(*) FROM catalog_products";
         return Convert.ToInt64(command.ExecuteScalar());
     }
 

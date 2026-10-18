@@ -3,3 +3,17 @@ html[data-admin-theme="light"] .admin-main{background:radial-gradient(circle at 
 .admin-sidebar{background:linear-gradient(180deg,color-mix(in srgb,var(--admin-accent-strong) 92%,#10251a),color-mix(in srgb,var(--admin-accent) 55%,#10251a));color:var(--accent-contrast,#fffaf5)}
 .admin-sidebar nav button{background:transparent;color:color-mix(in srgb,var(--accent-contrast,#fffaf5) 82%,var(--admin-accent-soft));border-color:transparent}.admin-sidebar nav button:hover{background:color-mix(in srgb,var(--admin-accent) 48%,transparent);color:#fff}.admin-sidebar nav button.is-active{background:var(--admin-accent);border-color:var(--admin-accent);color:var(--accent-contrast,#fffaf5);box-shadow:0 8px 18px rgb(0 0 0 / calc(var(--theme-shadow-strength) * .35))}.admin-sidebar__profile,.admin-sidebar__footer{color:var(--accent-contrast,#fffaf5)}.admin-sidebar__footer a,.admin-sidebar__footer button{color:color-mix(in srgb,var(--accent-contrast,#fffaf5) 88%,var(--admin-accent-soft))}
 html[data-admin-theme="light"] .admin-header,html[data-admin-theme="light"] .admin-header h1{color:var(--admin-text)}
+/* Final sidebar override: solid dark menu, gradient remains on admin-main. */
+.admin-sidebar{background:#102c20}
+html[data-admin-theme="dark"] .admin-sidebar{background:#0d2419}
+html[data-admin-theme="dark"] .admin-main{background:radial-gradient(circle at 88% 0,color-mix(in srgb,var(--admin-accent-soft) 82%,transparent),transparent 34%),linear-gradient(180deg,var(--admin-page),color-mix(in srgb,var(--admin-page) 86%,var(--admin-surface-alt)))}
+
+/* Nền menu luôn đậm nên chữ menu phải dùng tông sáng riêng, không lấy accent-contrast của theme sáng. */
+.admin-sidebar{color:#e8f3eb}
+.admin-sidebar .admin-brand{color:#e8f3eb}
+.admin-sidebar .admin-sidebar__profile{color:#e8f3eb}
+.admin-sidebar nav button:not(.is-active){color:#c7dccd}
+.admin-sidebar nav button:hover:not(.is-active){color:#ffffff}
+.admin-sidebar nav button.is-active{color:#102c20}
+.admin-sidebar__footer a,.admin-sidebar__footer button{color:#b8d1bf}
+.admin-sidebar__footer a:hover,.admin-sidebar__footer button:hover{color:#ffffff}
