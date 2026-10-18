@@ -231,8 +231,11 @@ public sealed class StoreDb
                   id BIGINT IDENTITY(1,1) PRIMARY KEY, customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
                   product_id NVARCHAR(255) NOT NULL, rating INT NOT NULL CHECK(rating BETWEEN 1 AND 5), comment NVARCHAR(MAX) NOT NULL,
                   admin_reply NVARCHAR(MAX) NOT NULL DEFAULT '', created_at NVARCHAR(100) NOT NULL, replied_at NVARCHAR(100) NULL,
+                  customer_name NVARCHAR(255) NULL,
                   CONSTRAINT UQ_reviews_customer_product UNIQUE(customer_id, product_id)
                 );
+                IF COL_LENGTH('product_reviews', 'customer_name') IS NULL
+                ALTER TABLE product_reviews ADD customer_name NVARCHAR(255) NULL;
 
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'customer_orders')
                 CREATE TABLE customer_orders (
@@ -1767,9 +1770,9 @@ public sealed class StoreDb
         using var db = Open();
         using var cmd = db.CreateCommand();
         cmd.CommandText = """
-            SELECT r.id, r.product_id, r.rating, r.comment, r.admin_reply, r.created_at, c.username, p.name
+            SELECT r.id, r.product_id, r.rating, r.comment, r.admin_reply, r.created_at, COALESCE(NULLIF(c.username, ''), NULLIF(r.customer_name, ''), N'Khách hàng') AS username, p.name
             FROM product_reviews r
-            JOIN customers c ON c.id = r.customer_id
+            LEFT JOIN customers c ON c.id = r.customer_id
             LEFT JOIN catalog_products p ON p.id = r.product_id
             ORDER BY r.created_at DESC
             """;
@@ -1786,7 +1789,7 @@ public sealed class StoreDb
                 comment = reader.GetString(3),
                 adminReply = reader.IsDBNull(4) ? "" : reader.GetString(4),
                 createdAt = reader.GetString(5),
-                username = reader.GetString(6),
+                username = reader.IsDBNull(6) ? "Khách hàng" : reader.GetString(6),
                 productName = reader.IsDBNull(7) ? pid : reader.GetString(7)
             });
         }
@@ -1809,8 +1812,9 @@ public sealed class StoreDb
         using var db = Open();
         using var cmd = db.CreateCommand();
         cmd.CommandText = """
-            SELECT r.id, r.product_id, r.customer_id, r.customer_name, r.rating, r.comment, r.admin_reply, r.created_at, r.replied_at
+            SELECT r.id, r.product_id, r.customer_id, COALESCE(NULLIF(r.customer_name, ''), NULLIF(c.username, ''), N'Khách hàng') AS customer_name, r.rating, r.comment, r.admin_reply, r.created_at, r.replied_at
             FROM product_reviews r
+            LEFT JOIN customers c ON c.id = r.customer_id
             WHERE r.product_id = @pid
             ORDER BY r.created_at DESC
             """;
@@ -1824,7 +1828,7 @@ public sealed class StoreDb
                 id = Convert.ToInt64(reader.GetValue(0)),
                 productId = reader.GetString(1),
                 customerId = Convert.ToInt64(reader.GetValue(2)),
-                customerName = reader.GetString(3),
+                customerName = reader.IsDBNull(3) ? "Khách hàng" : reader.GetString(3),
                 rating = Convert.ToInt32(reader.GetValue(4)),
                 comment = reader.GetString(5),
                 adminReply = reader.IsDBNull(6) ? "" : reader.GetString(6),
@@ -1849,7 +1853,7 @@ public sealed class StoreDb
             """;
         cmd.Parameters.AddWithValue("@pid", productId);
         cmd.Parameters.AddWithValue("@cid", customerId);
-        cmd.Parameters.AddWithValue("@cname", customerName);
+        cmd.Parameters.AddWithValue("@cname", string.IsNullOrWhiteSpace(customerName) ? "Khách hàng" : customerName.Trim());
         cmd.Parameters.AddWithValue("@rating", rating);
         cmd.Parameters.AddWithValue("@comment", comment);
         cmd.Parameters.AddWithValue("@now", now);

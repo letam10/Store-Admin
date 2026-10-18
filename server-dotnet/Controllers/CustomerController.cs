@@ -162,10 +162,17 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
     }
 
     [HttpGet("google/callback")]
-    public async Task<IActionResult> GoogleCallback([FromQuery] string? code, [FromQuery] string? state)
+    public async Task<IActionResult> GoogleCallback([FromQuery] string? code, [FromQuery] string? state, [FromQuery] string? error)
     {
         var frontend = GetConfig("FRONTEND_URL", "http://127.0.0.1:5173").TrimEnd('/');
         IActionResult Fail(string msg) => Redirect(frontend + "/login?googleError=" + Uri.EscapeDataString(msg));
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"[Google OAuth] Callback nhận lỗi từ Google: {error}. (Nếu là 'access_denied', hãy đảm bảo email đã được thêm vào Test users trong Google Cloud Console).");
+            Console.ResetColor();
+            return Fail(error);
+        }
         if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(state)) return Fail("GOOGLE_CANCELLED");
         var nextUrl = db.ConsumeOAuthState(state);
         if (nextUrl is null) return Fail("GOOGLE_STATE_EXPIRED");

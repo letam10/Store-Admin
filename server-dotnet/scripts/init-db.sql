@@ -221,6 +221,7 @@ IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'product_reviews')
 CREATE TABLE product_reviews (
   id BIGINT IDENTITY(1,1) PRIMARY KEY,
   customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
+  customer_name NVARCHAR(255) NULL,
   product_id NVARCHAR(255) NOT NULL,
   rating INT NOT NULL CHECK(rating BETWEEN 1 AND 5),
   comment NVARCHAR(MAX) NOT NULL,
@@ -229,6 +230,9 @@ CREATE TABLE product_reviews (
   replied_at NVARCHAR(100) NULL,
   CONSTRAINT UQ_reviews_customer_product UNIQUE(customer_id, product_id)
 );
+GO
+IF COL_LENGTH('product_reviews', 'customer_name') IS NULL
+  ALTER TABLE product_reviews ADD customer_name NVARCHAR(255) NULL;
 GO
 
 -- 18. Table: customer_orders
