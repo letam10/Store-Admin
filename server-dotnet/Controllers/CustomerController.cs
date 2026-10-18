@@ -151,7 +151,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
     public IActionResult GoogleStart([FromQuery] string? next)
     {
         var clientId = GetConfig("GOOGLE_CLIENT_ID");
-        var redirect = GetConfig("GOOGLE_REDIRECT_URI");
+        var redirect = GetConfig("GOOGLE_REDIRECT_URI", "http://127.0.0.1:5000/api/customer/google/callback");
         var secret = GetConfig("GOOGLE_CLIENT_SECRET");
         if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(secret)) return StatusCode(501, new { error = "GOOGLE_NOT_CONFIGURED" });
         var safeNext = (!string.IsNullOrEmpty(next) && next.StartsWith("/") && !next.StartsWith("//") && next.Length <= 200) ? next : "/";
@@ -173,16 +173,28 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         {
             var clientId = GetConfig("GOOGLE_CLIENT_ID");
             var secret = GetConfig("GOOGLE_CLIENT_SECRET");
-            var redirect = GetConfig("GOOGLE_REDIRECT_URI");
+            var redirect = GetConfig("GOOGLE_REDIRECT_URI", "http://127.0.0.1:5000/api/customer/google/callback");
             using var http = new HttpClient();
             var tokenRes = await http.PostAsync("https://oauth2.googleapis.com/token", new FormUrlEncodedContent(new Dictionary<string, string> { ["code"] = code, ["client_id"] = clientId, ["client_secret"] = secret, ["redirect_uri"] = redirect, ["grant_type"] = "authorization_code" }));
             var tokenJson = await tokenRes.Content.ReadAsStringAsync();
-            if (!tokenRes.IsSuccessStatusCode) return Fail("GOOGLE_FAILED");
+            if (!tokenRes.IsSuccessStatusCode)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[Google OAuth Token Error] Status: {tokenRes.StatusCode}, Response: {tokenJson}");
+                Console.ResetColor();
+                return Fail("GOOGLE_FAILED");
+            }
             var access = JsonDocument.Parse(tokenJson).RootElement.GetProperty("access_token").GetString() ?? "";
             var profileReq = new HttpRequestMessage(HttpMethod.Get, "https://openidconnect.googleapis.com/v1/userinfo");
             profileReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", access);
             var profileRes = await http.SendAsync(profileReq);
-            if (!profileRes.IsSuccessStatusCode) return Fail("GOOGLE_FAILED");
+            if (!profileRes.IsSuccessStatusCode)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[Google OAuth Profile Error] Status: {profileRes.StatusCode}");
+                Console.ResetColor();
+                return Fail("GOOGLE_FAILED");
+            }
             var profile = JsonDocument.Parse(await profileRes.Content.ReadAsStringAsync()).RootElement;
             var email = (profile.TryGetProperty("email", out var em) ? em.GetString() ?? "" : "").ToLowerInvariant();
             var verified = profile.TryGetProperty("email_verified", out var ev) && ev.ValueKind == JsonValueKind.True;
@@ -205,10 +217,11 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
             }
             else
             {
-                var name = profile.TryGetProperty("name", out var nm) ? nm.GetString() ?? email : email;
+                var name = profile.TryGetProperty("name", out var nm) ? (nm.GetString() ?? "").Trim() : "";
+                if (string.IsNullOrWhiteSpace(name)) name = email.Split('@')[0];
                 var (salt, hash) = Tokens.HashPassword(Tokens.RandomToken(16));
-                try { id = db.CreateCustomer(name.Trim()[..Math.Min(60, name.Trim().Length)], email, salt, hash); }
-                catch { id = db.CreateCustomer((name.Trim() + " " + Guid.NewGuid().ToString()[..4]).Trim(), email, salt, hash); }
+                try { id = db.CreateCustomer(name[..Math.Min(60, name.Length)], email, salt, hash); }
+                catch { id = db.CreateCustomer((name[..Math.Min(50, name.Length)] + " " + Guid.NewGuid().ToString()[..4]).Trim(), email, salt, hash); }
                 db.LinkGoogleSub(id, sub);
             }
             var auth = db.FindCustomerFull(id);
@@ -222,12 +235,19 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
             db.CreateSession(Tokens.Sha256(raw), id, DateTimeOffset.UtcNow.AddDays(30));
             Response.Cookies.Append(Cookie, raw, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Lax, MaxAge = TimeSpan.FromDays(30), Path = "/" });
             
-            // Gửi email thông báo đăng nhập Google
-            SendLoginNotificationAsync(email, auth?.Username ?? email, "Google OAuth");
+            // Gửi email thông báo đăng nhập Google về chính email vừa đăng nhập
+            var recipientName = !string.IsNullOrWhiteSpace(auth?.Username) ? auth.Value.Username : email;
+            SendLoginNotificationAsync(email, recipientName, "Google OAuth");
             
             return Redirect(frontend + nextUrl);
         }
-        catch { return Fail("GOOGLE_FAILED"); }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[Google OAuth Callback Exception] {ex.GetType().Name}: {ex.Message}");
+            Console.ResetColor();
+            return Fail("GOOGLE_FAILED");
+        }
     }
 
     [HttpGet("security")]
