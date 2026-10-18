@@ -1081,9 +1081,12 @@ public sealed class StoreDb
             SourceUrl = product.TryGetProperty("sourceUrl", out var sourceUrl) ? sourceUrl.GetString() ?? "" : "",
             SourcePriceCents = product.TryGetProperty("sourcePriceCents", out var cents) && cents.ValueKind == JsonValueKind.Number ? cents.GetInt64() : 0,
             SourceCurrency = product.TryGetProperty("sourceCurrency", out var currency) ? currency.GetString() ?? "VND" : "VND",
-            ImportedAt = product.TryGetProperty("importedAt", out var importedAt) ? importedAt.GetString() ?? DateTimeOffset.UtcNow.ToString("O") : DateTimeOffset.UtcNow.ToString("O")
+            ImportedAt = product.TryGetProperty("importedAt", out var importedAt) ? importedAt.GetString() ?? DateTimeOffset.UtcNow.ToString("O") : DateTimeOffset.UtcNow.ToString("O"),
+            DiscountPercent = product.TryGetProperty("discountPercent", out var discount) && discount.ValueKind == JsonValueKind.Number ? Math.Clamp(discount.GetInt32(), 0, 90) : 0,
+            StockCount = product.TryGetProperty("stockCount", out var stock) && stock.ValueKind == JsonValueKind.Number ? Math.Max(0, stock.GetInt32()) : 20
         }).Where(product => !string.IsNullOrWhiteSpace(product.Id)).ToList();
         var allowedIds = manifest.Select(product => product.Id).ToHashSet(StringComparer.Ordinal);
+        var backfillNeeded = !string.Equals(GetSetting("catalog.manifest.backfill.v1"), "completed", StringComparison.OrdinalIgnoreCase);
 
         using var db = Open();
         using var transaction = db.BeginTransaction();
@@ -1109,9 +1112,22 @@ public sealed class StoreDb
             using var upsert = db.CreateCommand();
             upsert.Transaction = transaction;
             upsert.CommandText = """
-                IF NOT EXISTS (SELECT 1 FROM catalog_products WHERE id=@id)
-                INSERT INTO catalog_products (id,source,source_id,name,category,price,description,image,features_json,tone,symbol,label,source_url,source_price_cents,source_currency,imported_at,discount_percent,stock_count)
-                VALUES (@id,@source,@sourceId,@name,@category,@price,@description,@image,@features,@tone,@symbol,@label,@sourceUrl,@sourcePriceCents,@sourceCurrency,@importedAt,0,20);
+                IF EXISTS (SELECT 1 FROM catalog_products WHERE id=@id)
+                BEGIN
+                    UPDATE catalog_products SET
+                        source=@source, source_id=@sourceId, name=@name, category=@category, price=@price,
+                        description=@description, image=@image, features_json=@features, tone=@tone, symbol=@symbol,
+                        label=@label, source_url=@sourceUrl, source_price_cents=@sourcePriceCents,
+                        source_currency=@sourceCurrency, imported_at=@importedAt,
+                        discount_percent=CASE WHEN @backfill=1 AND discount_percent=0 AND @discount>0 THEN @discount ELSE discount_percent END,
+                        stock_count=CASE WHEN @backfill=1 AND stock_count=20 AND @stock<>20 THEN @stock ELSE stock_count END
+                    WHERE id=@id;
+                END
+                ELSE
+                BEGIN
+                    INSERT INTO catalog_products (id,source,source_id,name,category,price,description,image,features_json,tone,symbol,label,source_url,source_price_cents,source_currency,imported_at,discount_percent,stock_count)
+                    VALUES (@id,@source,@sourceId,@name,@category,@price,@description,@image,@features,@tone,@symbol,@label,@sourceUrl,@sourcePriceCents,@sourceCurrency,@importedAt,@discount,@stock);
+                END
                 """;
             upsert.Parameters.AddWithValue("@id", product.Id);
             upsert.Parameters.AddWithValue("@source", product.Source);
@@ -1129,7 +1145,23 @@ public sealed class StoreDb
             upsert.Parameters.AddWithValue("@sourcePriceCents", product.SourcePriceCents);
             upsert.Parameters.AddWithValue("@sourceCurrency", product.SourceCurrency);
             upsert.Parameters.AddWithValue("@importedAt", product.ImportedAt);
+            upsert.Parameters.AddWithValue("@discount", product.DiscountPercent);
+            upsert.Parameters.AddWithValue("@stock", product.StockCount);
+            upsert.Parameters.AddWithValue("@backfill", backfillNeeded ? 1 : 0);
             upsert.ExecuteNonQuery();
+        }
+        if (backfillNeeded)
+        {
+            using var marker = db.CreateCommand();
+            marker.Transaction = transaction;
+            marker.CommandText = """
+                IF EXISTS (SELECT 1 FROM settings WHERE [key]='catalog.manifest.backfill.v1')
+                    UPDATE settings SET [value]='completed', [updated_at]=@now WHERE [key]='catalog.manifest.backfill.v1';
+                ELSE
+                    INSERT INTO settings([key],[value],[updated_at]) VALUES('catalog.manifest.backfill.v1','completed',@now);
+                """;
+            marker.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+            marker.ExecuteNonQuery();
         }
         transaction.Commit();
     }

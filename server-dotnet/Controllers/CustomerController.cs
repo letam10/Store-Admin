@@ -346,6 +346,10 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
                 weightKg = q.WeightKg
             });
         }
+        catch (CatalogOutOfSyncException ex)
+        {
+            return Conflict(new { error = "CATALOG_OUT_OF_SYNC", missingIds = ex.MissingIds });
+        }
         catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
     }
 
@@ -362,7 +366,9 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         if (request.Fulfillment == "delivery" && address.Length < 5) return BadRequest(new { error = "INVALID_ORDER" });
 
         var quoteRequest = new OrderQuoteRequest(request.Items, request.Fulfillment, request.Region, request.DistanceKm, request.WeightKg, request.VoucherCodes);
-        var q = ComputeQuote(customer, quoteRequest);
+        QuoteComputation q;
+        try { q = ComputeQuote(customer, quoteRequest); }
+        catch (CatalogOutOfSyncException ex) { return Conflict(new { error = "CATALOG_OUT_OF_SYNC", missingIds = ex.MissingIds }); }
         if (request.ExpectedTotal > 0 && request.ExpectedTotal != q.Total) return Conflict(new { error = "QUOTE_CHANGED" });
 
         var orderId = "ST-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
@@ -435,7 +441,9 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         if (request.Fulfillment == "delivery" && address.Length < 5) return BadRequest(new { error = "INVALID_ORDER" });
 
         var quoteRequest = new OrderQuoteRequest(request.Items, request.Fulfillment, request.Region, request.DistanceKm, request.WeightKg, request.VoucherCodes);
-        var q = ComputeQuote(customer, quoteRequest);
+        QuoteComputation q;
+        try { q = ComputeQuote(customer, quoteRequest); }
+        catch (CatalogOutOfSyncException ex) { return Conflict(new { error = "CATALOG_OUT_OF_SYNC", missingIds = ex.MissingIds }); }
         if (request.ExpectedTotal > 0 && request.ExpectedTotal != q.Total) return Conflict(new { error = "QUOTE_CHANGED" });
 
         var orderId = "ST-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
@@ -807,6 +815,11 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         int DistanceKm,
         double WeightKg);
 
+    private sealed class CatalogOutOfSyncException(IReadOnlyList<string> missingIds) : Exception
+    {
+        public IReadOnlyList<string> MissingIds { get; } = missingIds;
+    }
+
     private QuoteComputation ComputeQuote((long Id, string Username, string Email, int Points, int SpinCredits) customer, OrderQuoteRequest req)
     {
         var fulfillment = req.Fulfillment == "pickup" ? "pickup" : "delivery";
@@ -815,6 +828,13 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         var weightKg = req.WeightKg > 0 ? req.WeightKg : 1.0;
         var catalog = db.Catalog();
         var catalogMap = catalog.ToDictionary(p => p.Id, p => p);
+
+        var missingIds = (req.Items ?? [])
+            .Where(line => !string.IsNullOrWhiteSpace(line.Id) && !catalogMap.ContainsKey(line.Id))
+            .Select(line => line.Id!.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (missingIds.Length > 0) throw new CatalogOutOfSyncException(missingIds);
 
         var items = new List<QuoteItemResult>();
         foreach (var line in req.Items ?? [])

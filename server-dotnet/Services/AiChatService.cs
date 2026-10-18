@@ -47,6 +47,19 @@ public sealed class AiChatService
 
     private string OllamaModel => GetConfig("OLLAMA_MODEL", "qwen3.5:4b");
 
+    public string ModelName => OllamaModel;
+
+    public IReadOnlyList<int> AllowedContextSizes => new[] { 8192, 16384, 32768, 65536 };
+
+    public int ContextSize
+    {
+        get
+        {
+            var raw = GetConfig("AI_CONTEXT_SIZE", "16384");
+            return int.TryParse(raw, out var value) && AllowedContextSizes.Contains(value) ? value : 16384;
+        }
+    }
+
     private static (string Context, IReadOnlyList<object> Sources) BuildVerifiedAppearanceContext(StoreDb db)
     {
         IReadOnlyDictionary<string, object?> appearance;
@@ -291,7 +304,7 @@ public sealed class AiChatService
                 prompt,
                 system = systemPrompt,
                 stream = false,
-                options = new { num_ctx = 4096, num_predict = 600, temperature = 0.15 }
+                options = new { num_ctx = Math.Min(ContextSize, 8192), num_predict = 600, temperature = 0.15 }
             };
             var content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
             var response = await _httpClient.PostAsync($"{OllamaHost}/api/generate", content, cts.Token);

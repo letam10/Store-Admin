@@ -302,15 +302,16 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
     }
 
     [HttpGet("settings")]
-    public IActionResult Settings() => RequireAdmin() is null ? Unauthorized(new { error = "UNAUTHENTICATED" }) : Ok(new { contextSize = 16384, allowedContextSizes = new[] { 8192, 16384, 32768, 65536 }, model = "csharp-api" });
+    public IActionResult Settings() => RequireAdmin() is null ? Unauthorized(new { error = "UNAUTHENTICATED" }) : Ok(new { contextSize = aiChatService.ContextSize, allowedContextSizes = aiChatService.AllowedContextSizes, model = aiChatService.ModelName });
 
     [HttpPut("settings")]
     public IActionResult UpdateSettings(AdminSettingsRequest request)
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        var contextSize = request.ContextSize ?? 16384;
-        return Ok(new { contextSize, allowedContextSizes = new[] { 8192, 16384, 32768, 65536 }, model = "csharp-api" });
+        var requested = request.ContextSize ?? aiChatService.ContextSize;
+        var contextSize = aiChatService.AllowedContextSizes.Contains(requested) ? requested : aiChatService.ContextSize;
+        return Ok(new { contextSize, allowedContextSizes = aiChatService.AllowedContextSizes, model = aiChatService.ModelName });
     }
 
     [HttpGet("payment-settings")]
@@ -336,7 +337,7 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
         var fromDate = string.IsNullOrWhiteSpace(from) ? DateTimeOffset.UtcNow.AddDays(-30).ToString("yyyy-MM-dd") : from.Trim();
         var toDate = string.IsNullOrWhiteSpace(to) ? DateTimeOffset.UtcNow.ToString("yyyy-MM-dd") : to.Trim();
         var report = db.CalculateAdminRevenue(fromDate, toDate);
-        return Ok(new { report, source = "csharp-api" });
+        return Ok(new { report, source = aiChatService.ModelName });
     }
 
     [HttpGet("after-sales")]

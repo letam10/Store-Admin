@@ -10,7 +10,9 @@ function sql(value, unicode = true) {
 }
 function row(product) {
   const features = JSON.stringify(Array.isArray(product.features) ? product.features : [])
-  return `(${sql(product.id)}, ${sql(product.source)}, ${sql(product.sourceId)}, ${sql(product.name)}, ${sql(product.category)}, ${Number(product.price) || 0}, ${sql(product.description)}, ${sql(product.image, false)}, ${sql(features, false)}, ${sql(product.tone || 'green')}, ${sql(product.symbol || '✦')}, ${sql(product.label || 'Nguồn mẫu')}, ${sql(product.sourceUrl || '')}, ${Number(product.sourcePriceCents) || 0}, ${sql(product.sourceCurrency || 'VND')}, ${sql(product.importedAt || '2026-10-17')}, 0, 20)`
+  const discountPercent = Number.isFinite(Number(product.discountPercent)) ? Math.max(0, Math.min(90, Number(product.discountPercent))) : 0
+  const stockCount = Number.isFinite(Number(product.stockCount)) ? Math.max(0, Number(product.stockCount)) : 20
+  return `(${sql(product.id)}, ${sql(product.source)}, ${sql(product.sourceId)}, ${sql(product.name)}, ${sql(product.category)}, ${Number(product.price) || 0}, ${sql(product.description)}, ${sql(product.image, false)}, ${sql(features, false)}, ${sql(product.tone || 'green')}, ${sql(product.symbol || '✦')}, ${sql(product.label || 'Nguồn mẫu')}, ${sql(product.sourceUrl || '')}, ${Number(product.sourcePriceCents) || 0}, ${sql(product.sourceCurrency || 'VND')}, ${sql(product.importedAt || '2026-10-17')}, ${discountPercent}, ${stockCount})`
 }
 const columns = '[id], [source], [source_id], [name], [category], [price], [description], [image], [features_json], [tone], [symbol], [label], [source_url], [source_price_cents], [source_currency], [imported_at], [discount_percent], [stock_count]'
 const ids = products.map((product) => sql(product.id, false)).join(', ')
