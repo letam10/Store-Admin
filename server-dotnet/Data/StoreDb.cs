@@ -498,6 +498,19 @@ public sealed class StoreDb
             new ThemeRadius(18, 10, 24),
             32));
 
+    private static StoreTheme DefaultAdminTheme() => new(
+        1,
+        "light",
+        "forest",
+        new ThemeVariant(
+            new ThemeColors("#edf4ef", "#f9fcf8", "#e0ece3", "#173827", "#5d7466", "#c5d7c9", "#3f7f5a", "#245b3b", "#d7e9da", "#ffffff", "#d6e8d9", "#a84f45", "#3f7c55"),
+            new ThemeRadius(16, 10, 20),
+            18),
+        new ThemeVariant(
+            new ThemeColors("#0d1b14", "#14271e", "#1d3528", "#edf7ef", "#a8c4af", "#355943", "#76b98a", "#9bd3a8", "#254b31", "#193127", "#28543a", "#ee8b83", "#75c995"),
+            new ThemeRadius(16, 10, 20),
+            28));
+
     private static JsonElement Property(JsonElement source, string name)
     {
         if (source.ValueKind != JsonValueKind.Object) return default;
@@ -559,9 +572,9 @@ public sealed class StoreDb
             ReadInt(source, "shadowStrength", fallback.ShadowStrength, 0, 100));
     }
 
-    private static StoreTheme NormalizeThemeJson(JsonElement source)
+    private static StoreTheme NormalizeThemeJson(JsonElement source, StoreTheme? configuredFallback = null)
     {
-        var fallback = DefaultTheme();
+        var fallback = configuredFallback ?? DefaultTheme();
         var mode = ReadString(source, "defaultMode", fallback.DefaultMode).ToLowerInvariant();
         var preset = ReadString(source, "presetId", fallback.PresetId).ToLowerInvariant();
         var presetId = preset is "forest" or "terracotta" or "olive" ? preset : fallback.PresetId;
@@ -585,6 +598,22 @@ public sealed class StoreDb
         catch (JsonException)
         {
             return DefaultTheme();
+        }
+    }
+
+    public StoreTheme AdminTheme()
+    {
+        var fallback = DefaultAdminTheme();
+        var raw = GetSetting("appearance.adminTheme");
+        if (string.IsNullOrWhiteSpace(raw)) return fallback;
+        try
+        {
+            using var document = JsonDocument.Parse(raw);
+            return NormalizeThemeJson(document.RootElement, fallback);
+        }
+        catch (JsonException)
+        {
+            return fallback;
         }
     }
 
@@ -614,7 +643,7 @@ public sealed class StoreDb
             else if (k.StartsWith("appearance.", StringComparison.OrdinalIgnoreCase))
             {
                 var key = k[11..];
-                if (!key.Equals("theme", StringComparison.OrdinalIgnoreCase)) result[key] = v;
+                if (!key.Equals("theme", StringComparison.OrdinalIgnoreCase) && !key.Equals("adminTheme", StringComparison.OrdinalIgnoreCase)) result[key] = v;
             }
         }
         return result;
@@ -625,10 +654,11 @@ public sealed class StoreDb
         var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, value) in LegacyAppearance()) result[key] = value;
         result["theme"] = Theme();
+        result["adminTheme"] = AdminTheme();
         return result;
     }
 
-    public void SaveAppearance(IReadOnlyDictionary<string, string> dict, JsonElement? theme = null)
+    public void SaveAppearance(IReadOnlyDictionary<string, string> dict, JsonElement? theme = null, JsonElement? adminTheme = null)
     {
         var merged = new Dictionary<string, string>(LegacyAppearance(), StringComparer.OrdinalIgnoreCase);
         foreach (var (k, v) in dict) merged[k] = v ?? "";
@@ -636,6 +666,8 @@ public sealed class StoreDb
         SetSetting("storefront_appearance", json);
         var normalizedTheme = theme.HasValue ? NormalizeThemeJson(theme.Value) : Theme();
         SetSetting("appearance.theme", JsonSerializer.Serialize(normalizedTheme, ThemeJsonOptions));
+        var normalizedAdminTheme = adminTheme.HasValue ? NormalizeThemeJson(adminTheme.Value, DefaultAdminTheme()) : AdminTheme();
+        SetSetting("appearance.adminTheme", JsonSerializer.Serialize(normalizedAdminTheme, ThemeJsonOptions));
         using var db = Open();
         foreach (var (k, v) in merged)
         {

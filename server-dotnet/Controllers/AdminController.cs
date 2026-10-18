@@ -115,7 +115,7 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
     }
 
     [HttpGet("appearance")]
-    public IActionResult Appearance() => RequireAdmin() is null ? Unauthorized(new { error = "UNAUTHENTICATED" }) : Ok(new { appearance = db.Appearance(), theme = db.Theme() });
+    public IActionResult Appearance() => RequireAdmin() is null ? Unauthorized(new { error = "UNAUTHENTICATED" }) : Ok(new { appearance = db.Appearance(), theme = db.Theme(), adminTheme = db.AdminTheme() });
 
     [HttpPut("appearance")]
     public IActionResult UpdateAppearance([FromBody] JsonElement request)
@@ -128,6 +128,7 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
 
         var legacy = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         JsonElement? theme = null;
+        JsonElement? adminTheme = null;
         var hasThemeShape = false;
         if (source.ValueKind == JsonValueKind.Object)
         {
@@ -138,14 +139,24 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
                     theme = property.Value.Clone();
                     continue;
                 }
+                if (property.Name.Equals("adminTheme", StringComparison.OrdinalIgnoreCase))
+                {
+                    adminTheme = property.Value.Clone();
+                    continue;
+                }
                 if (property.Name is "schemaVersion" or "defaultMode" or "presetId" or "light" or "dark") hasThemeShape = true;
                 if (property.Value.ValueKind == JsonValueKind.String) legacy[property.Name] = property.Value.GetString() ?? "";
             }
             if (!theme.HasValue && hasThemeShape) theme = source.Clone();
         }
 
-        db.SaveAppearance(legacy, theme);
-        return Ok(new { appearance = db.Appearance(), theme = db.Theme() });
+        var topLevelTheme = Property(request, "theme");
+        if (topLevelTheme.ValueKind == JsonValueKind.Object) theme = topLevelTheme.Clone();
+        var topLevelAdminTheme = Property(request, "adminTheme");
+        if (topLevelAdminTheme.ValueKind == JsonValueKind.Object) adminTheme = topLevelAdminTheme.Clone();
+
+        db.SaveAppearance(legacy, theme, adminTheme);
+        return Ok(new { appearance = db.Appearance(), theme = db.Theme(), adminTheme = db.AdminTheme() });
     }
 
     [HttpGet("records")]

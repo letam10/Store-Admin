@@ -12,7 +12,7 @@ import { normalizeSearch } from '../storefront/state'
 import { AdminCustomers, AdminFavorites, AdminOrders, AdminReviews, AdminVouchers } from './AdminCommerce'
 import './AdminModules.css'
 import ThemeEditor from './ThemeEditor'
-import { AdminAfterSales, AdminPaymentSettings } from './AdminOrderWorkflow'
+import { AdminAfterSales } from './AdminOrderWorkflow'
 import DropdownMenu from '../components/ui/DropdownMenu'
 
 const statusOptions = ['Đang dùng', 'Nháp', 'Đang xử lý', 'Chờ duyệt', 'Đã xong', 'Đã duyệt', 'Tạm dừng']
@@ -46,7 +46,6 @@ const crudSchemas = {
   staff: { title: 'Quản lý nhân viên', description: 'Quản lý vai trò, ca làm, trạng thái và thông tin đăng nhập nội bộ.', fields: [{ key: 'role', label: 'Vai trò' }, { key: 'shift', label: 'Ca làm' }, { key: 'login', label: 'Tài khoản đăng nhập' }], columns: ['Vai trò', 'Ca làm', 'Tài khoản'] },
   overtime: { title: 'Tăng ca & khen thưởng', description: 'Tạo và duyệt đề xuất tăng ca hoặc ghi nhận thành tích.', fields: [{ key: 'kind', label: 'Hạng mục', options: ['Tăng ca', 'Khen thưởng'] }, { key: 'value', label: 'Thời lượng / điểm' }, { key: 'note', label: 'Ghi chú' }], columns: ['Hạng mục', 'Thời lượng / điểm', 'Ghi chú'] },
   support: { title: 'Quản lý chăm sóc khách hàng', description: 'Theo dõi ticket CSKH theo người phụ trách và trạng thái.', fields: [{ key: 'customer', label: 'Khách hàng' }, { key: 'topic', label: 'Chủ đề' }, { key: 'assignee', label: 'Phụ trách' }, { key: 'email', label: 'Email phản hồi' }, { key: 'message', label: 'Nội dung yêu cầu' }], columns: ['Khách hàng', 'Chủ đề', 'Phụ trách', 'Email', 'Nội dung'] },
-  settings: { title: 'Cài đặt hệ thống', description: 'Quản lý các thông số vận hành, cảnh báo và quy tắc hiển thị nội bộ.', fields: [{ key: 'key', label: 'Tên cài đặt' }, { key: 'value', label: 'Giá trị' }, { key: 'description', label: 'Mô tả' }], columns: ['Cài đặt', 'Giá trị', 'Mô tả'] },
 }
 
 // Chức năng emptyData: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
@@ -234,7 +233,6 @@ export default function AdminModule({ module, csrfToken, onNavigate, language = 
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (module === 'rewards-wheel') return <AdminVouchers csrfToken={csrfToken} />
   if (module === 'returns') return <AdminAfterSales csrfToken={csrfToken} />
-  if (module === 'settings') return <><AdminPaymentSettings csrfToken={csrfToken} /><CrudModule module={module} csrfToken={csrfToken} /></>
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (crudSchemas[module]) return <CrudModule module={module} csrfToken={csrfToken} />
   return <section className="admin-module-card"><h2>Module chưa có dữ liệu</h2><p>Module này đang chờ cấu hình backend.</p></section>

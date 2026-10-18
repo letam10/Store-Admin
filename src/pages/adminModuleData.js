@@ -25,5 +25,4 @@ export const adminModules = [
   ['rewards-wheel', 'Voucher', '◌'],
   ['staff', 'Nhân viên', '♙'],
   ['overtime', 'Tăng ca & khen thưởng', '★'],
-  ['settings', 'Cài đặt hệ thống', '⚙'],
 ]

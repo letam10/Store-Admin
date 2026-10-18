@@ -24,7 +24,7 @@ const moduleGroups = [
   { title: 'Tổng quan', ids: ['dashboard', 'statistics', 'ai-local'] },
   { title: 'Hàng hóa & cửa hàng', ids: ['products', 'product-views', 'inventory', 'logistics', 'appearance', 'returns'] },
   { title: 'Khách hàng', ids: ['customers', 'favorites', 'reviews', 'rewards-wheel', 'customer-orders', 'support'] },
-  { title: 'Vận hành', ids: ['order-types', 'staff', 'overtime', 'settings'] },
+  { title: 'Vận hành', ids: ['order-types', 'staff', 'overtime'] },
 ]
 const moduleById = new Map(adminModules.map((entry) => [entry[0], entry]))
 
@@ -50,7 +50,7 @@ function formatMoney(value) {
 export default function Admin() {
   const today = useMemo(() => businessToday(), [])
   const [theme, setTheme] = useState(() => THEME_MODES.includes(localStorage.getItem('store_admin_theme')) ? localStorage.getItem('store_admin_theme') : 'light')
-  const [themeConfig, setThemeConfig] = useState(() => normalizeTheme(DEFAULT_THEME))
+  const [adminThemeConfig, setAdminThemeConfig] = useState(() => normalizeTheme(DEFAULT_THEME))
   const [language, setLanguage] = useState(() => localStorage.getItem('store_admin_language') || 'vi')
   const [session, setSession] = useState(null)
   const [credentials, setCredentials] = useState({ username: '', password: '' })
@@ -81,9 +81,9 @@ export default function Admin() {
 
   useEffect(() => {
     document.documentElement.dataset.adminTheme = theme === 'dark' ? 'dark' : 'light'
-    Object.entries(themeVariables(themeConfig, theme)).forEach(([name, value]) => document.documentElement.style.setProperty(name, value))
+    Object.entries(themeVariables(adminThemeConfig, theme)).forEach(([name, value]) => document.documentElement.style.setProperty(name, value))
     localStorage.setItem('store_admin_theme', theme === 'dark' ? 'dark' : 'light')
-  }, [theme, themeConfig])
+  }, [theme, adminThemeConfig])
 
   useEffect(() => {
     document.documentElement.lang = language === 'en' ? 'en' : 'vi'
@@ -158,16 +158,10 @@ export default function Admin() {
     const restoreEpoch = ++restoreEpochRef.current
     const reportEpoch = statsEpochRef.current
 
-    apiJson('/api/admin/settings')
-      .then((payload) => {
-        if (epoch !== loadEpochRef.current || settingsEpoch !== settingsEpochRef.current) return
-        setSettings(payload); setContextSize(payload.contextSize)
-      })
-
     apiJson('/api/admin/appearance')
       .then((payload) => {
-        const nextTheme = normalizeTheme(payload.theme || payload.appearance?.theme)
-        setThemeConfig(nextTheme)
+        const nextTheme = normalizeTheme(payload.adminTheme || payload.theme || payload.appearance?.theme)
+        setAdminThemeConfig(nextTheme)
         if (!localStorage.getItem('store_admin_theme')) setTheme(nextTheme.defaultMode)
       })
       .catch(() => {})
@@ -250,6 +244,24 @@ export default function Admin() {
     }
     return () => { es?.close() }
   }, [session?.authenticated])
+
+  useEffect(() => {
+    if (!session?.authenticated || activeModule !== 'ai-local') return undefined
+    const epoch = loadEpochRef.current
+    const settingsEpoch = ++settingsEpochRef.current
+    apiJson('/api/admin/settings')
+      .then((payload) => {
+        if (epoch !== loadEpochRef.current || settingsEpoch !== settingsEpochRef.current) return
+        setSettings(payload)
+        setContextSize(payload.contextSize)
+      })
+      .catch((error) => {
+        if (epoch !== loadEpochRef.current || settingsEpoch !== settingsEpochRef.current) return
+        if (error.code === 'UNAUTHENTICATED') expireSession()
+        else setPageError('Không tải được cấu hình AI local.')
+      })
+    return () => { settingsEpochRef.current += 1 }
+  }, [session?.authenticated, activeModule]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [messages, activity])
 
@@ -421,7 +433,7 @@ export default function Admin() {
     </form></div></main>
   )
 
-  const moduleEnglish = { dashboard: 'Dashboard', customers: 'Customers', favorites: 'Favorites', reviews: 'Reviews', 'customer-orders': 'Orders', products: 'Products', 'product-views': 'Most viewed', logistics: 'Logistics', inventory: 'Inventory', appearance: 'Storefront', returns: 'Returns', statistics: 'Statistics', 'ai-local': 'Local AI', 'order-types': 'Order types', support: 'Support', settings: 'System settings', 'rewards-wheel': 'Voucher', staff: 'Staff', overtime: 'Overtime & rewards' }
+  const moduleEnglish = { dashboard: 'Dashboard', customers: 'Customers', favorites: 'Favorites', reviews: 'Reviews', 'customer-orders': 'Orders', products: 'Products', 'product-views': 'Most viewed', logistics: 'Logistics', inventory: 'Inventory', appearance: 'Storefront', returns: 'Returns', statistics: 'Statistics', 'ai-local': 'Local AI', 'order-types': 'Order types', support: 'Support', 'rewards-wheel': 'Voucher', staff: 'Staff', overtime: 'Overtime & rewards' }
   const currentLabel = language === 'en' ? (moduleEnglish[activeModule] || 'Dashboard') : (adminModules.find(([id]) => id === activeModule)?.[1] || 'Tổng quan')
 
   return (
@@ -432,7 +444,7 @@ export default function Admin() {
         <nav aria-label="Điều hướng quản trị">
           {moduleGroups.map((group) => <div className="admin-nav-group" key={group.title}><p>{group.title}</p>{group.ids.map((id) => {
             const [, label, icon] = moduleById.get(id)
-            const displayLabel = language === 'en' ? ({ dashboard: 'Dashboard', statistics: 'Statistics', 'ai-local': 'Local AI', products: 'Products', 'product-views': 'Most viewed', inventory: 'Inventory', logistics: 'Logistics', appearance: 'Storefront', returns: 'Returns', customers: 'Customers', favorites: 'Favorites', reviews: 'Reviews', 'rewards-wheel': 'Voucher', 'customer-orders': 'Orders', support: 'Support', 'order-types': 'Order types', settings: 'System settings', staff: 'Staff', overtime: 'Overtime & rewards' }[id] || label) : label
+            const displayLabel = language === 'en' ? ({ dashboard: 'Dashboard', statistics: 'Statistics', 'ai-local': 'Local AI', products: 'Products', 'product-views': 'Most viewed', inventory: 'Inventory', logistics: 'Logistics', appearance: 'Storefront', returns: 'Returns', customers: 'Customers', favorites: 'Favorites', reviews: 'Reviews', 'rewards-wheel': 'Voucher', 'customer-orders': 'Orders', support: 'Support', 'order-types': 'Order types', staff: 'Staff', overtime: 'Overtime & rewards' }[id] || label) : label
             return <button key={id} type="button" aria-current={activeModule === id ? 'page' : undefined} className={activeModule === id ? 'is-active' : ''} onClick={() => setActiveModule(id)}><span aria-hidden="true">{icon}</span>{displayLabel}</button>
           })}</div>)}
         </nav>
