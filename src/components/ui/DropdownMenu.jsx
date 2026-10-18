@@ -44,16 +44,11 @@ export default function DropdownMenu({ value, options = [], onChange, ariaLabel,
 
   useEffect(() => {
     if (!open) return undefined
-    triggerRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
     const measureViewport = () => {
       const trigger = triggerRef.current
       const root = rootRef.current
       if (!trigger || !root) return
-      let rect = trigger.getBoundingClientRect()
-      if (window.innerHeight - rect.bottom < 160) {
-        trigger.scrollIntoView?.({ block: 'center', inline: 'nearest' })
-        rect = trigger.getBoundingClientRect()
-      }
+      const rect = trigger.getBoundingClientRect()
       root.style.setProperty('--admin-dropdown-max-height', `${Math.max(140, Math.min(360, window.innerHeight - rect.bottom - 12))}px`)
     }
     measureViewport()
