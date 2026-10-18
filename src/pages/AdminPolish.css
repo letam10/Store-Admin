@@ -37,3 +37,196 @@ html[data-admin-theme=dark] .admin-detail-panel :is(span,output,li){color:#e7f3e
 /* Hàng khách hàng giữ tương phản khi rê chuột. */
 html[data-admin-theme="dark"] .admin-clickable-row:hover{background:#214b35;color:#eff8f2}
 .admin-message-input{width:100%;box-sizing:border-box;min-height:140px;border:1px solid #d6e4dc;border-radius:12px;padding:12px;font:inherit;resize:vertical;background:#fff;color:#254333}html[data-admin-theme="dark"] .admin-message-input{background:#11271b;color:#eff8f2;border-color:#3f614d}
+
+/* Chuẩn hóa thanh công cụ header: căn thẳng hàng và các ô vuông/nút bấm bằng nhau */
+.admin-header__actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  font-size: 11px !important;
+}
+
+.admin-header__actions .admin-live-dot {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  line-height: 1 !important;
+  color: var(--admin-accent-strong, #2e6b47) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  white-space: nowrap !important;
+  margin-right: 2px !important;
+}
+
+.admin-preferences {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.admin-language-control {
+  display: inline-flex !important;
+  align-items: center !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  position: relative !important;
+}
+
+.admin-language-control .sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* 3 ô vuông/nút đồng kích thước chiều cao và bo góc */
+.admin-header__actions .admin-dropdown-menu {
+  width: auto !important;
+  min-width: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+}
+
+.admin-header__actions .admin-dropdown-menu__trigger,
+.admin-header__actions .admin-theme-toggle,
+.admin-header__actions > button {
+  height: 38px !important;
+  min-height: 38px !important;
+  max-height: 38px !important;
+  box-sizing: border-box !important;
+  border: 1px solid #2f6949 !important;
+  border-radius: 10px !important;
+  background: #1c4232 !important;
+  color: #edf7ef !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  transition: all .2s ease !important;
+  box-shadow: 0 2px 6px rgba(16, 44, 32, 0.15) !important;
+}
+
+.admin-header__actions .admin-dropdown-menu__trigger:hover,
+.admin-header__actions .admin-theme-toggle:hover,
+.admin-header__actions > button:hover {
+  background: #143326 !important;
+  border-color: #438f65 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(16, 44, 32, 0.25) !important;
+}
+
+/* Chiều rộng & padding cân xứng cho từng ô */
+.admin-header__actions .admin-dropdown-menu__trigger {
+  width: auto !important;
+  min-width: 58px !important;
+  padding: 0 10px !important;
+  gap: 4px !important;
+}
+
+.admin-header__actions .admin-dropdown-menu__value {
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  color: inherit !important;
+}
+
+.admin-header__actions .admin-dropdown-menu__caret {
+  font-size: 11px !important;
+  color: inherit !important;
+  margin-left: 2px !important;
+}
+
+.admin-header__actions .admin-theme-toggle {
+  width: auto !important;
+  min-width: 76px !important;
+  padding: 0 12px !important;
+  gap: 6px !important;
+}
+
+.admin-header__actions .admin-theme-toggle span {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  color: inherit !important;
+}
+
+.admin-header__actions > button {
+  width: auto !important;
+  min-width: 82px !important;
+  padding: 0 14px !important;
+}
+
+/* Menu thả xuống của ô Ngôn ngữ */
+.admin-header__actions .admin-dropdown-menu__panel {
+  min-width: 70px !important;
+  padding: 4px !important;
+  border-radius: 10px !important;
+  border: 1px solid #2f6949 !important;
+  background: #1c4232 !important;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4) !important;
+}
+
+.admin-header__actions .admin-dropdown-menu__option {
+  min-height: 32px !important;
+  padding: 6px 10px !important;
+  border-radius: 7px !important;
+  color: #edf7ef !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+
+.admin-header__actions .admin-dropdown-menu__option:hover,
+.admin-header__actions .admin-dropdown-menu__option.is-active {
+  background: #275641 !important;
+  color: #ffffff !important;
+}
+
+.admin-header__actions .admin-dropdown-menu__option[aria-selected=true] {
+  color: #76d795 !important;
+}
+
+/* Chế độ Dark mode đồng bộ */
+html[data-admin-theme="dark"] .admin-header__actions .admin-live-dot {
+  color: #76d795 !important;
+}
+
+html[data-admin-theme="dark"] .admin-header__actions .admin-dropdown-menu__trigger,
+html[data-admin-theme="dark"] .admin-header__actions .admin-theme-toggle,
+html[data-admin-theme="dark"] .admin-header__actions > button {
+  background: #14281f !important;
+  border-color: #355943 !important;
+  color: #edf7ef !important;
+}
+
+html[data-admin-theme="dark"] .admin-header__actions .admin-dropdown-menu__trigger:hover,
+html[data-admin-theme="dark"] .admin-header__actions .admin-theme-toggle:hover,
+html[data-admin-theme="dark"] .admin-header__actions > button:hover {
+  background: #1c382b !important;
+  border-color: #4f8b67 !important;
+  color: #ffffff !important;
+}
+
+html[data-admin-theme="dark"] .admin-header__actions .admin-dropdown-menu__panel {
+  background: #14281f !important;
+  border-color: #355943 !important;
+}
+
+html[data-admin-theme="dark"] .admin-header__actions .admin-dropdown-menu__option:hover,
+html[data-admin-theme="dark"] .admin-header__actions .admin-dropdown-menu__option.is-active {
+  background: #1c382b !important;
+  color: #ffffff !important;
+}
+
+html[data-admin-theme="dark"] .admin-header__actions .admin-dropdown-menu__option[aria-selected=true] {
+  color: #76d795 !important;
+}
+
