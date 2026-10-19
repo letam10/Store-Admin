@@ -166,11 +166,9 @@ try
     await context.Database.EnsureCreatedAsync();
 
     var storeDb = scope.ServiceProvider.GetRequiredService<StoreDb>();
-    try { storeDb.EnsureDatabaseExists(); } catch { /* đã log trong StoreDb ctor */ }
-    storeDb.EnsureCustomerTables();
     try
     {
-        storeDb.SeedDefaultProducts();
+        storeDb.SeedDefaultProducts(force: false);
     }
     catch (Exception seedEx)
     {

@@ -1080,8 +1080,28 @@ public sealed class StoreDb
         return result;
     }
 
-    public void SeedDefaultProducts()
+    public void SeedDefaultProducts(bool force = false)
     {
+        if (!force)
+        {
+            try
+            {
+                using var checkDb = Open();
+                using var countCmd = checkDb.CreateCommand();
+                countCmd.CommandText = "SELECT COUNT(1) FROM catalog_products";
+                var count = Convert.ToInt32(countCmd.ExecuteScalar() ?? 0);
+                var backfillDone = string.Equals(GetSetting("catalog.manifest.backfill.v1"), "completed", StringComparison.OrdinalIgnoreCase);
+                if (count >= 1000 && backfillDone)
+                {
+                    return;
+                }
+            }
+            catch
+            {
+                // Nếu bảng chưa có hoặc lỗi, tiếp tục thực hiện bên dưới
+            }
+        }
+
         var manifestPath = Environment.GetEnvironmentVariable("CATALOG_MANIFEST_PATH");
         var candidates = new[]
         {

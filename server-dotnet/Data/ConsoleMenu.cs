@@ -3,6 +3,7 @@
  * Mục đích: Bảng menu tương tác quản lý hệ thống trên Console ASP.NET Core (giao diện chuẩn, căn lề thẳng hàng 100%).
  */
 using System.Diagnostics;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using Microsoft.AspNetCore.Builder;
 using StoreApi.Security;
@@ -82,22 +83,15 @@ public static class ConsoleMenu
         {
             try { Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }); } catch { }
         }
-        async Task WaitForPortAsync(int port, TimeSpan timeout)
+        async Task WaitForPortsAsync(IEnumerable<int> ports, TimeSpan timeout)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
+            var target = ports.ToHashSet();
             while (sw.Elapsed < timeout)
             {
-                if (IsPortInUse(port)) return;
-                await Task.Delay(400);
-            }
-        }
-        async Task WaitForPortClosedAsync(int port, TimeSpan timeout)
-        {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            while (sw.Elapsed < timeout)
-            {
-                if (!IsPortInUse(port)) return;
-                await Task.Delay(400);
+                var listening = GetListeningPorts();
+                if (target.All(p => listening.Contains(p))) return;
+                await Task.Delay(100);
             }
         }
         async Task StartAllAsync()
@@ -106,22 +100,22 @@ public static class ConsoleMenu
             Console.WriteLine("\n[+] DANG KHOI DONG TOAN BO HE THONG (API + Store + Admin)...");
             Console.ResetColor();
 
+            var current = GetListeningPorts();
+
             // 1. API 5000
             try
             {
-                if (!IsApiRunning())
+                if (!current.Contains(5000))
                 {
                     if (apiHostWasStopped)
                     {
                         StartApiConsole();
-                        await WaitForPortAsync(5000, TimeSpan.FromSeconds(10));
                     }
                     else
                     {
                         await app.StartAsync();
-                        await WaitForPortAsync(5000, TimeSpan.FromSeconds(8));
                     }
-                    Console.WriteLine("  [1/3] API :5000          -> OK (http://127.0.0.1:5000/swagger)");
+                    Console.WriteLine("  [1/3] API :5000          -> Dang khoi dong...");
                 }
                 else
                 {
@@ -134,11 +128,10 @@ public static class ConsoleMenu
                 Console.WriteLine($"  [1/3] API :5000 gap loi ({ex.Message}), thu mo cua so console moi...");
                 Console.ResetColor();
                 StartApiConsole();
-                await WaitForPortAsync(5000, TimeSpan.FromSeconds(10));
             }
 
             // 2. Store 5173
-            if (!IsPortInUse(5173))
+            if (!current.Contains(5173))
             {
                 LaunchStoreProcess();
                 Console.WriteLine("  [2/3] Store Frontend :5173 -> Dang khoi dong...");
@@ -149,7 +142,7 @@ public static class ConsoleMenu
             }
 
             // 3. Admin 5174
-            if (!IsPortInUse(5174))
+            if (!current.Contains(5174))
             {
                 LaunchAdminProcess();
                 Console.WriteLine("  [3/3] Admin Dashboard :5174-> Dang khoi dong...");
@@ -159,13 +152,13 @@ public static class ConsoleMenu
                 Console.WriteLine("  [3/3] Admin Dashboard :5174-> Da chay san.");
             }
 
-            await WaitForPortAsync(5000, TimeSpan.FromSeconds(12));
-            await WaitForPortAsync(5173, TimeSpan.FromSeconds(12));
-            await WaitForPortAsync(5174, TimeSpan.FromSeconds(12));
+            // Cho ca 3 cong san sang dong thoi (toi da 12s)
+            await WaitForPortsAsync(new[] { 5000, 5173, 5174 }, TimeSpan.FromSeconds(12));
 
-            if (IsPortInUse(5000)) OpenUrl("http://127.0.0.1:5000/swagger");
-            if (IsPortInUse(5173)) OpenUrl("http://127.0.0.1:5173");
-            if (IsPortInUse(5174)) OpenUrl("http://127.0.0.1:5174");
+            var ready = GetListeningPorts();
+            if (ready.Contains(5000)) OpenUrl("http://127.0.0.1:5000/swagger");
+            if (ready.Contains(5173)) OpenUrl("http://127.0.0.1:5173");
+            if (ready.Contains(5174)) OpenUrl("http://127.0.0.1:5174");
 
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine("\n[OK] DA BAT TOAN BO HE THONG VA MO 3 TRANG WEB!");
@@ -175,47 +168,51 @@ public static class ConsoleMenu
 
         async Task StopAllCoreAsync()
         {
-            // 1. API 5000
+            // 1. Dung API in-process neu dang chay
             if (IsApiRunning())
             {
                 try
                 {
                     await app.StopAsync();
                     apiHostWasStopped = true;
-                    await WaitForPortClosedAsync(5000, TimeSpan.FromSeconds(3));
                 }
                 catch { }
-                if (IsApiRunning())
-                {
-                    StopPort(5000);
-                    await WaitForPortClosedAsync(5000, TimeSpan.FromSeconds(3));
-                }
-                Console.WriteLine("  [1/3] API :5000          -> Da tat.");
-            }
-            else
-            {
-                Console.WriteLine("  [1/3] API :5000          -> Dang tat.");
             }
 
-            // 2 & 3. Frontends 5173 & 5174
-            KillProcessTree(_storeFrontendCmdPid, "Store CMD :5173");
-            KillProcessTree(_adminFrontendCmdPid, "Admin CMD :5174");
-            _storeFrontendCmdPid = null;
-            _adminFrontendCmdPid = null;
-            StopPort(5173);
-            StopPort(5174);
-            Console.WriteLine("  [2/3] Store Frontend :5173 -> Da tat.");
-            Console.WriteLine("  [3/3] Admin Dashboard :5174-> Da tat.");
+            // 2 & 3. Giai phong toan bo port 5000, 5173, 5174 va tat ca cay tien trinh CMD/Node trong 1 lenh duy nhat
+            StopPorts(5000, 5173, 5174);
+
+            // Cho toi da 1s de tat ca cac port dong hoan toan
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < 1000)
+            {
+                var ports = GetListeningPorts();
+                if (!ports.Contains(5000) && !ports.Contains(5173) && !ports.Contains(5174))
+                    break;
+                await Task.Delay(50);
+            }
+
+            var finalCheck = GetListeningPorts();
+            Console.WriteLine(finalCheck.Contains(5000)
+                ? "  [1/3] API :5000          -> Chua tat hoan toan."
+                : "  [1/3] API :5000          -> Da tat.");
+            Console.WriteLine(finalCheck.Contains(5173)
+                ? "  [2/3] Store Frontend :5173 -> Chua tat hoan toan."
+                : "  [2/3] Store Frontend :5173 -> Da tat.");
+            Console.WriteLine(finalCheck.Contains(5174)
+                ? "  [3/3] Admin Dashboard :5174-> Chua tat hoan toan."
+                : "  [3/3] Admin Dashboard :5174-> Da tat.");
         }
         while (true)
         {
             try { Console.Clear(); } catch { }
             TitleBar();
 
-            // Panel trang thai live: API / Store / Admin / DB – kiem tra port that, khong phu thuoc flag.
-            bool apiLive = IsApiRunning();
-            bool s5173 = IsPortInUse(5173);
-            bool s5174 = IsPortInUse(5174);
+            // Panel trang thai live: API / Store / Admin / DB – kiem tra port nhanh tu bang kernel Windows (< 1ms).
+            var livePorts = GetListeningPorts();
+            bool apiLive = livePorts.Contains(5000);
+            bool s5173 = livePorts.Contains(5173);
+            bool s5174 = livePorts.Contains(5174);
             string dbLine;
             try
             {
@@ -349,16 +346,24 @@ public static class ConsoleMenu
         Console.ResetColor();
     }
 
+    private static HashSet<int> GetListeningPorts()
+    {
+        try
+        {
+            var listeners = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners();
+            return new HashSet<int>(listeners.Select(ep => ep.Port));
+        }
+        catch
+        {
+            return new HashSet<int>();
+        }
+    }
+
     private static bool IsPortInUse(int port)
     {
         try
         {
-            using var client = new TcpClient();
-            var result = client.BeginConnect("127.0.0.1", port, null, null);
-            var success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromMilliseconds(500));
-            if (!success) return false;
-            client.EndConnect(result);
-            return true;
+            return GetListeningPorts().Contains(port);
         }
         catch
         {
@@ -455,99 +460,52 @@ public static class ConsoleMenu
         }
     }
 
-    private static void KillProcessTree(int? pid, string label)
+    private static void StopPort(int port)
     {
-        if (pid is null or <= 0)
-        {
-            Console.WriteLine($"  {label}: khong co PID cua so CMD da luu - se fallback theo port.");
-            return;
-        }
+        StopPorts(port);
+    }
 
+    private static void StopPorts(params int[] ports)
+    {
         try
         {
+            var pidsToKill = new HashSet<int>();
+
+            if (_storeFrontendCmdPid is > 0) pidsToKill.Add(_storeFrontendCmdPid.Value);
+            if (_adminFrontendCmdPid is > 0) pidsToKill.Add(_adminFrontendCmdPid.Value);
+            _storeFrontendCmdPid = null;
+            _adminFrontendCmdPid = null;
+
+            var portPids = GetPidsByPorts(ports);
+            foreach (var pid in portPids)
+            {
+                pidsToKill.Add(pid);
+            }
+
+            if (pidsToKill.Count == 0) return;
+
+            var args = "/F /T " + string.Join(" ", pidsToKill.Select(p => $"/PID {p}"));
             var psi = new ProcessStartInfo
             {
                 FileName = "taskkill",
-                Arguments = $"/PID {pid.Value} /T /F",
+                Arguments = args,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
             using var p = Process.Start(psi);
-            p?.WaitForExit(5000);
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"  {label}: da dong cua so CMD va cay tien trinh PID {pid.Value}.");
-            Console.ResetColor();
+            p?.WaitForExit(3000);
         }
         catch (Exception ex)
         {
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"  {label}: khong kill duoc PID {pid.Value} ({ex.Message}) - se fallback theo port.");
-            Console.ResetColor();
+            Console.WriteLine($"  Loi khi tat tien trinh: {ex.Message}");
         }
     }
 
-    private static void StopPort(int port)
+    private static List<int> GetPidsByPorts(IEnumerable<int> ports)
     {
-        try
-        {
-            var pids = GetPidsByPort(port);
-            if (pids.Count == 0)
-            {
-                Console.WriteLine($"  Cong {port}: hien dang trong - khong can tat.");
-                return;
-            }
-            Console.WriteLine($"  Cong {port}: tim thay PID {string.Join(", ", pids)} - dang tat...");
-            foreach (var pid in pids)
-            {
-                try
-                {
-                    // /T = kill ca cay tien trinh con (cmd -> npm -> node/vite), /F = bat buoc
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = "taskkill",
-                        Arguments = $"/PID {pid} /T /F",
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-                    using var p = Process.Start(psi);
-                    if (p != null)
-                    {
-                        p.WaitForExit(5000);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"  Cong {port} PID {pid}: khong tat duoc ({ex.Message})");
-                }
-            }
-            System.Threading.Thread.Sleep(800);
-            if (!IsPortInUse(port))
-            {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"  Cong {port}: da tat thanh cong!");
-                Console.ResetColor();
-            }
-            else
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"  Cong {port}: van con tien trinh giu cong. Thu mo CMD chay: netstat -ano | findstr :{port}  roi taskkill /PID <PID> /F");
-                Console.ResetColor();
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"  Cong {port}: loi {ex.Message}");
-            Console.ResetColor();
-        }
-    }
-
-    private static List<int> GetPidsByPort(int port)
-    {
+        var targetPorts = ports.ToHashSet();
         var pids = new List<int>();
         try
         {
@@ -562,15 +520,26 @@ public static class ConsoleMenu
             using var p = Process.Start(psi);
             if (p == null) return pids;
             string output = p.StandardOutput.ReadToEnd();
-            p.WaitForExit(5000);
+            p.WaitForExit(3000);
             int selfPid = Environment.ProcessId;
+
             foreach (var rawLine in output.Split('\n'))
             {
                 var line = rawLine.Trim();
                 if (!line.StartsWith("TCP", StringComparison.OrdinalIgnoreCase)) continue;
                 if (!line.Contains("LISTENING", StringComparison.OrdinalIgnoreCase)) continue;
-                // Khop chinh xac ":5173 " de tranh nham ":51730"
-                if (!line.Contains($":{port} ", StringComparison.Ordinal)) continue;
+
+                bool matches = false;
+                foreach (var port in targetPorts)
+                {
+                    if (line.Contains($":{port} ", StringComparison.Ordinal))
+                    {
+                        matches = true;
+                        break;
+                    }
+                }
+                if (!matches) continue;
+
                 var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length == 0) continue;
                 if (int.TryParse(parts[^1], out int pid) && pid > 0 && pid != selfPid && !pids.Contains(pid))
@@ -722,7 +691,7 @@ public static class ConsoleMenu
 
         try
         {
-            db.SeedDefaultProducts();
+            db.SeedDefaultProducts(force: true);
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine("\n✅ Đã nạp thành công các sản phẩm mẫu vào bảng Products và catalog_products trong SQL Server!");
             Console.ResetColor();
