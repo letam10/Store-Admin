@@ -423,9 +423,9 @@ export default function Admin() {
   }
 
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-  if (session === null) return <main className="admin-shell"><div className="admin-loading-state"><p>Đang kiểm tra phiên admin…</p><ThemeLanguageControls compact /></div></main>
+  if (session === null) return <main className="admin-shell admin-shell--login"><div className="admin-login-card admin-loading-state"><div className="admin-login-card__preferences"><ThemeLanguageControls /></div><p>Đang kiểm tra phiên admin…</p></div></main>
   if (!session?.authenticated) return (
-    <main className="admin-shell admin-shell--login"><div className="admin-login-frame"><ThemeLanguageControls /><form className="admin-login" onSubmit={login}>
+    <main className="admin-shell admin-shell--login"><div className="admin-login-card"><div className="admin-login-card__preferences"><ThemeLanguageControls /></div><form className="admin-login" onSubmit={login}>
       <p className="admin-eyebrow">STORE ADMIN</p><h1>{copy.login}</h1><p>{copy.adminOnly}</p>
       <label>{copy.account}<input autoComplete="username" value={credentials.username} onChange={(event) => setCredentials((current) => ({ ...current, username: event.target.value }))} /></label>
       <label>{copy.password}<input type="password" autoComplete="current-password" value={credentials.password} onChange={(event) => setCredentials((current) => ({ ...current, password: event.target.value }))} /></label>
@@ -438,6 +438,7 @@ export default function Admin() {
 
   return (
     <main className="admin-shell admin-shell--workspace">
+      <div className="admin-workspace-card">
       <aside className="admin-sidebar">
         <a className="admin-brand" href="/admin">store<span>.</span><small>ADMIN</small></a>
         <div className="admin-sidebar__profile"><span>{String(session.username || 'A').slice(0, 1).toUpperCase()}</span><div><b>{session.username}</b><small>Quản trị viên</small></div></div>
@@ -451,6 +452,7 @@ export default function Admin() {
         <div className="admin-sidebar__footer"><a href={import.meta.env?.VITE_STOREFRONT_URL || 'http://localhost:5173'}>↗ {language === 'en' ? 'View store' : 'Xem cửa hàng'}</a><button type="button" onClick={logout}>{copy.signOut}</button></div>
       </aside>
       <section className="admin-main">
+        <div className="admin-main__card">
         <header className="admin-header">
           <div><p className="admin-eyebrow">STORE ADMIN / {activeModule.toUpperCase()}</p><h1>{currentLabel}</h1></div>
           <div className="admin-global-search">
@@ -503,7 +505,9 @@ export default function Admin() {
             </section>
           </div>
         </>}
+        </div>
       </section>
+      </div>
     </main>
   )
 }

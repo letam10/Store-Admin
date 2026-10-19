@@ -138,6 +138,11 @@ test('grouped admin navigation and dashboard shortcut open top-view analytics', 
     throw new Error('Unexpected URL ' + url)
   }, async ({ click }) => {
     assert.match(document.querySelector('.admin-sidebar').textContent, /Hàng hóa & cửa hàng/)
+    assert.ok(document.querySelector('.admin-workspace-card'))
+    assert.ok(document.querySelector('.admin-workspace-card .admin-sidebar'))
+    assert.ok(document.querySelector('.admin-main__card'))
+    assert.ok(document.querySelector('.admin-main__card .admin-theme-toggle'))
+    assert.ok(document.querySelector('.admin-main__card .admin-language-control'))
     await click('Sản phẩm xem nhiều')
     assert.match(document.querySelector('.admin-main').textContent, /20 sản phẩm được xem nhiều nhất/)
     assert.match(document.querySelector('.admin-view-list').textContent, /Tai nghe Everyday/)

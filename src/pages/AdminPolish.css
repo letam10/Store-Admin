@@ -230,3 +230,19 @@ html[data-admin-theme="dark"] .admin-header__actions .admin-dropdown-menu__optio
   color: #76d795 !important;
 }
 
+/* Khu làm việc và bộ điều khiển admin dùng chung một card bao ngoài. */
+.admin-main__card{min-height:calc(100vh - 92px);padding:clamp(20px,3vw,38px);border:1px solid var(--admin-border,#dce8de);border-radius:28px;background:var(--admin-surface,#fff);box-shadow:0 18px 46px rgb(23 55 40 / calc(var(--theme-shadow-strength) * .38))}
+.admin-login-card{width:min(470px,100%);padding:18px 28px 28px;border:1px solid var(--admin-border,#dce8de);border-radius:28px;background:var(--admin-surface,#fff);box-shadow:0 18px 50px rgb(23 55 40 / calc(var(--theme-shadow-strength) * .38))}
+.admin-login-card__preferences{display:flex;justify-content:flex-end}
+.admin-login-card .admin-login{width:100%;padding:18px 0 0;border:0;border-radius:0;background:transparent;box-shadow:none}
+.admin-loading-state{min-height:0;gap:18px}
+html[data-admin-theme="dark"] .admin-main__card,html[data-admin-theme="dark"] .admin-login-card{background:#14281f;border-color:#2d4a39;box-shadow:0 18px 46px #0007}
+@media(max-width:700px){.admin-main__card{min-height:calc(100vh - 80px);padding:18px;border-radius:20px}.admin-login-card{padding:16px 20px 22px;border-radius:20px}}
+.admin-shell--workspace{display:block;padding:24px;background:var(--admin-page,#f1f5f1)}
+.admin-workspace-card{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:calc(100vh - 48px);overflow:hidden;border:1px solid var(--admin-border,#dce8de);border-radius:30px;background:var(--admin-surface,#fff);box-shadow:0 22px 54px rgb(23 55 40 / calc(var(--theme-shadow-strength) * .42))}
+.admin-workspace-card .admin-sidebar{position:relative;top:auto;width:auto;height:auto;min-height:100%;border-radius:0}
+.admin-workspace-card .admin-main{min-width:0}
+html[data-admin-theme="dark"] .admin-workspace-card{border-color:#2d4a39;box-shadow:0 22px 54px #0008}
+@media(max-width:1150px){.admin-workspace-card{grid-template-columns:84px minmax(0,1fr)}}
+@media(max-width:700px){.admin-shell--workspace{padding:0}.admin-workspace-card{display:block;min-height:100vh;border:0;border-radius:0;box-shadow:none}.admin-workspace-card .admin-sidebar{min-height:0}}
+
