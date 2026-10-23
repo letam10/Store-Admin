@@ -19,7 +19,7 @@ namespace StoreApi.Controllers;
 [ApiController]
 [Route("api/admin")]
 // Vai trò kiểu AdminController: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
-public sealed class AdminController(StoreDb db, AiChatService aiChatService) : ControllerBase
+public sealed class AdminController(StoreDb db, AiChatService aiChatService, OrderEmailService orderEmailService) : ControllerBase
 {
     private const string Cookie = "store_admin_session";
 
@@ -210,7 +210,9 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        return db.MarkAdminOrderPaid(id, request?.Reference) ? Ok(new { success = true, orderId = id }) : NotFound(new { error = "ORDER_NOT_FOUND" });
+        var updated = db.MarkAdminOrderPaid(id, request?.Reference);
+        if (updated) orderEmailService.QueueInvoice(id);
+        return updated ? Ok(new { success = true, orderId = id }) : NotFound(new { error = "ORDER_NOT_FOUND" });
     }
 
     [HttpPatch("customer-orders/{id}/fulfillment")]

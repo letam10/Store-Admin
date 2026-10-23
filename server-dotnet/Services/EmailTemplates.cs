@@ -251,6 +251,83 @@ public static class EmailTemplates
 """;
     }
 
+    public static string BuildSupportRequestEmailHtml(SupportRequestData request, string frontendUrl)
+    {
+        var id = WebUtility.HtmlEncode(request.RequestId);
+        var name = WebUtility.HtmlEncode(request.CustomerName);
+        var email = WebUtility.HtmlEncode(request.CustomerEmail);
+        var topic = WebUtility.HtmlEncode(request.Topic);
+        var message = WebUtility.HtmlEncode(request.Message).Replace("\n", "<br>");
+        var createdAt = WebUtility.HtmlEncode(request.CreatedAt);
+        return $"""
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yêu cầu hỗ trợ mới #{id}</title>
+</head>
+<body style="margin:0;padding:32px 16px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#0f172a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
+        <tr><td style="height:5px;background:#0f766e;line-height:5px;font-size:0;">&nbsp;</td></tr>
+        <tr><td style="padding:26px 28px 12px;"><div style="font-size:24px;font-weight:900;">store<span style="color:#10b981;">.</span></div><p style="margin:8px 0 0;color:#64748b;font-size:12px;">Yêu cầu hỗ trợ mới cần được xử lý</p></td></tr>
+        <tr><td style="padding:12px 28px 28px;">
+          <div style="background:#f0fdfa;border:1px solid #99f6e4;border-radius:10px;padding:14px 16px;margin-bottom:18px;font-size:13px;color:#115e59;"><strong>Mã yêu cầu: #{id}</strong><br>Thời gian: {createdAt}</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;line-height:1.7;margin-bottom:18px;">
+            <tr><td style="color:#64748b;width:125px;">Khách hàng</td><td><strong>{name}</strong></td></tr>
+            <tr><td style="color:#64748b;">Email phản hồi</td><td><a href="mailto:{email}">{email}</a></td></tr>
+            <tr><td style="color:#64748b;">Chủ đề</td><td><strong>{topic}</strong></td></tr>
+          </table>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;font-size:14px;line-height:1.7;">{message}</div>
+          <p style="margin:20px 0 0;color:#64748b;font-size:12px;">Mở trang quản trị để phân công và phản hồi yêu cầu này.</p>
+          <a href="{frontendUrl}/contact" style="display:inline-block;margin-top:12px;padding:11px 18px;background:#0f766e;color:#fff;text-decoration:none;border-radius:9px;font-weight:700;font-size:13px;">Mở Store</a>
+        </td></tr>
+        <tr><td style="padding:18px 28px;background:#f8fafc;border-top:1px solid #f1f5f9;text-align:center;color:#94a3b8;font-size:12px;">Email tự động từ hệ thống hỗ trợ Store.</td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+""";
+    }
+
+    public static string BuildSupportAcknowledgementEmailHtml(SupportRequestData request, string frontendUrl)
+    {
+        var id = WebUtility.HtmlEncode(request.RequestId);
+        var name = WebUtility.HtmlEncode(request.CustomerName);
+        var topic = WebUtility.HtmlEncode(request.Topic);
+        var message = WebUtility.HtmlEncode(request.Message).Replace("\n", "<br>");
+        return $"""
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Đã tiếp nhận yêu cầu hỗ trợ #{id}</title>
+</head>
+<body style="margin:0;padding:32px 16px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#0f172a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
+        <tr><td style="height:5px;background:#10b981;line-height:5px;font-size:0;">&nbsp;</td></tr>
+        <tr><td style="padding:26px 28px 12px;"><div style="font-size:24px;font-weight:900;">store<span style="color:#10b981;">.</span></div><p style="margin:8px 0 0;color:#64748b;font-size:12px;">Xác nhận tiếp nhận yêu cầu hỗ trợ</p></td></tr>
+        <tr><td style="padding:12px 28px 28px;">
+          <div style="text-align:center;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:16px;color:#065f46;margin-bottom:18px;"><strong>✓ Store đã nhận yêu cầu của bạn</strong><br><span style="font-size:13px;">Mã yêu cầu: #{id}</span></div>
+          <p style="font-size:14px;line-height:1.7;">Chào {name}, Store sẽ kiểm tra và phản hồi qua email này. Bạn vui lòng giữ lại mã yêu cầu để tiện theo dõi.</p>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;line-height:1.7;margin:18px 0;"><tr><td style="color:#64748b;width:125px;">Chủ đề</td><td><strong>{topic}</strong></td></tr><tr><td style="color:#64748b;vertical-align:top;">Nội dung</td><td>{message}</td></tr></table>
+          <a href="{frontendUrl}/contact" style="display:inline-block;padding:11px 18px;background:#0f766e;color:#fff;text-decoration:none;border-radius:9px;font-weight:700;font-size:13px;">Quay lại Store</a>
+        </td></tr>
+        <tr><td style="padding:18px 28px;background:#f8fafc;border-top:1px solid #f1f5f9;text-align:center;color:#94a3b8;font-size:12px;">Email tự động từ hệ thống hỗ trợ Store. Vui lòng không trả lời trực tiếp nếu không cần thiết.</td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+""";
+    }
+
     public static string BuildGoogleLoginEmailHtml(string username, string email, string loginAt, string frontendUrl)
         => BuildLoginNotificationEmailHtml(username, email, loginAt, "Google OAuth", frontendUrl);
 

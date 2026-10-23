@@ -21,7 +21,7 @@ namespace StoreApi.Controllers;
 [ApiController]
 [Route("api/customer")]
 // Vai trò kiểu CustomerController: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
-public sealed class CustomerController(StoreDb db, IConfiguration configuration, EmailService emailService) : ControllerBase
+public sealed class CustomerController(StoreDb db, IConfiguration configuration, EmailService emailService, OrderEmailService orderEmailService) : ControllerBase
 {
     private const string Cookie = "store_customer_session";
 
@@ -46,11 +46,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         try
         {
             var id = db.CreateCustomer(request.Username.Trim(), request.Email.Trim(), salt, hash);
-            _ = Task.Run(async () =>
-            {
-                try { await emailService.SendWelcomeEmailAsync(request.Email.Trim(), request.Username.Trim()); }
-                catch (Exception ex) { Console.WriteLine($"[Store Mailer] Welcome email exception: {ex.Message}"); }
-            });
+            QueueWelcomeEmail(request.Email.Trim(), request.Username.Trim());
             return LoginInternal(request.Username.Trim(), id);
         }
         // Nhánh lỗi: chuyển ngoại lệ thành phản hồi an toàn, không làm lộ dữ liệu nhạy cảm.
@@ -210,6 +206,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
             var rowBySub = db.FindCustomerByGoogleSub(sub);
             var rowByEmail = db.FindCustomer(email);
             long id;
+            var createdByGoogle = false;
             if (rowBySub is not null)
             {
                 id = rowBySub.Value.Id;
@@ -230,6 +227,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
                 try { id = db.CreateCustomer(name[..Math.Min(60, name.Length)], email, salt, hash); }
                 catch { id = db.CreateCustomer((name[..Math.Min(50, name.Length)] + " " + Guid.NewGuid().ToString()[..4]).Trim(), email, salt, hash); }
                 db.LinkGoogleSub(id, sub);
+                createdByGoogle = true;
             }
             var auth = db.FindCustomerFull(id);
             if (auth is not null && auth.Value.TotpEnabled == 1 && !string.IsNullOrEmpty(auth.Value.TotpSecret))
@@ -242,9 +240,15 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
             db.CreateSession(Tokens.Sha256(raw), id, DateTimeOffset.UtcNow.AddDays(30));
             Response.Cookies.Append(Cookie, raw, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Lax, MaxAge = TimeSpan.FromDays(30), Path = "/" });
             
-            // Gửi email thông báo đăng nhập Google về chính email vừa đăng nhập
             var recipientName = !string.IsNullOrWhiteSpace(auth?.Username) ? auth.Value.Username : email;
-            SendLoginNotificationAsync(email, recipientName, "Google OAuth");
+            if (createdByGoogle)
+            {
+                QueueWelcomeEmail(email, recipientName);
+            }
+            else
+            {
+                SendLoginNotificationAsync(email, recipientName, "Google OAuth");
+            }
             
             return Redirect(frontend + nextUrl);
         }
@@ -415,20 +419,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         if (q.VoucherCodes.Count > 0) db.ConsumeCustomerVouchers(customer.Id, q.VoucherCodes);
         db.AddCustomerPoints(customer.Id, pointsEarned);
 
-        // Gửi hóa đơn điện tử về email của khách hàng
-        var invoiceItems = q.Items.Select(i => new OrderInvoiceItem(i.Name, i.Quantity, i.Price, i.Price * i.Quantity)).ToList();
-        var invoice = new OrderInvoiceData(
-            orderId, customer.Email, recipient, phone,
-            q.Fulfillment == "pickup" ? "Nhận tại cửa hàng" : address,
-            q.Fulfillment, method, invoiceItems,
-            q.Subtotal, q.Discount, q.ShippingFee, q.Total, q.Tier,
-            createdAt, request.ScheduledAt);
-
-        _ = Task.Run(async () =>
-        {
-            try { await emailService.SendOrderInvoiceEmailAsync(customer.Email, invoice); }
-            catch (Exception ex) { Console.WriteLine($"[Store Mailer] Invoice mail exception: {ex.Message}"); }
-        });
+        orderEmailService.QueueInvoice(orderId);
 
         var createdOrder = db.FindCustomerOrder(orderId, customer.Id);
         return StatusCode(StatusCodes.Status201Created, new { order = createdOrder });
@@ -550,6 +541,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
 
         var now = DateTimeOffset.UtcNow.ToString("o");
         db.UpdateOrderStatus(id, "paid", now);
+        orderEmailService.QueueInvoice(id);
         var updatedOrder = db.FindCustomerOrder(id, customer.Id);
         return Ok(new { success = true, orderId = id, order = updatedOrder, status = "paid" });
     }
@@ -648,6 +640,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         var order = db.FindCustomerOrder(id, customer.Id);
         if (order is null) return NotFound(new { error = "ORDER_NOT_FOUND" });
         db.UpdateOrderStatus(id, "paid", DateTimeOffset.UtcNow.ToString("o"));
+        orderEmailService.QueueInvoice(id);
         return Ok(new { success = true, orderId = id, status = "paid" });
     }
 
@@ -795,6 +788,22 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
                 Console.ForegroundColor = ConsoleColor.Yellow;
                 Console.WriteLine($"[Store Mailer] Lỗi gửi thông báo đăng nhập ({method}) tới {email}: {ex.Message}");
                 Console.ResetColor();
+            }
+        });
+    }
+
+    private void QueueWelcomeEmail(string email, string username)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await emailService.SendWelcomeEmailAsync(email, username);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Store Mailer] Welcome email exception: {ex.Message}");
             }
         });
     }

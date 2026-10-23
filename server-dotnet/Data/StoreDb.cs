@@ -245,7 +245,7 @@ public sealed class StoreDb
                   subtotal INT NOT NULL, discount INT NOT NULL, goods_total INT NOT NULL, shipping_fee INT NOT NULL,
                   total INT NOT NULL, voucher_codes_json NVARCHAR(MAX) NOT NULL DEFAULT '[]', tier NVARCHAR(50) NOT NULL,
                   status NVARCHAR(50) NOT NULL DEFAULT 'pending', points_earned INT NOT NULL DEFAULT 0,
-                  created_at NVARCHAR(100) NOT NULL, paid_at NVARCHAR(100) NULL
+                  created_at NVARCHAR(100) NOT NULL, paid_at NVARCHAR(100) NULL, invoice_email_sent_at NVARCHAR(100) NULL
                 );
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('customer_orders') AND name = 'payment_method')
                 ALTER TABLE customer_orders ADD payment_method NVARCHAR(100) NOT NULL DEFAULT 'bank_transfer';
@@ -255,6 +255,9 @@ public sealed class StoreDb
 
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('customer_orders') AND name = 'weight_kg')
                 ALTER TABLE customer_orders ADD weight_kg FLOAT NOT NULL DEFAULT 1;
+
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('customer_orders') AND name = 'invoice_email_sent_at')
+                ALTER TABLE customer_orders ADD invoice_email_sent_at NVARCHAR(100) NULL;
 
 
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Products')
@@ -848,6 +851,34 @@ public sealed class StoreDb
         cmd.Parameters.AddWithValue("@paidAt", (object?)paidAt ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@id", orderId);
         cmd.ExecuteNonQuery();
+    }
+
+    public string? FindCustomerEmailForOrder(string orderId)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "SELECT TOP 1 c.email FROM customer_orders o JOIN customers c ON c.id=o.customer_id WHERE o.id=@id";
+        command.Parameters.AddWithValue("@id", orderId);
+        return command.ExecuteScalar()?.ToString();
+    }
+
+    public bool HasInvoiceEmailBeenSent(string orderId)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "SELECT CASE WHEN invoice_email_sent_at IS NULL THEN 0 ELSE 1 END FROM customer_orders WHERE id=@id";
+        command.Parameters.AddWithValue("@id", orderId);
+        return Convert.ToInt32(command.ExecuteScalar() ?? 0) == 1;
+    }
+
+    public bool MarkInvoiceEmailSent(string orderId)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "UPDATE customer_orders SET invoice_email_sent_at=@now WHERE id=@id AND invoice_email_sent_at IS NULL";
+        command.Parameters.AddWithValue("@id", orderId);
+        command.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+        return command.ExecuteNonQuery() > 0;
     }
 
     public object? FindCustomerOrder(string orderId, long? customerId = null)

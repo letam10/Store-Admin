@@ -30,6 +30,14 @@ public sealed record OrderInvoiceData(
     string CreatedAt,
     string? ScheduledAt);
 
+public sealed record SupportRequestData(
+    string RequestId,
+    string CustomerName,
+    string CustomerEmail,
+    string Topic,
+    string Message,
+    string CreatedAt);
+
 public sealed class EmailService
 {
     private readonly IConfiguration _configuration;
@@ -58,6 +66,8 @@ public sealed class EmailService
 
     private string FrontendUrl => GetConfig("FRONTEND_URL", "http://127.0.0.1:5173").TrimEnd('/');
 
+    private string SupportEmail => GetConfig("SUPPORT_EMAIL", GetConfig("SMTP_USER"));
+
     public async Task<bool> SendWelcomeEmailAsync(string toEmail, string username)
     {
         var subject = "[Store] Chào mừng bạn gia nhập Store - Đăng ký tài khoản thành công";
@@ -71,6 +81,21 @@ public sealed class EmailService
         var subject = $"[Store] Hóa đơn điện tử - Xác nhận đơn hàng #{invoice.OrderId}";
         var html = EmailTemplates.BuildInvoiceEmailHtml(invoice, FrontendUrl);
         return await SendOrLogEmailAsync(toEmail, subject, html, "invoice_" + invoice.OrderId, invoice.Recipient);
+    }
+
+    public async Task<bool> SendSupportRequestEmailAsync(SupportRequestData request)
+    {
+        if (string.IsNullOrWhiteSpace(SupportEmail)) return false;
+        var subject = $"[Store] Yêu cầu hỗ trợ mới #{request.RequestId}";
+        var html = EmailTemplates.BuildSupportRequestEmailHtml(request, FrontendUrl);
+        return await SendOrLogEmailAsync(SupportEmail, subject, html, "support_" + request.RequestId, request.CustomerName);
+    }
+
+    public async Task<bool> SendSupportAcknowledgementEmailAsync(SupportRequestData request)
+    {
+        var subject = $"[Store] Đã tiếp nhận yêu cầu hỗ trợ #{request.RequestId}";
+        var html = EmailTemplates.BuildSupportAcknowledgementEmailHtml(request, FrontendUrl);
+        return await SendOrLogEmailAsync(request.CustomerEmail, subject, html, "support_ack_" + request.RequestId, request.CustomerName);
     }
 
     public async Task<bool> SendLoginNotificationEmailAsync(string toEmail, string username, string method = "Google OAuth")
@@ -109,10 +134,10 @@ public sealed class EmailService
         if (string.IsNullOrWhiteSpace(smtpHost))
         {
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine($"[Store Mailer] [Offline/Dev] Đã tạo email cho {toEmail} ('{subject}')");
+            Console.WriteLine($"[Store Mailer] [Offline/Dev] Chỉ tạo bản xem trước cho {toEmail} ('{subject}'), chưa gửi email thật.");
             Console.WriteLine($"[Store Mailer] File HTML xem trước: {logFilePath}");
             Console.ResetColor();
-            return true;
+            return false;
         }
 
         try

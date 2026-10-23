@@ -258,8 +258,12 @@ CREATE TABLE customer_orders (
   status NVARCHAR(50) NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','paid')),
   points_earned INT NOT NULL DEFAULT 0,
   created_at NVARCHAR(100) NOT NULL,
-  paid_at NVARCHAR(100) NULL
+  paid_at NVARCHAR(100) NULL,
+  invoice_email_sent_at NVARCHAR(100) NULL
 );
+GO
+IF COL_LENGTH('customer_orders', 'invoice_email_sent_at') IS NULL
+  ALTER TABLE customer_orders ADD invoice_email_sent_at NVARCHAR(100) NULL;
 GO
 
 -- 19. Table: Products (Yêu cầu đề thi giáo viên: Id, Name, Price, Category)

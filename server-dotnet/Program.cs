@@ -128,6 +128,7 @@ builder.Services.AddSwaggerGen(options => options.SwaggerDoc("v1", new OpenApiIn
 
 builder.Services.AddSingleton<StoreDb>();
 builder.Services.AddSingleton<StoreApi.Services.EmailService>();
+builder.Services.AddSingleton<StoreApi.Services.OrderEmailService>();
 builder.Services.AddSingleton<StoreApi.Services.AiChatService>();
 
 builder.Services.AddHttpContextAccessor();

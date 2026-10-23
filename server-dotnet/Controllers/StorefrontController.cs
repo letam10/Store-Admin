@@ -11,13 +11,14 @@ using Microsoft.AspNetCore.Mvc;
 using StoreApi.Data;
 using StoreApi.Models;
 using StoreApi.Security;
+using StoreApi.Services;
 
 namespace StoreApi.Controllers;
 
 [ApiController]
 [Route("api/storefront")]
 // Vai trò kiểu StorefrontController: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
-public sealed class StorefrontController(StoreDb db) : ControllerBase
+public sealed class StorefrontController(StoreDb db, EmailService emailService) : ControllerBase
 {
     private const string Cookie = "store_customer_session";
 
@@ -67,6 +68,34 @@ public sealed class StorefrontController(StoreDb db) : ControllerBase
         };
         var dataJson = JsonSerializer.Serialize(data);
         db.CreateAdminRecord("support", $"#{requestId} - {name} ({topic})", "Chờ duyệt", dataJson);
+
+        var supportRequest = new SupportRequestData(
+            requestId,
+            name,
+            email,
+            topic,
+            message,
+            DateTimeOffset.Now.ToString("dd/MM/yyyy HH:mm"));
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await emailService.SendSupportRequestEmailAsync(supportRequest);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Store Mailer] Support notification exception: {ex.Message}");
+            }
+
+            try
+            {
+                await emailService.SendSupportAcknowledgementEmailAsync(supportRequest);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Store Mailer] Support acknowledgement exception: {ex.Message}");
+            }
+        });
 
         return Ok(new { success = true, requestId });
     }
