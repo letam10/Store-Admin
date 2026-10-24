@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiJson, streamChat } from '../api/chat'
 import { createRequestGate } from '../api/requestGate'
 import { adminConversationKey } from './adminState'
-import { mapServerMessages } from '../components/ui/customerSupportState'
+import { hideSourceDisclosure, mapServerMessages } from '../components/ui/customerSupportState'
 import AdminModule from './AdminModules'
 import { adminModules } from './adminModuleData'
 import { normalizeSearch } from '../storefront/state'
@@ -57,14 +57,15 @@ export default function Admin() {
   const [loginError, setLoginError] = useState('')
   const [pageError, setPageError] = useState('')
   const [settings, setSettings] = useState(null)
-  const [contextSize, setContextSize] = useState(16384)
+  const [contextSize, setContextSize] = useState(32768)
+  const [thinkingEnabled, setThinkingEnabled] = useState(true)
+  const [thinkingMode, setThinkingMode] = useState('high')
   const [messages, setMessages] = useState([])
   const [conversationId, setConversationId] = useState('')
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [activity, setActivity] = useState('')
   const [compactStatus, setCompactStatus] = useState('not_needed')
-  const [sources, setSources] = useState([])
   const [report, setReport] = useState(null)
   const [range, setRange] = useState({ from: today.slice(0, 8) + '01', to: today })
   const [activeModule, setActiveModule] = useState('dashboard')
@@ -78,6 +79,7 @@ export default function Admin() {
   const settingsEpochRef = useRef(0)
   const sessionProbeRef = useRef(0)
   const adminSearchRef = useRef(null)
+  const chatInputRef = useRef(null)
 
   useEffect(() => {
     document.documentElement.dataset.adminTheme = theme === 'dark' ? 'dark' : 'light'
@@ -119,14 +121,15 @@ export default function Admin() {
     settingsEpochRef.current += 1
     if (removeStorageFor) sessionStorage.removeItem(adminConversationKey(removeStorageFor))
     setSettings(null)
-    setContextSize(16384)
+    setContextSize(32768)
+    setThinkingEnabled(true)
+    setThinkingMode('high')
     setMessages([])
     setConversationId('')
     setDraft('')
     setBusy(false)
     setActivity('')
     setCompactStatus('not_needed')
-    setSources([])
     setReport(null)
     setPageError('')
   }
@@ -254,6 +257,8 @@ export default function Admin() {
         if (epoch !== loadEpochRef.current || settingsEpoch !== settingsEpochRef.current) return
         setSettings(payload)
         setContextSize(payload.contextSize)
+        setThinkingEnabled(payload.thinking !== false)
+        setThinkingMode(payload.thinkingMode || 'high')
       })
       .catch((error) => {
         if (epoch !== loadEpochRef.current || settingsEpoch !== settingsEpochRef.current) return
@@ -378,7 +383,7 @@ export default function Admin() {
       { id: localId(), role: 'user', content, status: 'complete' },
       { id: assistantId, role: 'assistant', content: '', status: 'streaming', sources: [], requestId, retryContent: content },
     ])
-    setDraft(''); setBusy(true); setActivity('Đang phân tích'); setSources([]); setPageError('')
+    setDraft(''); chatInputRef.current?.focus(); setBusy(true); setActivity('Đang phân tích'); setPageError('')
 
     try {
       await streamChat({
@@ -392,7 +397,6 @@ export default function Admin() {
             setCompactStatus(streamEvent.compactStatus || 'not_needed')
           } else if (streamEvent.type === 'status') setActivity(streamEvent.label || 'Đang phân tích')
           else if (streamEvent.type === 'delta') updateAssistant(assistantId, (message) => ({ ...message, content: message.content + streamEvent.content }))
-          else if (streamEvent.type === 'sources') { setSources(streamEvent.sources || []); updateAssistant(assistantId, (message) => ({ ...message, sources: streamEvent.sources || [] })) }
           else if (streamEvent.type === 'report') {
             if (reportEpoch === statsEpochRef.current) setReport(streamEvent.report)
             updateAssistant(assistantId, (message) => ({ ...message, report: streamEvent.report }))
@@ -411,7 +415,7 @@ export default function Admin() {
         setDraft((current) => current || content)
       }
     } finally {
-      if (gateRef.current.isCurrent(gate.epoch)) { gateRef.current.finish(gate.epoch); setBusy(false); setActivity('') }
+      if (gateRef.current.isCurrent(gate.epoch)) { gateRef.current.finish(gate.epoch); setBusy(false); setActivity(''); chatInputRef.current?.focus() }
     }
   }
 
@@ -475,7 +479,7 @@ export default function Admin() {
         {activeModule === 'ai-local' && <>
           <section className="admin-meta" aria-label="Cấu hình AI">
             <div><small>Model</small><strong>{settings?.model || 'qwen3.5:4b'}</strong></div>
-            <div><small>Thinking</small><strong>Tắt · phản hồi trực tiếp</strong></div>
+            <div><small>Thinking</small><strong>{thinkingEnabled ? 'Bật · ' + thinkingMode : 'Tắt · phản hồi trực tiếp'}</strong></div>
             <div><small>Rút gọn</small><strong>{compactStatus}</strong></div>
             <div className="admin-context"><label>Context<DropdownMenu value={contextSize} options={(settings?.allowedContextSizes || [8192, 16384, 32768, 65536]).map((size) => [size, size === 65536 ? '64K · thử nghiệm' : (size / 1024) + 'K'])} onChange={(value) => setContextSize(Number(value))} ariaLabel="Kích thước context" /></label><button type="button" onClick={saveContext}>Lưu</button></div>
           </section>
@@ -486,22 +490,20 @@ export default function Admin() {
               {report ? <dl className="admin-stats"><div><dt>Doanh thu gộp</dt><dd>{formatMoney(report.grossRevenue)}</dd></div><div><dt>Hoàn tiền đã trừ</dt><dd>{formatMoney(report.refunds)}</dd></div><div><dt>Doanh thu ròng</dt><dd>{formatMoney(report.netRevenue)}</dd></div><div><dt>Đơn được tính</dt><dd>{report.includedOrders}</dd></div></dl> : <p className="admin-muted">Chọn khoảng thời gian để lấy số liệu backend.</p>}
               {report && <p className="admin-source">Nguồn: backend SQLite · {report.from} → {report.to} · dữ liệu: {report.dataMode}</p>}
             </section>
-            <section className="admin-panel admin-chat"><div className="admin-panel__heading"><div><p className="admin-eyebrow">AI NHẬN XÉT</p><h2>Chat admin</h2></div><span>Thinking: Tắt</span></div>
+            <section className="admin-panel admin-chat"><div className="admin-panel__heading"><div><p className="admin-eyebrow">AI NHẬN XÉT</p><h2>Chat admin</h2></div><span>Thinking: {thinkingEnabled ? thinkingMode : 'Tắt'}</span></div>
               <div ref={logRef} className="admin-chat__log" role="log" aria-live="polite">
                 {messages.length === 0 && <p className="admin-muted">Số liệu và nội dung nghiệp vụ được backend kiểm soát; chưa có phân tích tự do đã xác minh.</p>}
                 {messages.map((message) => <div key={message.id} className={'admin-chat__message admin-chat__message--' + message.role}>
                   <small>{message.role === 'user' ? 'Admin' : 'AI local'}</small>
-                  <p>{message.content || (busy && message.role === 'assistant' ? '…' : '')}</p>
+                  <p>{hideSourceDisclosure(message.content) || (busy && message.role === 'assistant' ? '…' : '')}</p>
                   {message.verified?.text && <p>{message.verified.text}</p>}
-                  {message.report && <p>Nguồn SQLite: {message.report.from} → {message.report.to} · {message.report.dataMode} · Doanh thu ròng: {formatMoney(message.report.netRevenue)}</p>}
-                  {message.sources?.map((source) => <small key={source.id}>{source.label} </small>)}
+                  {message.report && <p>Báo cáo: {message.report.from} → {message.report.to} · Doanh thu ròng: {formatMoney(message.report.netRevenue)}</p>}
                   {['incomplete', 'error', 'stopped', 'pending'].includes(message.status) && <small>Chưa hoàn tất. {message.error}</small>}
                   {['incomplete', 'error', 'stopped'].includes(message.status) && message.requestId && <button type="button" disabled={busy} onClick={(event) => sendMessage(event, message)}>Thử lại</button>}
                 </div>)}
                 {busy && <p className="admin-thinking">{activity || 'Đang phân tích'}</p>}
               </div>
-              {sources.length > 0 && <div className="admin-chat__sources">{sources.map((source) => <span key={source.id}>Nguồn: {source.label}</span>)}</div>}
-              <form className="admin-chat__form" onSubmit={sendMessage}><textarea maxLength={2000} rows="3" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Ví dụ: Phân tích doanh thu tháng này…" disabled={busy} />{busy ? <button type="button" onClick={stopStream}>Dừng</button> : <button type="submit" disabled={!draft.trim()}>Gửi</button>}</form>
+              <form className="admin-chat__form" onSubmit={sendMessage}><textarea ref={chatInputRef} maxLength={2000} rows="3" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Ví dụ: Phân tích doanh thu tháng này…" aria-busy={busy} />{busy ? <button type="button" onClick={stopStream}>Dừng</button> : <button type="submit" disabled={!draft.trim()}>Gửi</button>}</form>
             </section>
           </div>
         </>}

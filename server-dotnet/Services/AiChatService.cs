@@ -51,8 +51,8 @@ public sealed class AiChatService
     {
         get
         {
-            var raw = GetConfig("OLLAMA_TIMEOUT_SECONDS", "30");
-            return int.TryParse(raw, out var value) ? Math.Clamp(value, 5, 60) : 30;
+            var raw = GetConfig("OLLAMA_TIMEOUT_SECONDS", "120");
+            return int.TryParse(raw, out var value) ? Math.Clamp(value, 5, 180) : 120;
         }
     }
 
@@ -60,12 +60,36 @@ public sealed class AiChatService
 
     public IReadOnlyList<int> AllowedContextSizes => new[] { 8192, 16384, 32768, 65536 };
 
+    public string ThinkingMode
+    {
+        get
+        {
+            var raw = GetConfig("AI_THINKING", "high").ToLowerInvariant();
+            return raw switch
+            {
+                "false" or "off" or "0" => "off",
+                "medium" => "medium",
+                "high" => "high",
+                _ => "low"
+            };
+        }
+    }
+
+    public bool ThinkingEnabled => ThinkingMode != "off";
+
+    private int OllamaPredictionTokens => ThinkingMode switch
+    {
+        "high" => 2048,
+        "medium" => 1200,
+        _ => 800
+    };
+
     public int ContextSize
     {
         get
         {
-            var raw = GetConfig("AI_CONTEXT_SIZE", "16384");
-            return int.TryParse(raw, out var value) && AllowedContextSizes.Contains(value) ? value : 16384;
+            var raw = GetConfig("AI_CONTEXT_SIZE", "32768");
+            return int.TryParse(raw, out var value) && AllowedContextSizes.Contains(value) ? value : 32768;
         }
     }
 
@@ -179,7 +203,7 @@ public sealed class AiChatService
         }
 
         var retrieval = BuildCustomerRetrieval(message, db);
-        var adminSystemPrompt = "Bạn là trợ lý AI quản trị kinh doanh cho Store. Chỉ dùng dữ liệu trong phần NGUỒN ĐÃ XÁC MINH. Không tự bịa giá, tồn kho, danh mục, chính sách, trạng thái đơn hoặc số liệu. Nếu nguồn không có câu trả lời, nói rõ chưa có dữ liệu được xác minh. Trả lời tiếng Việt ngắn gọn và kết thúc bằng mục Nguồn, nêu đúng mã nguồn đã dùng.";
+        var adminSystemPrompt = "Bạn là trợ lý AI quản trị kinh doanh cho Store. Chỉ dùng dữ liệu trong phần NGUỒN ĐÃ XÁC MINH. Không tự bịa giá, tồn kho, danh mục, chính sách, trạng thái đơn hoặc số liệu. Nếu nguồn không có câu trả lời, nói rõ chưa có dữ liệu được xác minh. Suy nghĩ kỹ theo mức cấu hình rồi trả lời tiếng Việt gọn. Không in nhãn nguồn, mã nguồn hoặc mục Nguồn trong nội dung trả lời; backend tự quản lý metadata nguồn.";
         var adminPrompt = $"Câu hỏi quản trị: {message}\n\nNGUỒN ĐÃ XÁC MINH:\n{retrieval.Context}";
         var ollamaResult = await TryOllamaGenerateAsync(adminPrompt, adminSystemPrompt, cancellationToken);
         if (!string.IsNullOrWhiteSpace(ollamaResult))
@@ -230,7 +254,7 @@ public sealed class AiChatService
             return MissingPolicyResponse(name, "voucher và khuyến mãi", retrieval.Sources);
         }
 
-        var systemPrompt = "Bạn là trợ lý hỗ trợ Store. Chỉ dùng dữ liệu trong phần NGUỒN ĐÃ XÁC MINH. Không tự bịa giá, tồn kho, danh mục, chính sách, trạng thái đơn hoặc cam kết giao hàng. Nếu nguồn không có câu trả lời, nói rõ Store chưa cung cấp thông tin được xác minh. Trả lời tiếng Việt ngắn gọn và kết thúc bằng mục Nguồn, nêu đúng mã nguồn sản phẩm khi có.";
+        var systemPrompt = "Bạn là trợ lý hỗ trợ Store. Chỉ dùng dữ liệu trong phần NGUỒN ĐÃ XÁC MINH. Không tự bịa giá, tồn kho, danh mục, chính sách, trạng thái đơn hoặc cam kết giao hàng. Nếu nguồn không có câu trả lời, nói rõ Store chưa cung cấp thông tin được xác minh. Suy nghĩ kỹ theo mức cấu hình rồi trả lời tiếng Việt gọn. Không in nhãn nguồn, mã nguồn hoặc mục Nguồn trong nội dung trả lời; backend tự quản lý metadata nguồn.";
         var ollamaResult = await TryOllamaGenerateAsync($"Câu hỏi: {message}\n\nNGUỒN ĐÃ XÁC MINH:\n{retrieval.Context}", systemPrompt, cancellationToken);
         if (!string.IsNullOrWhiteSpace(ollamaResult))
         {
@@ -241,8 +265,9 @@ public sealed class AiChatService
                 true);
         }
 
+        var matchedNames = string.Join(", ", retrieval.MatchedProducts.Take(3).Select(product => product.Name));
         var defaultText = retrieval.MatchedProducts.Count > 0
-            ? $"Chào {name}! Dữ liệu hiện có cho câu hỏi này:\n\n{retrieval.Context}\n\nStore chưa có thêm chính sách được xác minh cho yêu cầu này."
+            ? $"Chào {name}! Tôi tìm thấy các sản phẩm liên quan: {matchedNames}. Store chưa có thêm chính sách được xác minh cho yêu cầu này."
             : $"Chào {name}! Store chưa có dữ liệu được xác minh để trả lời câu hỏi này. Quý khách có thể hỏi tên sản phẩm, danh mục hoặc giá để tôi tra trong catalog.";
 
         return new AiChatResponse(
@@ -307,14 +332,15 @@ public sealed class AiChatService
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(OllamaTimeoutSeconds));
 
+            var think = ThinkingEnabled ? (object)ThinkingMode : false;
             var body = new
             {
                 model = OllamaModel,
                 prompt,
                 system = systemPrompt,
                 stream = false,
-                think = false,
-                options = new { num_ctx = Math.Min(ContextSize, 8192), num_predict = 600, temperature = 0.15 }
+                think,
+                options = new { num_ctx = ContextSize, num_predict = OllamaPredictionTokens, temperature = 0.12 }
             };
             var content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
             var response = await _httpClient.PostAsync($"{OllamaHost}/api/generate", content, cts.Token);

@@ -6,6 +6,11 @@
  * Liên kết trực tiếp: không có import/using trực tiếp được phát hiện.
  * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
  */
+// Ẩn phần metadata nguồn nếu model lặp lại nhãn nguồn trong nội dung trả lời.
+export function hideSourceDisclosure(text) {
+  return String(text || '').replace(/\n\s*(?:Nguồn|Sources?)\s*:?\s*[\s\S]*$/i, '').trim()
+}
+
 // Chức năng mapServerMessages: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function mapServerMessages(messages) {
   return messages.map((message) => ({

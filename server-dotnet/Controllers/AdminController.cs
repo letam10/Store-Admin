@@ -329,7 +329,7 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
     }
 
     [HttpGet("settings")]
-    public IActionResult Settings() => RequireAdmin() is null ? Unauthorized(new { error = "UNAUTHENTICATED" }) : Ok(new { contextSize = aiChatService.ContextSize, allowedContextSizes = aiChatService.AllowedContextSizes, model = aiChatService.ModelName });
+    public IActionResult Settings() => RequireAdmin() is null ? Unauthorized(new { error = "UNAUTHENTICATED" }) : Ok(new { contextSize = aiChatService.ContextSize, allowedContextSizes = aiChatService.AllowedContextSizes, model = aiChatService.ModelName, thinking = aiChatService.ThinkingEnabled, thinkingMode = aiChatService.ThinkingMode });
 
     [HttpPut("settings")]
     public IActionResult UpdateSettings(AdminSettingsRequest request)
@@ -338,7 +338,7 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
         var requested = request.ContextSize ?? aiChatService.ContextSize;
         var contextSize = aiChatService.AllowedContextSizes.Contains(requested) ? requested : aiChatService.ContextSize;
-        return Ok(new { contextSize, allowedContextSizes = aiChatService.AllowedContextSizes, model = aiChatService.ModelName });
+        return Ok(new { contextSize, allowedContextSizes = aiChatService.AllowedContextSizes, model = aiChatService.ModelName, thinking = aiChatService.ThinkingEnabled, thinkingMode = aiChatService.ThinkingMode });
     }
 
     [HttpGet("payment-settings")]
