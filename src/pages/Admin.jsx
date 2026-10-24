@@ -475,7 +475,7 @@ export default function Admin() {
         {activeModule === 'ai-local' && <>
           <section className="admin-meta" aria-label="Cấu hình AI">
             <div><small>Model</small><strong>{settings?.model || 'qwen3.5:4b'}</strong></div>
-            <div><small>Thinking</small><strong>Bật · khóa tại backend</strong></div>
+            <div><small>Thinking</small><strong>Tắt · phản hồi trực tiếp</strong></div>
             <div><small>Rút gọn</small><strong>{compactStatus}</strong></div>
             <div className="admin-context"><label>Context<DropdownMenu value={contextSize} options={(settings?.allowedContextSizes || [8192, 16384, 32768, 65536]).map((size) => [size, size === 65536 ? '64K · thử nghiệm' : (size / 1024) + 'K'])} onChange={(value) => setContextSize(Number(value))} ariaLabel="Kích thước context" /></label><button type="button" onClick={saveContext}>Lưu</button></div>
           </section>
@@ -486,7 +486,7 @@ export default function Admin() {
               {report ? <dl className="admin-stats"><div><dt>Doanh thu gộp</dt><dd>{formatMoney(report.grossRevenue)}</dd></div><div><dt>Hoàn tiền đã trừ</dt><dd>{formatMoney(report.refunds)}</dd></div><div><dt>Doanh thu ròng</dt><dd>{formatMoney(report.netRevenue)}</dd></div><div><dt>Đơn được tính</dt><dd>{report.includedOrders}</dd></div></dl> : <p className="admin-muted">Chọn khoảng thời gian để lấy số liệu backend.</p>}
               {report && <p className="admin-source">Nguồn: backend SQLite · {report.from} → {report.to} · dữ liệu: {report.dataMode}</p>}
             </section>
-            <section className="admin-panel admin-chat"><div className="admin-panel__heading"><div><p className="admin-eyebrow">AI NHẬN XÉT</p><h2>Chat admin</h2></div><span>Thinking: Bật</span></div>
+            <section className="admin-panel admin-chat"><div className="admin-panel__heading"><div><p className="admin-eyebrow">AI NHẬN XÉT</p><h2>Chat admin</h2></div><span>Thinking: Tắt</span></div>
               <div ref={logRef} className="admin-chat__log" role="log" aria-live="polite">
                 {messages.length === 0 && <p className="admin-muted">Số liệu và nội dung nghiệp vụ được backend kiểm soát; chưa có phân tích tự do đã xác minh.</p>}
                 {messages.map((message) => <div key={message.id} className={'admin-chat__message admin-chat__message--' + message.role}>

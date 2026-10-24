@@ -47,6 +47,15 @@ public sealed class AiChatService
 
     private string OllamaModel => GetConfig("OLLAMA_MODEL", "qwen3.5:4b");
 
+    private int OllamaTimeoutSeconds
+    {
+        get
+        {
+            var raw = GetConfig("OLLAMA_TIMEOUT_SECONDS", "30");
+            return int.TryParse(raw, out var value) ? Math.Clamp(value, 5, 60) : 30;
+        }
+    }
+
     public string ModelName => OllamaModel;
 
     public IReadOnlyList<int> AllowedContextSizes => new[] { 8192, 16384, 32768, 65536 };
@@ -296,7 +305,7 @@ public sealed class AiChatService
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(TimeSpan.FromSeconds(6));
+            cts.CancelAfter(TimeSpan.FromSeconds(OllamaTimeoutSeconds));
 
             var body = new
             {
@@ -304,6 +313,7 @@ public sealed class AiChatService
                 prompt,
                 system = systemPrompt,
                 stream = false,
+                think = false,
                 options = new { num_ctx = Math.Min(ContextSize, 8192), num_predict = 600, temperature = 0.15 }
             };
             var content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
@@ -314,12 +324,14 @@ public sealed class AiChatService
             using var doc = JsonDocument.Parse(resJson);
             if (doc.RootElement.TryGetProperty("response", out var respProp))
             {
-                return respProp.GetString();
+                var responseText = respProp.GetString();
+                if (!string.IsNullOrWhiteSpace(responseText)) return responseText;
+                Console.WriteLine($"[AI Local] Ollama trả response rỗng cho model '{OllamaModel}'.");
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Ollama offline or unreachable
+            Console.WriteLine($"[AI Local] Không gọi được Ollama: {ex.Message}");
         }
         finally
         {
