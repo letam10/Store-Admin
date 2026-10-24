@@ -21,9 +21,9 @@ import './AdminPolish.css'
 import './AdminTheme.css'
 
 const moduleGroups = [
-  { title: 'Tổng quan', ids: ['dashboard', 'statistics', 'ai-local'] },
+  { title: 'Tổng quan', ids: ['dashboard', 'customer-orders', 'statistics', 'ai-local'] },
   { title: 'Hàng hóa & cửa hàng', ids: ['products', 'product-views', 'inventory', 'logistics', 'appearance', 'returns'] },
-  { title: 'Khách hàng', ids: ['customers', 'favorites', 'reviews', 'rewards-wheel', 'customer-orders', 'support'] },
+  { title: 'Khách hàng', ids: ['customers', 'favorites', 'reviews', 'rewards-wheel', 'support'] },
   { title: 'Vận hành', ids: ['order-types', 'staff', 'overtime'] },
 ]
 const moduleById = new Map(adminModules.map((entry) => [entry[0], entry]))

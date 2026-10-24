@@ -195,7 +195,7 @@ GO
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'customer_vouchers')
 CREATE TABLE customer_vouchers (
   code NVARCHAR(255) PRIMARY KEY FOREIGN KEY REFERENCES voucher_codes(code),
-  customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
+  customer_id BIGINT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
   label NVARCHAR(255) NOT NULL,
   type NVARCHAR(50) NOT NULL CHECK(type IN ('amount','percent')),
   value INT NOT NULL CHECK(value > 0),
@@ -204,6 +204,9 @@ CREATE TABLE customer_vouchers (
   source NVARCHAR(255) NOT NULL,
   created_at NVARCHAR(100) NOT NULL
 );
+GO
+IF COL_LENGTH('customer_vouchers', 'customer_id') IS NOT NULL
+  ALTER TABLE customer_vouchers ALTER COLUMN customer_id BIGINT NULL;
 GO
 
 -- 16. Table: customer_favorites

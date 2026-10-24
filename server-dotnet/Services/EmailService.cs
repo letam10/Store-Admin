@@ -59,8 +59,8 @@ public sealed class EmailService
 
     private string GetConfig(string key, string fallback = "")
     {
-        var val = _configuration[key];
-        if (string.IsNullOrWhiteSpace(val)) val = Environment.GetEnvironmentVariable(key);
+        var val = Environment.GetEnvironmentVariable(key);
+        if (string.IsNullOrWhiteSpace(val)) val = _configuration[key];
         return string.IsNullOrWhiteSpace(val) ? fallback : val.Trim();
     }
 

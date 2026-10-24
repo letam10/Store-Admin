@@ -7,6 +7,7 @@
  * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
  */
 using System.Text.Json;
+using System.Text;
 
 using Microsoft.AspNetCore.Mvc;
 using StoreApi.Data;
@@ -250,6 +251,19 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
     [HttpGet("customers")]
     public IActionResult Customers() => RequireAdmin() is null ? Unauthorized(new { error = "UNAUTHENTICATED" }) : Ok(new { customers = db.ListAdminCustomers() });
 
+    [HttpPatch("customers/{id:long}")]
+    public IActionResult UpdateCustomer(long id, AdminCustomerUpdateRequest request)
+    {
+        if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
+        if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        try
+        {
+            var customer = db.UpdateAdminCustomer(id, request.Username, request.Email, request.Points, request.SpinCredits);
+            return customer is null ? NotFound(new { error = "CUSTOMER_NOT_FOUND" }) : Ok(new { customer });
+        }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+    }
+
     [HttpPost("customers/{id:long}/vouchers")]
     public IActionResult CreateCustomerVoucher(long id, AdminVoucherRequest request)
     {
@@ -279,7 +293,7 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
         var type = string.IsNullOrWhiteSpace(request.Type) ? "percent" : request.Type.Trim();
         var scope = string.IsNullOrWhiteSpace(request.Scope) ? "goods" : request.Scope.Trim();
         var expiresAt = string.IsNullOrWhiteSpace(request.ExpiresAt) ? DateTimeOffset.UtcNow.AddDays(30).ToString("yyyy-MM-dd") : request.ExpiresAt.Trim();
-        var voucher = db.CreateAdminVoucher(code, request.CustomerId ?? 1, label, type, request.Value ?? 10, scope, expiresAt, "admin");
+        var voucher = db.CreateAdminVoucher(code, request.CustomerId is > 0 ? request.CustomerId : null, label, type, request.Value ?? 10, scope, expiresAt, "admin");
         return StatusCode(StatusCodes.Status201Created, new { voucher });
     }
 
@@ -353,11 +367,43 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
         return Ok(new { report, source = aiChatService.ModelName });
     }
 
+    [HttpGet("stats/export")]
+    public IActionResult ExportStats([FromQuery] string? from, [FromQuery] string? to, [FromQuery] string? format)
+    {
+        if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
+        var fromDate = string.IsNullOrWhiteSpace(from) ? DateTimeOffset.UtcNow.AddDays(-30).ToString("yyyy-MM-dd") : from.Trim();
+        var toDate = string.IsNullOrWhiteSpace(to) ? DateTimeOffset.UtcNow.ToString("yyyy-MM-dd") : to.Trim();
+        var report = db.CalculateAdminRevenue(fromDate, toDate);
+        if (string.Equals(format, "html", StringComparison.OrdinalIgnoreCase))
+        {
+            var json = JsonSerializer.Serialize(report);
+            return Content($"<!doctype html><html lang='vi'><head><meta charset='utf-8'><title>Báo cáo Store</title><style>body{{font-family:Arial,sans-serif;padding:32px;color:#17382c}}table{{border-collapse:collapse;width:100%;max-width:760px}}td,th{{border:1px solid #cbd8ce;padding:10px;text-align:left}}@media print{{button{{display:none}}}}</style></head><body><button onclick='print()'>In / Lưu PDF</button><h1>Báo cáo Store</h1><p>{fromDate} → {toDate}</p><pre>{System.Net.WebUtility.HtmlEncode(json)}</pre></body></html>", "text/html; charset=utf-8");
+        }
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(report));
+        var root = document.RootElement;
+        var rows = new[]
+        {
+            "Chỉ tiêu,Giá trị",
+            $"Từ ngày,{fromDate}",
+            $"Đến ngày,{toDate}",
+            $"Tổng đơn,{root.GetProperty("allOrders").GetInt64()}",
+            $"Đơn được tính,{root.GetProperty("includedOrders").GetInt64()}",
+            $"Doanh thu gộp,{root.GetProperty("grossRevenue").GetInt64()}",
+            $"Hoàn tiền,{root.GetProperty("refunds").GetInt64()}",
+            $"Doanh thu ròng,{root.GetProperty("netRevenue").GetInt64()}",
+            $"Chế độ dữ liệu,{root.GetProperty("dataMode").GetString()}"
+        };
+        var csv = string.Join("\r\n", rows) + "\r\n";
+        return File(Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv)).ToArray(), "text/csv; charset=utf-8", $"store-statistics-{fromDate}-{toDate}.csv");
+    }
+
     [HttpGet("after-sales")]
     public IActionResult AfterSales()
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
-        return Ok(new { requests = Array.Empty<object>(), policy = new { cancellationPercent = 1, returnDays = 7, rescheduleDays = 3 } });
+        var requests = db.ListAdminRecords("after-sales").Select(ParseAfterSales).Where(item => item is not null).Select(item => item!).ToArray();
+        return Ok(new { requests, policy = new { cancellationPercent = 1, returnDays = 7, rescheduleDays = 3 } });
     }
 
     [HttpPost("after-sales/{id}/action")]
@@ -365,7 +411,22 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        return Ok(new { updated = true });
+        var record = db.ListAdminRecords("after-sales").Select(ParseAfterSalesRecord).FirstOrDefault(item => item is not null && string.Equals(ReadDataString(item.Data, "id"), id, StringComparison.OrdinalIgnoreCase));
+        if (record is null) return NotFound(new { error = "AFTER_SALES_NOT_FOUND" });
+        var action = (request.Action ?? "").Trim().ToLowerInvariant();
+        var status = action switch
+        {
+            "approve" => ReadDataInt(record.Data, "quote", "feeAmount") > 0 ? "awaiting_payment" : ReadDataString(record.Data, "kind") == "return" ? "awaiting_return" : "resolved",
+            "fee_paid" => "awaiting_return",
+            "complete_return" => "resolved",
+            "reject" => "rejected",
+            _ => record.Status
+        };
+        record.Data["status"] = status;
+        record.Data["note"] = request.Note ?? ReadDataString(record.Data, "note");
+        if (!string.IsNullOrWhiteSpace(request.Reference)) record.Data["refundReference"] = request.Reference.Trim();
+        db.UpdateAdminRecord(record.Id, "after-sales", record.Title, AfterSalesStatusLabel(status), JsonSerializer.Serialize(record.Data));
+        return Ok(new { updated = true, id, status });
     }
 
     [HttpGet("events/stream")]
@@ -525,6 +586,71 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
     {
         var raw = Request.Cookies[Cookie]; return string.IsNullOrWhiteSpace(raw) ? null : db.FindAdminBySession(Tokens.Sha256(raw));
     }
+
+    private static object? ParseAfterSales(object value)
+    {
+        var record = ParseAfterSalesRecord(value);
+        if (record is null) return null;
+        return new
+        {
+            id = ReadDataString(record.Data, "id") ?? record.Id.ToString(),
+            orderId = ReadDataString(record.Data, "orderId"),
+            kind = ReadDataString(record.Data, "kind"),
+            reason = ReadDataString(record.Data, "reason"),
+            scheduledAt = ReadDataString(record.Data, "scheduledAt"),
+            status = ReadDataString(record.Data, "status") ?? record.Status,
+            username = "Khách hàng #" + ReadDataString(record.Data, "customerId"),
+            quote = ReadDataObject(record.Data, "quote"),
+            note = ReadDataString(record.Data, "note"),
+            refundReference = ReadDataString(record.Data, "refundReference")
+        };
+    }
+
+    private static AfterSalesRecord? ParseAfterSalesRecord(object value)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(value));
+            var root = doc.RootElement;
+            var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(root.GetProperty("data").GetRawText()) ?? [];
+            return new AfterSalesRecord(root.GetProperty("id").GetInt32(), root.GetProperty("title").GetString() ?? "", root.GetProperty("status").GetString() ?? "", data);
+        }
+        catch { return null; }
+    }
+
+    private static string? ReadDataString(Dictionary<string, object?> data, string key)
+    {
+        return data.TryGetValue(key, out var value) ? value switch
+        {
+            JsonElement element when element.ValueKind == JsonValueKind.String => element.GetString(),
+            null => null,
+            _ => Convert.ToString(value)
+        } : null;
+    }
+
+    private static int ReadDataInt(Dictionary<string, object?> data, string parent, string key)
+    {
+        if (!data.TryGetValue(parent, out var value)) return 0;
+        var element = value is JsonElement json ? json : JsonSerializer.SerializeToElement(value);
+        return element.ValueKind == JsonValueKind.Object && element.TryGetProperty(key, out var field) && field.TryGetInt32(out var number) ? number : 0;
+    }
+
+    private static object? ReadDataObject(Dictionary<string, object?> data, string key)
+    {
+        return data.TryGetValue(key, out var value) && value is JsonElement element ? JsonSerializer.Deserialize<object>(element.GetRawText()) : value;
+    }
+
+    private static string AfterSalesStatusLabel(string status) => status switch
+    {
+        "awaiting_payment" => "Chờ thanh toán phí",
+        "awaiting_return" => "Chờ nhận hàng trả",
+        "resolved" => "Đã xử lý",
+        "rejected" => "Đã từ chối",
+        "cancelled" => "Đã hủy yêu cầu",
+        _ => "Chờ cửa hàng duyệt"
+    };
+
+    private sealed record AfterSalesRecord(int Id, string Title, string Status, Dictionary<string, object?> Data);
 
     private static JsonElement Property(JsonElement source, string name)
     {

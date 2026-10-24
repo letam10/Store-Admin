@@ -100,6 +100,9 @@ public static class ConsoleMenu
             Console.WriteLine("\n[+] DANG KHOI DONG TOAN BO HE THONG (API + Store + Admin)...");
             Console.ResetColor();
 
+            var database = db.EnsureReady();
+            DbRow(database.Ok ? "OK  -  database đã sẵn sàng" : $"LOI - {database.Message}");
+
             var current = GetListeningPorts();
 
             // 1. API 5000

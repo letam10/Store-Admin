@@ -440,10 +440,78 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         return Ok(new
         {
             order,
-            afterSales = Array.Empty<object>(),
+            afterSales = ListCustomerAfterSales(customer.Id, id),
             events = Array.Empty<object>(),
             store = new { name = "Store Mini Mart", address = "TP. Hồ Chí Minh", demo = true }
         });
+    }
+
+    [HttpPost("orders/{id}/after-sales")]
+    public IActionResult CreateAfterSales(string id, AfterSalesCreateRequest request)
+    {
+        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        var order = db.FindCustomerOrder(id, customer.Id);
+        if (order is null) return NotFound(new { error = "ORDER_NOT_FOUND" });
+        var kind = (request.Kind ?? "").Trim().ToLowerInvariant();
+        if (kind is not ("cancel" or "return" or "reschedule" or "merchant_fault") || string.IsNullOrWhiteSpace(request.Reason)) return BadRequest(new { error = "INVALID_AFTER_SALES" });
+        var orderJson = JsonSerializer.Serialize(order);
+        using var orderDocument = JsonDocument.Parse(orderJson);
+        var root = orderDocument.RootElement;
+        var quote = BuildAfterSalesQuote(root, kind);
+        var caseId = "AS-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        var data = new Dictionary<string, object?>
+        {
+            ["id"] = caseId,
+            ["customerId"] = customer.Id,
+            ["orderId"] = id,
+            ["kind"] = kind,
+            ["reason"] = request.Reason.Trim(),
+            ["scheduledAt"] = request.ScheduledAt,
+            ["status"] = "awaiting_confirmation",
+            ["quote"] = quote,
+            ["feePaidAt"] = null,
+            ["refundReference"] = null,
+            ["note"] = "",
+            ["compensation"] = Array.Empty<object>()
+        };
+        var record = db.CreateAdminRecord("after-sales", "#" + caseId + " · " + id, "Chờ khách xác nhận phí", JsonSerializer.Serialize(data));
+        return StatusCode(StatusCodes.Status201Created, new { request = record });
+    }
+
+    [HttpGet("after-sales/{id}/payment")]
+    public IActionResult AfterSalesPayment(string id)
+    {
+        if (!RequireAccount(out var customer)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        var record = FindCustomerAfterSales(id, customer.Id);
+        if (record is null) return NotFound(new { error = "AFTER_SALES_NOT_FOUND" });
+        var fee = ReadInt(record.Data, "quote", "feeAmount");
+        return Ok(new { orderId = id, amount = fee, expiresAt = DateTimeOffset.UtcNow.AddMinutes(2), payment = BuildPaymentInfo(id, fee) });
+    }
+
+    [HttpPost("after-sales/{id}/demo-paid")]
+    [HttpPost("after-sales/{id}/action")]
+    public IActionResult AfterSalesAction(string id, AfterSalesActionRequest request)
+    {
+        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        var record = FindCustomerAfterSales(id, customer.Id);
+        if (record is null) return NotFound(new { error = "AFTER_SALES_NOT_FOUND" });
+        var action = (request.Action ?? "").Trim().ToLowerInvariant();
+        var status = action switch
+        {
+            "confirm" => "pending",
+            "cancel" => "cancelled",
+            "payment_report" or "fee_paid" => "awaiting_return",
+            "complete_return" => "resolved",
+            _ => record.Status
+        };
+        record.Data["status"] = status;
+        record.Data["note"] = request.Note ?? record.Data.GetValueOrDefault("note");
+        if (action is "payment_report" or "fee_paid") record.Data["feePaidAt"] = DateTimeOffset.UtcNow.ToString("O");
+        if (!string.IsNullOrWhiteSpace(request.Reference)) record.Data["refundReference"] = request.Reference.Trim();
+        db.UpdateAdminRecord(record.Id, "after-sales", record.Title, StatusLabel(status), JsonSerializer.Serialize(record.Data));
+        return Ok(new { success = true, id, status });
     }
 
     [HttpPost("payment-sessions")]
@@ -895,7 +963,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
             var type = root.GetProperty("type").GetString() ?? "amount";
             var val = root.GetProperty("value").GetInt32();
             var scope = root.GetProperty("scope").GetString() ?? "goods";
-            validVouchers[code] = (type, val, scope);
+            validVouchers[code.Trim().ToUpperInvariant()] = (type, val, scope);
         }
 
         int remainingGoods = subtotal;
@@ -904,7 +972,10 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
 
         foreach (var code in voucherCodes)
         {
-            if (!validVouchers.TryGetValue(code, out var v)) continue;
+            if (!validVouchers.TryGetValue(code.Trim().ToUpperInvariant(), out var v))
+            {
+                throw new InvalidOperationException("INVALID_VOUCHER");
+            }
             appliedCodes.Add(code);
             if (v.Scope == "shipping")
             {
@@ -952,10 +1023,119 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         return 60000;
     }
 
+    private IReadOnlyList<object> ListCustomerAfterSales(long customerId, string orderId)
+    {
+        return db.ListAdminRecords("after-sales")
+            .Select(item => ParseAfterSalesRecord(item))
+            .Where(item => item is not null && ReadLong(item!.Data, "customerId") == customerId && string.Equals(ReadString(item.Data, "orderId"), orderId, StringComparison.OrdinalIgnoreCase))
+            .Select(item => MapAfterSales(item!))
+            .ToArray();
+    }
+
+    private AfterSalesRecord? FindCustomerAfterSales(string id, long customerId)
+    {
+        return db.ListAdminRecords("after-sales")
+            .Select(item => ParseAfterSalesRecord(item))
+            .FirstOrDefault(item => item is not null && ReadLong(item.Data, "customerId") == customerId && string.Equals(ReadString(item.Data, "id"), id, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static object MapAfterSales(AfterSalesRecord record)
+    {
+        return new
+        {
+            id = ReadString(record.Data, "id") ?? record.Id.ToString(),
+            orderId = ReadString(record.Data, "orderId"),
+            kind = ReadString(record.Data, "kind"),
+            reason = ReadString(record.Data, "reason"),
+            scheduledAt = ReadString(record.Data, "scheduledAt"),
+            status = ReadString(record.Data, "status") ?? record.Status,
+            quote = GetObject(record.Data, "quote"),
+            feePaidAt = ReadString(record.Data, "feePaidAt"),
+            refundReference = ReadString(record.Data, "refundReference"),
+            note = ReadString(record.Data, "note"),
+            compensation = GetObject(record.Data, "compensation") ?? Array.Empty<object>()
+        };
+    }
+
+    private static AfterSalesRecord? ParseAfterSalesRecord(object value)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(value));
+            var root = doc.RootElement;
+            var id = root.GetProperty("id").GetInt32();
+            var title = root.GetProperty("title").GetString() ?? "";
+            var status = root.GetProperty("status").GetString() ?? "";
+            var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(root.GetProperty("data").GetRawText()) ?? [];
+            return new AfterSalesRecord(id, title, status, data);
+        }
+        catch { return null; }
+    }
+
+    private static object BuildAfterSalesQuote(JsonElement order, string kind)
+    {
+        var total = Number(order, "total");
+        var goods = Number(order, "goodsTotal");
+        var shipping = Number(order, "shippingFee");
+        var fee = kind == "cancel" ? Math.Max(1000, goods / 100) : 0;
+        var refund = kind == "merchant_fault" ? total : kind == "return" ? Math.Max(0, total - shipping) : kind == "cancel" ? Math.Max(0, total - fee) : 0;
+        var breakdown = new List<object>();
+        if (kind == "cancel") breakdown.Add(new { label = "Phí hủy trước giao (1%)", amount = fee });
+        if (kind == "return") breakdown.Add(new { label = "Phí gửi trả dự kiến", amount = shipping });
+        if (kind == "merchant_fault") breakdown.Add(new { label = "Miễn phí do lỗi cửa hàng", amount = 0 });
+        if (kind == "reschedule") breakdown.Add(new { label = "Phí đổi lịch", amount = 0 });
+        return new { feeAmount = fee, refundAmount = refund, additionalDue = fee, breakdown };
+    }
+
+    private static int Number(JsonElement root, string property)
+    {
+        return root.TryGetProperty(property, out var value) && value.TryGetInt32(out var number) ? number : 0;
+    }
+
+    private static string? ReadString(Dictionary<string, object?> data, string key)
+    {
+        return data.TryGetValue(key, out var value) ? value switch
+        {
+            JsonElement element when element.ValueKind == JsonValueKind.String => element.GetString(),
+            null => null,
+            _ => Convert.ToString(value)
+        } : null;
+    }
+
+    private static long ReadLong(Dictionary<string, object?> data, string key)
+    {
+        return long.TryParse(ReadString(data, key), out var value) ? value : 0;
+    }
+
+    private static int ReadInt(Dictionary<string, object?> data, string parent, string key)
+    {
+        if (!data.TryGetValue(parent, out var value)) return 0;
+        var raw = value is JsonElement element ? element : JsonSerializer.SerializeToElement(value);
+        return raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty(key, out var field) && field.TryGetInt32(out var number) ? number : 0;
+    }
+
+    private static object? GetObject(Dictionary<string, object?> data, string key)
+    {
+        return data.TryGetValue(key, out var value) && value is JsonElement element ? JsonSerializer.Deserialize<object>(element.GetRawText()) : value;
+    }
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "pending" => "Chờ cửa hàng duyệt",
+        "awaiting_payment" => "Chờ thanh toán phí",
+        "awaiting_return" => "Chờ nhận hàng trả",
+        "resolved" => "Đã xử lý",
+        "rejected" => "Đã từ chối",
+        "cancelled" => "Đã hủy yêu cầu",
+        _ => "Chờ khách xác nhận phí"
+    };
+
+    private sealed record AfterSalesRecord(int Id, string Title, string Status, Dictionary<string, object?> Data);
+
     private string GetConfig(string key, string fallback = "")
     {
-        var val = configuration[key];
-        if (string.IsNullOrWhiteSpace(val)) val = Environment.GetEnvironmentVariable(key);
+        var val = Environment.GetEnvironmentVariable(key);
+        if (string.IsNullOrWhiteSpace(val)) val = configuration[key];
         return string.IsNullOrWhiteSpace(val) ? fallback : val.Trim();
     }
 }

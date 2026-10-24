@@ -2,6 +2,8 @@
  * Tệp: server-dotnet/Data/StoreDb.cs
  * Mục đích: Lớp truy cập Microsoft SQL Server bằng Microsoft.Data.SqlClient cho API C#.
  */
+using System.Diagnostics;
+using System.Data;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
@@ -75,23 +77,39 @@ public sealed class StoreDb
             };
             _connectionString = builder.ConnectionString;
         }
+        EnsureReady();
+    }
+
+    public (bool Ok, string Message) EnsureReady()
+    {
         try
         {
+            StartLocalDbIfConfigured();
             EnsureDatabaseExists();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[StoreDb] Chưa tạo được database '{DatabaseName}': {ex.Message}");
-            Console.WriteLine("[StoreDb] Hãy kiểm tra SQL Server đã Running + chạy scripts/setup-db.ps1");
-        }
-        try
-        {
             EnsureCustomerTables();
+            return TryCheckHealth();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[StoreDb] Chưa tạo được tables: {ex.Message}");
+            Console.WriteLine($"[StoreDb] Chưa sẵn sàng database '{DatabaseName}': {ex.Message}");
+            Console.WriteLine("[StoreDb] Hãy kiểm tra SQL Server/LocalDB rồi chạy scripts/setup-db.ps1 nếu cần.");
+            return (false, ex.Message);
         }
+    }
+
+    private void StartLocalDbIfConfigured()
+    {
+        if (!_connectionString.Contains("(localdb)", StringComparison.OrdinalIgnoreCase)) return;
+        using var process = Process.Start(new ProcessStartInfo
+        {
+            FileName = "sqllocaldb.exe",
+            Arguments = "start MSSQLLocalDB",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        });
+        process?.WaitForExit(8000);
     }
 
     /// <summary>
@@ -221,10 +239,14 @@ public sealed class StoreDb
 
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'customer_vouchers')
                 CREATE TABLE customer_vouchers (
-                  code NVARCHAR(255) PRIMARY KEY FOREIGN KEY REFERENCES voucher_codes(code), customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
+                  code NVARCHAR(255) PRIMARY KEY FOREIGN KEY REFERENCES voucher_codes(code), customer_id BIGINT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
                   label NVARCHAR(255) NOT NULL, type NVARCHAR(50) NOT NULL, value INT NOT NULL, scope NVARCHAR(50) NOT NULL DEFAULT 'goods',
                   expires_at NVARCHAR(100) NOT NULL, source NVARCHAR(255) NOT NULL, created_at NVARCHAR(100) NOT NULL
                 );
+                IF COL_LENGTH('customer_vouchers', 'customer_id') IS NOT NULL
+                BEGIN
+                    ALTER TABLE customer_vouchers ALTER COLUMN customer_id BIGINT NULL;
+                END;
 
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'product_reviews')
                 CREATE TABLE product_reviews (
@@ -1011,7 +1033,7 @@ public sealed class StoreDb
         using var command = db.CreateCommand();
         command.CommandText = """
             DELETE FROM customer_vouchers WHERE expires_at <= @now;
-            SELECT code,label,type,value,scope,expires_at,source FROM customer_vouchers WHERE customer_id=@id ORDER BY expires_at;
+            SELECT code,label,type,value,scope,expires_at,source FROM customer_vouchers WHERE customer_id=@id OR customer_id IS NULL ORDER BY expires_at;
             """;
         command.Parameters.AddWithValue("@id", customerId);
         command.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
@@ -1699,6 +1721,29 @@ public sealed class StoreDb
         return list;
     }
 
+    public object? UpdateAdminCustomer(long id, string? username, string? email, int? points, int? spinCredits)
+    {
+        var current = FindCustomerFull(id);
+        if (current is null) return null;
+        var nextUsername = string.IsNullOrWhiteSpace(username) ? current.Value.Username : username.Trim();
+        var nextEmail = string.IsNullOrWhiteSpace(email) ? current.Value.Email : email.Trim().ToLowerInvariant();
+        if (nextUsername.Length < 3 || nextEmail.Length < 5 || !nextEmail.Contains('@')) throw new InvalidOperationException("INVALID_CUSTOMER");
+
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "UPDATE customers SET username=@username,email=@email,points=@points,spin_credits=@spinCredits WHERE id=@id";
+        cmd.Parameters.AddWithValue("@id", id);
+        cmd.Parameters.AddWithValue("@username", nextUsername);
+        cmd.Parameters.AddWithValue("@email", nextEmail);
+        cmd.Parameters.AddWithValue("@points", Math.Max(0, points ?? 0));
+        cmd.Parameters.AddWithValue("@spinCredits", Math.Max(0, spinCredits ?? 0));
+        try { if (cmd.ExecuteNonQuery() == 0) return null; }
+        catch (SqlException ex) when (ex.Number is 2601 or 2627) { throw new InvalidOperationException("CUSTOMER_EXISTS", ex); }
+        var updated = FindCustomerFull(id);
+        if (updated is null) return null;
+        return new { id, username = updated.Value.Username, email = updated.Value.Email, points = points ?? 0, spinCredits = spinCredits ?? 0 };
+    }
+
     public IReadOnlyList<object> ListAdminVouchers()
     {
         using var db = Open();
@@ -1706,7 +1751,7 @@ public sealed class StoreDb
         cmd.CommandText = """
             SELECT v.code, v.label, v.type, v.value, v.scope, v.expires_at, v.source, v.created_at, c.id, c.username, c.email
             FROM customer_vouchers v
-            JOIN customers c ON c.id = v.customer_id
+            LEFT JOIN customers c ON c.id = v.customer_id
             ORDER BY v.created_at DESC
             """;
         using var reader = cmd.ExecuteReader();
@@ -1723,16 +1768,16 @@ public sealed class StoreDb
                 expiresAt = reader.GetString(5),
                 source = reader.GetString(6),
                 createdAt = reader.GetString(7),
-                customerId = Convert.ToInt64(reader.GetValue(8)),
-                username = reader.GetString(9),
-                email = reader.GetString(10),
+                customerId = reader.IsDBNull(8) ? (long?)null : Convert.ToInt64(reader.GetValue(8)),
+                username = reader.IsDBNull(9) ? "Mọi khách" : reader.GetString(9),
+                email = reader.IsDBNull(10) ? "Dùng được với mã này" : reader.GetString(10),
                 active = true
             });
         }
         return list;
     }
 
-    public object CreateAdminVoucher(string code, long customerId, string label, string type, int value, string scope, string expiresAt, string source)
+    public object CreateAdminVoucher(string code, long? customerId, string label, string type, int value, string scope, string expiresAt, string source)
     {
         var now = DateTimeOffset.UtcNow.ToString("O");
         using var db = Open();
@@ -1744,7 +1789,8 @@ public sealed class StoreDb
             VALUES(@code, @cid, @label, @type, @val, @scope, @exp, @src, @now);
             """;
         cmd.Parameters.AddWithValue("@code", code);
-        cmd.Parameters.AddWithValue("@cid", customerId);
+        var customerParameter = cmd.Parameters.Add("@cid", SqlDbType.BigInt);
+        customerParameter.Value = (object?)customerId ?? DBNull.Value;
         cmd.Parameters.AddWithValue("@label", label);
         cmd.Parameters.AddWithValue("@type", type);
         cmd.Parameters.AddWithValue("@val", value);
