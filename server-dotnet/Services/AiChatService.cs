@@ -33,7 +33,8 @@ public sealed class AiChatService
     public AiChatService(IConfiguration configuration)
     {
         _configuration = configuration;
-        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        // Timeout của request được điều khiển bởi OllamaTimeoutSeconds ở từng lượt chat.
+        _httpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
     }
 
     private string GetConfig(string key, string fallback = "")
@@ -64,13 +65,13 @@ public sealed class AiChatService
     {
         get
         {
-            var raw = GetConfig("AI_THINKING", "high").ToLowerInvariant();
+            var raw = GetConfig("AI_THINKING", "off").ToLowerInvariant();
             return raw switch
             {
                 "false" or "off" or "0" => "off",
                 "medium" => "medium",
                 "high" => "high",
-                _ => "low"
+                _ => "off"
             };
         }
     }
@@ -79,9 +80,10 @@ public sealed class AiChatService
 
     private int OllamaPredictionTokens => ThinkingMode switch
     {
-        "high" => 2048,
-        "medium" => 1200,
-        _ => 800
+        "high" => 3072,
+        "medium" => 2048,
+        "low" => 1536,
+        _ => 2048
     };
 
     public int ContextSize
@@ -136,7 +138,7 @@ public sealed class AiChatService
         }
     }
 
-    public async Task<AiChatResponse> ProcessAdminChatAsync(string message, StoreDb db, CancellationToken cancellationToken)
+    public async Task<AiChatResponse> ProcessAdminChatAsync(string message, StoreDb db, IReadOnlyList<ChatTurnData> history, CancellationToken cancellationToken)
     {
         var lower = message.ToLowerInvariant();
         if (lower.Contains("doanh thu") || lower.Contains("báo cáo") || lower.Contains("thống kê") || lower.Contains("lợi nhuận") || lower.Contains("tiền"))
@@ -203,8 +205,8 @@ public sealed class AiChatService
         }
 
         var retrieval = BuildCustomerRetrieval(message, db);
-        var adminSystemPrompt = "Bạn là trợ lý AI quản trị kinh doanh cho Store. Chỉ dùng dữ liệu trong phần NGUỒN ĐÃ XÁC MINH. Không tự bịa giá, tồn kho, danh mục, chính sách, trạng thái đơn hoặc số liệu. Nếu nguồn không có câu trả lời, nói rõ chưa có dữ liệu được xác minh. Suy nghĩ kỹ theo mức cấu hình rồi trả lời tiếng Việt gọn. Không in nhãn nguồn, mã nguồn hoặc mục Nguồn trong nội dung trả lời; backend tự quản lý metadata nguồn.";
-        var adminPrompt = $"Câu hỏi quản trị: {message}\n\nNGUỒN ĐÃ XÁC MINH:\n{retrieval.Context}";
+        var adminSystemPrompt = "Bạn là trợ lý AI quản trị kinh doanh cho Store. Khi câu hỏi cần dữ liệu Store, chỉ dùng phần NGUỒN ĐÃ XÁC MINH và không tự bịa giá, tồn kho, danh mục, chính sách, trạng thái đơn hoặc số liệu. Khi là câu hỏi kiến thức chung, được phép trả lời bằng kiến thức tổng quát; nếu câu hỏi không liên quan dữ liệu Store thì nói rõ điều đó. Trả lời tiếng Việt rõ ràng, đầy đủ, trực tiếp. Không in suy nghĩ nội bộ, nhãn nguồn, mã nguồn hoặc mục Nguồn trong nội dung trả lời; backend tự quản lý metadata nguồn.";
+        var adminPrompt = BuildPrompt(message, history, retrieval.Context);
         var ollamaResult = await TryOllamaGenerateAsync(adminPrompt, adminSystemPrompt, cancellationToken);
         if (!string.IsNullOrWhiteSpace(ollamaResult))
         {
@@ -215,47 +217,21 @@ public sealed class AiChatService
                 true);
         }
 
-        var fallbackText = "Chào bạn! Tôi là Trợ lý AI Quản trị của Store. Tôi có thể hỗ trợ bạn:\n\n" +
-                           "1. **Báo cáo doanh thu:** Gõ *'Báo cáo doanh thu'* hoặc *'Thống kê'* để xem doanh thu và đối soát 30 ngày.\n" +
-                           "2. **Kiểm tra kho hàng:** Gõ *'Kiểm tra tồn kho'* để xem các mặt hàng sắp hết hoặc cần bổ sung.\n" +
-                           "3. **Quản lý đơn hàng:** Theo dõi tình trạng giao vận và đối soát chuyển khoản VietQR.\n\n" +
-                           "Bạn cần tôi hỗ trợ phân tích thông tin nào?";
+        var fallbackText = "AI Local hiện chưa kết nối được với Ollama nên chưa thể trả lời câu hỏi này. Hãy mở Ollama, kiểm tra model qwen3.5:4b rồi thử lại.";
 
         return new AiChatResponse(
             SplitIntoChunks(fallbackText),
             null,
-            retrieval.Sources.Append(new { id = "assistant-local", label = "Fallback dữ liệu Store" }).ToArray(),
+            retrieval.Sources.Append(new { id = "assistant-local", label = "AI Local chưa kết nối Ollama" }).ToArray(),
             true);
     }
 
-    public async Task<AiChatResponse> ProcessCustomerChatAsync(string message, StoreDb db, string? customerName, CancellationToken cancellationToken)
+    public async Task<AiChatResponse> ProcessCustomerChatAsync(string message, StoreDb db, string? customerName, IReadOnlyList<ChatTurnData> history, CancellationToken cancellationToken)
     {
-        var lower = message.ToLowerInvariant();
-        var name = string.IsNullOrWhiteSpace(customerName) ? "quý khách" : customerName.Trim();
         var retrieval = BuildCustomerRetrieval(message, db);
 
-        if (lower.Contains("ship") || lower.Contains("vận chuyển") || lower.Contains("giao hàng") || lower.Contains("phí"))
-        {
-            return MissingPolicyResponse(name, "vận chuyển", retrieval.Sources);
-        }
-
-        if (lower.Contains("thanh toán") || lower.Contains("chuyển khoản") || lower.Contains("vietqr") || lower.Contains("ngân hàng"))
-        {
-            return MissingPolicyResponse(name, "thanh toán", retrieval.Sources);
-        }
-
-        if (lower.Contains("đổi trả") || lower.Contains("bảo hành") || lower.Contains("hoàn tiền") || lower.Contains("hủy đơn"))
-        {
-            return MissingPolicyResponse(name, "đổi trả và bảo hành", retrieval.Sources);
-        }
-
-        if (lower.Contains("voucher") || lower.Contains("vòng quay") || lower.Contains("khuyến mãi") || lower.Contains("giảm giá") || lower.Contains("xu") || lower.Contains("điểm"))
-        {
-            return MissingPolicyResponse(name, "voucher và khuyến mãi", retrieval.Sources);
-        }
-
-        var systemPrompt = "Bạn là trợ lý hỗ trợ Store. Chỉ dùng dữ liệu trong phần NGUỒN ĐÃ XÁC MINH. Không tự bịa giá, tồn kho, danh mục, chính sách, trạng thái đơn hoặc cam kết giao hàng. Nếu nguồn không có câu trả lời, nói rõ Store chưa cung cấp thông tin được xác minh. Suy nghĩ kỹ theo mức cấu hình rồi trả lời tiếng Việt gọn. Không in nhãn nguồn, mã nguồn hoặc mục Nguồn trong nội dung trả lời; backend tự quản lý metadata nguồn.";
-        var ollamaResult = await TryOllamaGenerateAsync($"Câu hỏi: {message}\n\nNGUỒN ĐÃ XÁC MINH:\n{retrieval.Context}", systemPrompt, cancellationToken);
+        var systemPrompt = "Bạn là trợ lý hỗ trợ khách hàng của Store. Khi câu hỏi liên quan Store, chỉ dùng phần NGUỒN ĐÃ XÁC MINH và không tự bịa giá, tồn kho, danh mục, chính sách, trạng thái đơn hoặc cam kết giao hàng. Nếu Store chưa có chính sách hoặc dữ liệu cần thiết, nói rõ chưa có dữ liệu được xác minh và không đoán. Khi là câu hỏi kiến thức chung, được phép trả lời trực tiếp bằng kiến thức phổ thông. Trả lời tiếng Việt rõ ràng, đầy đủ, trực tiếp. Không in suy nghĩ nội bộ, nhãn nguồn, mã nguồn hoặc mục Nguồn trong nội dung trả lời; backend tự quản lý metadata nguồn.";
+        var ollamaResult = await TryOllamaGenerateAsync(BuildPrompt(message, history, retrieval.Context), systemPrompt, cancellationToken);
         if (!string.IsNullOrWhiteSpace(ollamaResult))
         {
             return new AiChatResponse(
@@ -267,26 +243,25 @@ public sealed class AiChatService
 
         var matchedNames = string.Join(", ", retrieval.MatchedProducts.Take(3).Select(product => product.Name));
         var defaultText = retrieval.MatchedProducts.Count > 0
-            ? $"Chào {name}! Tôi tìm thấy các sản phẩm liên quan: {matchedNames}. Store chưa có thêm chính sách được xác minh cho yêu cầu này."
-            : $"Chào {name}! Store chưa có dữ liệu được xác minh để trả lời câu hỏi này. Quý khách có thể hỏi tên sản phẩm, danh mục hoặc giá để tôi tra trong catalog.";
+            ? $"AI Local hiện chưa kết nối được với Ollama. Tôi đã tìm thấy sản phẩm liên quan trong catalog: {matchedNames}, nhưng chưa thể tạo câu trả lời đầy đủ."
+            : "AI Local hiện chưa kết nối được với Ollama nên chưa thể trả lời câu hỏi này. Hãy mở Ollama, kiểm tra model qwen3.5:4b rồi thử lại.";
 
         return new AiChatResponse(
             SplitIntoChunks(defaultText),
             null,
-            retrieval.Sources.Append(new { id = "local-fallback", label = "Fallback dữ liệu Store" }).ToArray(),
+            retrieval.Sources.Append(new { id = "local-fallback", label = "AI Local chưa kết nối Ollama" }).ToArray(),
             true);
-    }
-
-    private static AiChatResponse MissingPolicyResponse(string name, string topic, IReadOnlyList<object> sources)
-    {
-        var text = $"Chào {name}! Store chưa cung cấp thông tin {topic} đã được xác minh trong dữ liệu hiện tại. Tôi không tự suy đoán nội dung chính sách; vui lòng gửi form Liên hệ để nhân viên xác nhận.";
-        return new AiChatResponse(SplitIntoChunks(text), null, sources.Append(new { id = "policy-missing", label = $"Chưa có chính sách {topic} được duyệt" }).ToArray(), true);
     }
 
     private static (string Context, IReadOnlyList<object> Sources, IReadOnlyList<CatalogProduct> MatchedProducts) BuildCustomerRetrieval(string message, StoreDb db)
     {
-        var terms = message.Split([' ', '\t', '\r', '\n', ',', '.', ':', ';', '?', '!'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        var stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "tôi", "mình", "bạn", "cho", "với", "của", "là", "có", "và", "hay", "những", "các", "một", "về", "này", "nào", "giúp", "xin", "hỏi", "store", "sản", "phẩm"
+        };
+        var terms = message.Split([' ', '\t', '\r', '\n', ',', '.', ':', ';', '?', '!', '(', ')', '[', ']'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(term => term.Length >= 2)
+            .Where(term => !stopWords.Contains(term))
             .Select(term => term.ToLowerInvariant())
             .Distinct()
             .ToArray();
@@ -364,6 +339,24 @@ public sealed class AiChatService
             _ollamaGate.Release();
         }
         return null;
+    }
+
+    private static string BuildPrompt(string message, IReadOnlyList<ChatTurnData> history, string retrievalContext)
+    {
+        var previousTurns = history
+            .TakeLast(8)
+            .Select(turn => $"Khách/Admin: {TrimPromptText(turn.UserContent)}\nAI: {TrimPromptText(turn.AssistantContent)}")
+            .ToArray();
+        var conversation = previousTurns.Length == 0
+            ? "Chưa có lịch sử hội thoại."
+            : string.Join("\n\n", previousTurns);
+        return $"LỊCH SỬ HỘI THOẠI:\n{conversation}\n\nCÂU HỎI HIỆN TẠI:\n{TrimPromptText(message)}\n\nNGUỒN ĐÃ XÁC MINH:\n{retrievalContext}";
+    }
+
+    private static string TrimPromptText(string value)
+    {
+        var clean = value.Trim();
+        return clean.Length <= 1800 ? clean : clean[..1800] + "…";
     }
 
     private static IReadOnlyList<string> SplitIntoChunks(string text)

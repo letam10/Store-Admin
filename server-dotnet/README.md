@@ -66,3 +66,17 @@ npm run dev
 ```
 
 Khi kiểm thử C# cần đặt `VITE_API_TARGET=http://127.0.0.1:5000`; không dùng backend Node làm nguồn dữ liệu thay thế cho nghiệm thu catalog, appearance hoặc AI Local.
+
+## AI Local chạy đúng
+
+AI Local cần Ollama chạy riêng trên máy đang chạy API:
+
+```powershell
+ollama serve
+ollama pull qwen3.5:4b
+ollama list
+```
+
+Mặc định dự án dùng `AI_CONTEXT_SIZE=32768`, `AI_THINKING=off` và timeout 120 giây. Tắt `think` để qwen3.5:4b không dùng hết giới hạn sinh câu trả lời trong phần suy nghĩ; đây không phải một mức `high` riêng của Ollama. Chất lượng dữ liệu được giữ bằng RAG từ StoreDb, prompt có lịch sử hội thoại và giới hạn trả lời đầy đủ. Sau khi sửa `.env`, phải khởi động lại API.
+
+Lịch sử chat được lưu theo tài khoản trong các bảng `conversations`, `messages` và `chat_turns`, nên việc Store làm mới phiên khách mỗi phút không còn xóa hội thoại. Backend chỉ đưa các lượt gần nhất vào prompt; dữ liệu sản phẩm, danh mục, giá và tồn kho vẫn được đọc lại trực tiếp từ `catalog_products` ở mỗi câu hỏi.

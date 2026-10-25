@@ -453,10 +453,22 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
         }
     }
 
+    [HttpGet("conversations/{conversationId}")]
+    public IActionResult Conversation(string conversationId)
+    {
+        var admin = RequireAdmin();
+        if (admin is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
+        var id = (conversationId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(id) || id.Length > 255) return BadRequest(new { error = "INVALID_CONVERSATION" });
+        var ownerKey = "admin:" + admin.Value.Id;
+        return Ok(new { conversationId = id, messages = db.GetChatHistory(id, ownerKey, "admin"), compactStatus = "not_needed" });
+    }
+
     [HttpPost("chat")]
     public async Task Chat(ChatStreamRequest request, CancellationToken cancellationToken)
     {
-        if (RequireAdmin() is null)
+        var admin = RequireAdmin();
+        if (admin is null)
         {
             Response.StatusCode = StatusCodes.Status401Unauthorized;
             Response.ContentType = "application/json";
@@ -484,6 +496,10 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
         var convId = string.IsNullOrWhiteSpace(request.ConversationId)
             ? "admin-conv-" + Guid.NewGuid().ToString("N")[..8]
             : request.ConversationId.Trim();
+        var requestId = string.IsNullOrWhiteSpace(request.RequestId)
+            ? "admin-req-" + Guid.NewGuid().ToString("N")
+            : request.RequestId.Trim();
+        var ownerKey = "admin:" + admin.Value.Id;
 
         Response.ContentType = "application/x-ndjson; charset=utf-8";
         Response.Headers.CacheControl = "no-cache";
@@ -495,7 +511,8 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
         // 2. status event
         await WriteNdjsonAsync(Response, new { type = "status", label = "Đang phân tích dữ liệu..." }, cancellationToken);
 
-        var chatRes = await aiChatService.ProcessAdminChatAsync(message, db, cancellationToken);
+        var history = db.GetChatTurns(convId, ownerKey, "admin");
+        var chatRes = await aiChatService.ProcessAdminChatAsync(message, db, history, cancellationToken);
 
         // 3. sources event
         if (chatRes.Sources.Count > 0)
@@ -518,6 +535,18 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
             if (cancellationToken.IsCancellationRequested) break;
             await WriteNdjsonAsync(Response, new { type = "delta", content = chunk }, cancellationToken);
             await Task.Delay(25, cancellationToken);
+        }
+
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                db.SaveChatTurn(convId, ownerKey, "admin", requestId, message, string.Concat(chatRes.Chunks), "completed", chatRes.Sources, chatRes.Report, chatRes.Verified);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AI Chat] Không lưu được lịch sử admin: {ex.Message}");
+            }
         }
 
         // 7. done event

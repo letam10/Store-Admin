@@ -28,7 +28,8 @@ public sealed class SupportController(StoreDb db, AiChatService aiChatService) :
     {
         var id = (conversationId ?? "").Trim();
         if (string.IsNullOrWhiteSpace(id) || id.Length > 255) return BadRequest(new { error = "INVALID_CONVERSATION" });
-        return Ok(new { conversationId = id, messages = Array.Empty<object>() });
+        var ownerKey = CustomerOwnerKey();
+        return Ok(new { conversationId = id, messages = db.GetChatHistory(id, ownerKey, "support"), compactStatus = "not_needed" });
     }
 
     [HttpPost("chat")]
@@ -44,16 +45,25 @@ public sealed class SupportController(StoreDb db, AiChatService aiChatService) :
         }
 
         string? customerName = null;
+        long? customerId = null;
         var raw = Request.Cookies[CustomerCookie];
         if (!string.IsNullOrWhiteSpace(raw))
         {
             var customer = db.FindCustomerBySession(Security.Tokens.Sha256(raw));
-            if (customer != null) customerName = customer.Value.Username;
+            if (customer != null)
+            {
+                customerId = customer.Value.Id;
+                customerName = customer.Value.Username;
+            }
         }
 
         var convId = string.IsNullOrWhiteSpace(request.ConversationId)
             ? "supp-conv-" + Guid.NewGuid().ToString("N")[..8]
             : request.ConversationId.Trim();
+        var requestId = string.IsNullOrWhiteSpace(request.RequestId)
+            ? "support-req-" + Guid.NewGuid().ToString("N")
+            : request.RequestId.Trim();
+        var ownerKey = customerId.HasValue ? "customer:" + customerId.Value : "customer:anonymous";
 
         Response.ContentType = "application/x-ndjson; charset=utf-8";
         Response.Headers.CacheControl = "no-cache";
@@ -65,7 +75,8 @@ public sealed class SupportController(StoreDb db, AiChatService aiChatService) :
         // 2. status event
         await WriteNdjsonAsync(Response, new { type = "status", status = "generating" }, cancellationToken);
 
-        var chatRes = await aiChatService.ProcessCustomerChatAsync(message, db, customerName, cancellationToken);
+        var history = db.GetChatTurns(convId, ownerKey, "support");
+        var chatRes = await aiChatService.ProcessCustomerChatAsync(message, db, customerName, history, cancellationToken);
 
         // 3. sources event
         if (chatRes.Sources.Count > 0)
@@ -84,6 +95,18 @@ public sealed class SupportController(StoreDb db, AiChatService aiChatService) :
             await Task.Delay(20, cancellationToken);
         }
 
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                db.SaveChatTurn(convId, ownerKey, "support", requestId, message, string.Concat(chatRes.Chunks), "completed", chatRes.Sources, null, chatRes.Verified);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AI Chat] Không lưu được lịch sử hỗ trợ: {ex.Message}");
+            }
+        }
+
         // 6. done event
         await WriteNdjsonAsync(Response, new { type = "done", conversationId = convId }, cancellationToken);
     }
@@ -93,6 +116,14 @@ public sealed class SupportController(StoreDb db, AiChatService aiChatService) :
         var json = JsonSerializer.Serialize(data);
         await response.WriteAsync(json + "\n", ct);
         await response.Body.FlushAsync(ct);
+    }
+
+    private string CustomerOwnerKey()
+    {
+        var raw = Request.Cookies[CustomerCookie];
+        if (string.IsNullOrWhiteSpace(raw)) return "customer:anonymous";
+        var customer = db.FindCustomerBySession(Security.Tokens.Sha256(raw));
+        return customer is null ? "customer:anonymous" : "customer:" + customer.Value.Id;
     }
 }
 

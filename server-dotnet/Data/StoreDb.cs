@@ -354,8 +354,256 @@ public sealed class StoreDb
                   created_at NVARCHAR(100) NOT NULL,
                   updated_at NVARCHAR(100) NOT NULL
                 );
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'conversations')
+                CREATE TABLE conversations (
+                  id NVARCHAR(255) PRIMARY KEY,
+                  kind NVARCHAR(50) NOT NULL CHECK(kind IN ('support', 'admin')),
+                  owner_key NVARCHAR(255) NOT NULL,
+                  summary NVARCHAR(MAX) NOT NULL DEFAULT '',
+                  memory_json NVARCHAR(MAX) NOT NULL DEFAULT '{}',
+                  compact_status NVARCHAR(50) NOT NULL DEFAULT 'not_needed',
+                  last_compacted_message_id INT NOT NULL DEFAULT 0,
+                  created_at NVARCHAR(100) NOT NULL,
+                  updated_at NVARCHAR(100) NOT NULL
+                );
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'messages')
+                CREATE TABLE messages (
+                  id INT IDENTITY(1,1) PRIMARY KEY,
+                  conversation_id NVARCHAR(255) NOT NULL FOREIGN KEY REFERENCES conversations(id) ON DELETE CASCADE,
+                  role NVARCHAR(50) NOT NULL CHECK(role IN ('user', 'assistant')),
+                  content NVARCHAR(MAX) NOT NULL,
+                  completed INT NOT NULL DEFAULT 1,
+                  sources_json NVARCHAR(MAX) NOT NULL DEFAULT '[]',
+                  created_at NVARCHAR(100) NOT NULL
+                );
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'chat_turns')
+                CREATE TABLE chat_turns (
+                  id INT IDENTITY(1,1) PRIMARY KEY,
+                  request_id NVARCHAR(255) NOT NULL,
+                  owner_key NVARCHAR(255) NOT NULL,
+                  kind NVARCHAR(50) NOT NULL CHECK(kind IN ('support', 'admin')),
+                  conversation_id NVARCHAR(255) NOT NULL FOREIGN KEY REFERENCES conversations(id) ON DELETE CASCADE,
+                  user_message_id INT NOT NULL FOREIGN KEY REFERENCES messages(id) ON DELETE NO ACTION,
+                  assistant_message_id INT NULL,
+                  user_content NVARCHAR(MAX) NOT NULL,
+                  status NVARCHAR(50) NOT NULL CHECK(status IN ('running', 'completed', 'failed', 'stopped')),
+                  assistant_content NVARCHAR(MAX) NOT NULL DEFAULT '',
+                  sources_json NVARCHAR(MAX) NOT NULL DEFAULT '[]',
+                  report_json NVARCHAR(MAX) NOT NULL DEFAULT 'null',
+                  verified_json NVARCHAR(MAX) NOT NULL DEFAULT 'null',
+                  error_code NVARCHAR(255) NULL,
+                  created_at NVARCHAR(100) NOT NULL,
+                  updated_at NVARCHAR(100) NOT NULL,
+                  CONSTRAINT UQ_chat_turns_owner_req UNIQUE(owner_key, request_id)
+                );
                 """;
             command.ExecuteNonQuery();
+    }
+
+    public IReadOnlyList<ChatTurnData> GetChatTurns(string conversationId, string ownerKey, string kind)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = """
+            SELECT request_id,user_content,status,assistant_content,sources_json,report_json,verified_json
+            FROM (
+                SELECT TOP 20 t.id,t.request_id,t.user_content,t.status,t.assistant_content,t.sources_json,t.report_json,t.verified_json
+                FROM chat_turns t
+                JOIN conversations c ON c.id=t.conversation_id
+                WHERE t.conversation_id=@conversationId AND c.owner_key=@ownerKey AND c.kind=@kind
+                ORDER BY t.id DESC
+            ) recent
+            ORDER BY recent.id
+            """;
+        command.Parameters.AddWithValue("@conversationId", conversationId.Trim());
+        command.Parameters.AddWithValue("@ownerKey", ownerKey.Trim());
+        command.Parameters.AddWithValue("@kind", kind.Trim());
+        var turns = new List<ChatTurnData>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            turns.Add(new ChatTurnData(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(3),
+                reader.GetString(2),
+                reader.IsDBNull(4) ? "[]" : reader.GetString(4),
+                reader.IsDBNull(5) ? "null" : reader.GetString(5),
+                reader.IsDBNull(6) ? "null" : reader.GetString(6)));
+        }
+        return turns;
+    }
+
+    public IReadOnlyList<object> GetChatHistory(string conversationId, string ownerKey, string kind)
+    {
+        var messages = new List<object>();
+        foreach (var turn in GetChatTurns(conversationId, ownerKey, kind))
+        {
+            messages.Add(new
+            {
+                id = turn.RequestId + ":user",
+                role = "user",
+                content = turn.UserContent,
+                status = "complete",
+                requestId = turn.RequestId,
+                retryContent = turn.UserContent
+            });
+
+            if (string.IsNullOrWhiteSpace(turn.AssistantContent) && turn.Status == "running") continue;
+            messages.Add(new
+            {
+                id = turn.RequestId + ":assistant",
+                role = "assistant",
+                content = turn.AssistantContent,
+                status = turn.Status,
+                sources = ParseStoredChatJson(turn.SourcesJson, Array.Empty<object>()),
+                report = ParseStoredChatJson(turn.ReportJson, null),
+                verified = ParseStoredChatJson(turn.VerifiedJson, null),
+                requestId = turn.RequestId,
+                retryContent = turn.UserContent
+            });
+        }
+        return messages;
+    }
+
+    public void SaveChatTurn(
+        string conversationId,
+        string ownerKey,
+        string kind,
+        string requestId,
+        string userContent,
+        string assistantContent,
+        string status,
+        object? sources,
+        object? report,
+        object? verified)
+    {
+        var now = DateTimeOffset.UtcNow.ToString("O");
+        var sourcesJson = JsonSerializer.Serialize(sources ?? Array.Empty<object>());
+        var reportJson = JsonSerializer.Serialize(report);
+        var verifiedJson = JsonSerializer.Serialize(verified);
+        using var db = Open();
+        using var transaction = db.BeginTransaction();
+
+        using (var conversation = db.CreateCommand())
+        {
+            conversation.Transaction = transaction;
+            conversation.CommandText = """
+                IF NOT EXISTS (SELECT 1 FROM conversations WHERE id=@conversationId)
+                INSERT INTO conversations(id,kind,owner_key,created_at,updated_at)
+                VALUES(@conversationId,@kind,@ownerKey,@now,@now);
+                UPDATE conversations SET updated_at=@now WHERE id=@conversationId AND kind=@kind AND owner_key=@ownerKey;
+                """;
+            conversation.Parameters.AddWithValue("@conversationId", conversationId.Trim());
+            conversation.Parameters.AddWithValue("@kind", kind.Trim());
+            conversation.Parameters.AddWithValue("@ownerKey", ownerKey.Trim());
+            conversation.Parameters.AddWithValue("@now", now);
+            conversation.ExecuteNonQuery();
+        }
+
+        int? existingId = null;
+        int? existingAssistantId = null;
+        using (var lookup = db.CreateCommand())
+        {
+            lookup.Transaction = transaction;
+            lookup.CommandText = "SELECT TOP 1 id,assistant_message_id FROM chat_turns WHERE owner_key=@ownerKey AND request_id=@requestId";
+            lookup.Parameters.AddWithValue("@ownerKey", ownerKey.Trim());
+            lookup.Parameters.AddWithValue("@requestId", requestId.Trim());
+            using var reader = lookup.ExecuteReader();
+            if (reader.Read())
+            {
+                existingId = Convert.ToInt32(reader.GetValue(0));
+                existingAssistantId = reader.IsDBNull(1) ? null : Convert.ToInt32(reader.GetValue(1));
+            }
+        }
+
+        if (existingId.HasValue)
+        {
+            using var update = db.CreateCommand();
+            update.Transaction = transaction;
+            update.CommandText = """
+                UPDATE chat_turns SET assistant_content=@assistantContent,status=@status,sources_json=@sourcesJson,
+                  report_json=@reportJson,verified_json=@verifiedJson,updated_at=@now
+                WHERE id=@id;
+                """;
+            update.Parameters.AddWithValue("@assistantContent", assistantContent);
+            update.Parameters.AddWithValue("@status", status);
+            update.Parameters.AddWithValue("@sourcesJson", sourcesJson);
+            update.Parameters.AddWithValue("@reportJson", reportJson);
+            update.Parameters.AddWithValue("@verifiedJson", verifiedJson);
+            update.Parameters.AddWithValue("@now", now);
+            update.Parameters.AddWithValue("@id", existingId.Value);
+            update.ExecuteNonQuery();
+
+            if (existingAssistantId.HasValue)
+            {
+                using var updateMessage = db.CreateCommand();
+                updateMessage.Transaction = transaction;
+                updateMessage.CommandText = "UPDATE messages SET content=@content,completed=1,sources_json=@sourcesJson WHERE id=@id";
+                updateMessage.Parameters.AddWithValue("@content", assistantContent);
+                updateMessage.Parameters.AddWithValue("@sourcesJson", sourcesJson);
+                updateMessage.Parameters.AddWithValue("@id", existingAssistantId.Value);
+                updateMessage.ExecuteNonQuery();
+            }
+        }
+        else
+        {
+            int userMessageId;
+            using (var insertUser = db.CreateCommand())
+            {
+                insertUser.Transaction = transaction;
+                insertUser.CommandText = "INSERT INTO messages(conversation_id,role,content,completed,created_at) VALUES(@conversationId,'user',@content,1,@now); SELECT CAST(SCOPE_IDENTITY() AS INT);";
+                insertUser.Parameters.AddWithValue("@conversationId", conversationId.Trim());
+                insertUser.Parameters.AddWithValue("@content", userContent);
+                insertUser.Parameters.AddWithValue("@now", now);
+                userMessageId = Convert.ToInt32(insertUser.ExecuteScalar());
+            }
+
+            int assistantMessageId;
+            using (var insertAssistant = db.CreateCommand())
+            {
+                insertAssistant.Transaction = transaction;
+                insertAssistant.CommandText = "INSERT INTO messages(conversation_id,role,content,completed,sources_json,created_at) VALUES(@conversationId,'assistant',@content,1,@sourcesJson,@now); SELECT CAST(SCOPE_IDENTITY() AS INT);";
+                insertAssistant.Parameters.AddWithValue("@conversationId", conversationId.Trim());
+                insertAssistant.Parameters.AddWithValue("@content", assistantContent);
+                insertAssistant.Parameters.AddWithValue("@sourcesJson", sourcesJson);
+                insertAssistant.Parameters.AddWithValue("@now", now);
+                assistantMessageId = Convert.ToInt32(insertAssistant.ExecuteScalar());
+            }
+
+            using var insertTurn = db.CreateCommand();
+            insertTurn.Transaction = transaction;
+            insertTurn.CommandText = """
+                INSERT INTO chat_turns(request_id,owner_key,kind,conversation_id,user_message_id,assistant_message_id,user_content,status,assistant_content,sources_json,report_json,verified_json,created_at,updated_at)
+                VALUES(@requestId,@ownerKey,@kind,@conversationId,@userMessageId,@assistantMessageId,@userContent,@status,@assistantContent,@sourcesJson,@reportJson,@verifiedJson,@now,@now)
+                """;
+            insertTurn.Parameters.AddWithValue("@requestId", requestId.Trim());
+            insertTurn.Parameters.AddWithValue("@ownerKey", ownerKey.Trim());
+            insertTurn.Parameters.AddWithValue("@kind", kind.Trim());
+            insertTurn.Parameters.AddWithValue("@conversationId", conversationId.Trim());
+            insertTurn.Parameters.AddWithValue("@userMessageId", userMessageId);
+            insertTurn.Parameters.AddWithValue("@assistantMessageId", assistantMessageId);
+            insertTurn.Parameters.AddWithValue("@userContent", userContent);
+            insertTurn.Parameters.AddWithValue("@status", status);
+            insertTurn.Parameters.AddWithValue("@assistantContent", assistantContent);
+            insertTurn.Parameters.AddWithValue("@sourcesJson", sourcesJson);
+            insertTurn.Parameters.AddWithValue("@reportJson", reportJson);
+            insertTurn.Parameters.AddWithValue("@verifiedJson", verifiedJson);
+            insertTurn.Parameters.AddWithValue("@now", now);
+            insertTurn.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
+    private static object? ParseStoredChatJson(string json, object? fallback)
+    {
+        if (string.IsNullOrWhiteSpace(json) || string.Equals(json, "null", StringComparison.OrdinalIgnoreCase)) return fallback;
+        try { return JsonSerializer.Deserialize<object>(json); }
+        catch { return fallback; }
     }
 
     public IReadOnlyList<CatalogProduct> Catalog()
