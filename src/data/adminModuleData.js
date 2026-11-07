@@ -1,6 +1,6 @@
 /**
  * @codex-vn-doc
- * Tệp: src/pages/adminModuleData.js
+ * Tệp: src/data/adminModuleData.js
  * Mục đích: Metadata nhãn, nhóm và cấu hình module admin.
  * Thành phần chính: adminModules.
  * Liên kết trực tiếp: không có import/using trực tiếp được phát hiện.

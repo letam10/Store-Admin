@@ -48,3 +48,8 @@ __pycache__/
 *.ckpt
 *.pt
 *.pth
+
+# Ảnh gốc và bản xem trước của quá trình tạo ảnh chỉ lưu local.
+# Ảnh dùng bởi ứng dụng trong public/products vẫn được commit.
+/work/**/generated-originals/
+/work/product-image-preview-*/

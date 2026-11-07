@@ -56,7 +56,7 @@ Cấu hình bằng connection string `StoreDb` trong `appsettings.json`, hoặc 
 
 Không ghi mật khẩu vào source hoặc commit; xem `.env.example`. File `.env` local đã được `.gitignore` ở gốc bỏ qua.
 
-Các route C# chính gồm `/api/health`, `/api/health/db`, `/api/storefront/catalog`, `/api/storefront/appearance`, `/api/storefront/contact`, `/api/storefront/products/{id}/view`, `/api/customer/*`, `/api/admin/products`, `/api/admin/appearance`, `/api/support/status` và `/api/support/chat`. Catalog đọc từ `shared/catalog-manifest.json`, có đúng 1.000 ID dùng chung cho Store và Admin.
+Các route C# chính gồm `/api/health`, `/api/health/db`, `/api/storefront/catalog`, `/api/storefront/appearance`, `/api/storefront/contact`, `/api/storefront/products/{id}/view`, `/api/customer/*`, `/api/admin/products`, `/api/admin/appearance`, `/api/support/status` và `/api/support/chat`. Catalog đọc từ `shared/catalog-manifest.json`, có đúng 500 ID dùng chung cho Store và Admin.
 
 Để thử frontend với C# mà không đổi cấu hình mặc định, chạy Vite bằng:
 

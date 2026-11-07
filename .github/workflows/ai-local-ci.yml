@@ -1,4 +1,4 @@
-name: ai-local-ci
+name: store-admin-ci
 
 on:
   push:
@@ -18,17 +18,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            server/package-lock.json
+          cache-dependency-path: package-lock.json
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
 
       - name: Pin npm
         run: npm install --global npm@11.17.0
@@ -41,44 +42,21 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Install backend dependencies
-        working-directory: server
-        run: npm ci
-
       - name: Frontend regression tests
         run: npm test
 
-      - name: Backend app regressions
-        working-directory: server
-        run: timeout 90s node --test test/app.test.js
-
-      - name: Backend commerce invariants regressions
-        working-directory: server
-        run: timeout 60s node --test test/commerce-invariants.test.js
-
-      - name: Backend context regressions
-        working-directory: server
-        run: timeout 60s node --test test/context.test.js
-
-      - name: Backend Ollama HTTP regressions
-        working-directory: server
-        run: timeout 60s node --test test/ollama-http.test.js
-
-      - name: Backend date regressions
-        working-directory: server
-        run: timeout 60s node --test test/dates.test.js
-
-      - name: Backend knowledge/data regressions
-        working-directory: server
-        run: timeout 60s node --test test/knowledge-db.test.js
-
-      - name: Backend security/queue regressions
-        working-directory: server
-        run: timeout 60s node --test test/security-queue.test.js
+      - name: Validate catalog manifest
+        run: node server-dotnet/scripts/validate-catalog-manifest.mjs
 
       - name: Lint
         run: npm run lint
 
-      - name: Build
+      - name: Build frontend
         run: npm run build
+
+      - name: Restore C# backend
+        run: dotnet restore server-dotnet/server-dotnet.csproj
+
+      - name: Build C# backend
+        run: dotnet build server-dotnet/server-dotnet.csproj --no-restore --configuration Release
 

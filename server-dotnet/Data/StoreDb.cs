@@ -621,6 +621,37 @@ public sealed class StoreDb
         return products;
     }
 
+    public (IReadOnlyList<CatalogProduct> Products, int Total) CatalogPage(int offset, int limit, string? query)
+    {
+        offset = Math.Max(0, offset);
+        limit = Math.Clamp(limit, 1, 100);
+        var filter = string.IsNullOrWhiteSpace(query)
+            ? string.Empty
+            : " WHERE p.name LIKE @query OR p.category LIKE @query OR p.id LIKE @query";
+        var pattern = string.IsNullOrWhiteSpace(query) ? null : "%" + query.Trim() + "%";
+
+        using var db = Open();
+        using var countCommand = db.CreateCommand();
+        countCommand.CommandText = "SELECT COUNT(*) FROM catalog_products p" + filter;
+        if (pattern is not null) countCommand.Parameters.AddWithValue("@query", pattern);
+        var total = Convert.ToInt32(countCommand.ExecuteScalar());
+
+        using var command = db.CreateCommand();
+        command.CommandText = """
+            SELECT p.id,p.name,p.category,p.price,p.description,p.image,p.features_json,p.tone,p.symbol,p.label,
+                   COALESCE(p.discount_percent,0),COALESCE(p.stock_count,20),COALESCE(v.view_count,0)
+            FROM catalog_products p LEFT JOIN product_views v ON v.product_id=p.id
+            """ + filter + " ORDER BY p.id OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY";
+        command.Parameters.AddWithValue("@offset", offset);
+        command.Parameters.AddWithValue("@limit", limit);
+        if (pattern is not null) command.Parameters.AddWithValue("@query", pattern);
+
+        var products = new List<CatalogProduct>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) products.Add(ReadProduct(reader));
+        return (products, total);
+    }
+
     private static CatalogProduct ReadProduct(SqlDataReader reader)
     {
         var features = new List<string>();
@@ -1383,26 +1414,6 @@ public sealed class StoreDb
 
     public void SeedDefaultProducts(bool force = false)
     {
-        if (!force)
-        {
-            try
-            {
-                using var checkDb = Open();
-                using var countCmd = checkDb.CreateCommand();
-                countCmd.CommandText = "SELECT COUNT(1) FROM catalog_products";
-                var count = Convert.ToInt32(countCmd.ExecuteScalar() ?? 0);
-                var backfillDone = string.Equals(GetSetting("catalog.manifest.backfill.v1"), "completed", StringComparison.OrdinalIgnoreCase);
-                if (count >= 1000 && backfillDone)
-                {
-                    return;
-                }
-            }
-            catch
-            {
-                // Nếu bảng chưa có hoặc lỗi, tiếp tục thực hiện bên dưới
-            }
-        }
-
         var manifestPath = Environment.GetEnvironmentVariable("CATALOG_MANIFEST_PATH");
         var candidates = new[]
         {
@@ -1416,9 +1427,35 @@ public sealed class StoreDb
         if (string.IsNullOrWhiteSpace(resolved)) throw new FileNotFoundException("Không tìm thấy shared/catalog-manifest.json");
 
         using var document = JsonDocument.Parse(File.ReadAllText(resolved));
-        if (!document.RootElement.TryGetProperty("products", out var productsElement) || productsElement.ValueKind != JsonValueKind.Array || productsElement.GetArrayLength() != 1000)
+        if (!document.RootElement.TryGetProperty("products", out var productsElement) || productsElement.ValueKind != JsonValueKind.Array)
         {
-            throw new InvalidOperationException("Manifest catalog phải có đúng 1000 sản phẩm.");
+            throw new InvalidOperationException("Manifest catalog không có mảng sản phẩm hợp lệ.");
+        }
+        if (!document.RootElement.TryGetProperty("selectedCount", out var selectedCountElement) || selectedCountElement.ValueKind != JsonValueKind.Number)
+        {
+            throw new InvalidOperationException("Manifest catalog thiếu selectedCount.");
+        }
+        var expectedCount = selectedCountElement.GetInt32();
+        if (expectedCount < 1 || productsElement.GetArrayLength() != expectedCount)
+        {
+            throw new InvalidOperationException($"Manifest catalog phải có đúng {expectedCount} sản phẩm.");
+        }
+
+        if (!force)
+        {
+            try
+            {
+                var backfillDone = string.Equals(GetSetting("catalog.manifest.backfill.v1"), "completed", StringComparison.OrdinalIgnoreCase);
+                var syncedCount = GetSetting("catalog.manifest.selectedCount");
+                if (backfillDone && string.Equals(syncedCount, expectedCount.ToString(), StringComparison.Ordinal))
+                {
+                    return;
+                }
+            }
+            catch
+            {
+                // Nếu bảng chưa có hoặc lỗi, tiếp tục thực hiện bên dưới.
+            }
         }
 
         var manifest = productsElement.EnumerateArray().Select(product => new
@@ -1450,16 +1487,16 @@ public sealed class StoreDb
         using (var delete = db.CreateCommand())
         {
             delete.Transaction = transaction;
-            delete.CommandText = "SELECT id FROM catalog_products";
-            var existingIds = new List<string>();
+            delete.CommandText = "SELECT id, source FROM catalog_products";
+            var existingProducts = new List<(string Id, string Source)>();
             using var reader = delete.ExecuteReader();
-            while (reader.Read()) existingIds.Add(reader.GetString(0));
+            while (reader.Read()) existingProducts.Add((reader.GetString(0), reader.IsDBNull(1) ? "" : reader.GetString(1)));
             reader.Close();
-            foreach (var id in existingIds.Where(id => !allowedIds.Contains(id)))
+            foreach (var existing in existingProducts.Where(item => !allowedIds.Contains(item.Id) && !string.Equals(item.Source, "admin-manual", StringComparison.OrdinalIgnoreCase)))
             {
                 delete.CommandText = "DELETE FROM catalog_products WHERE id=@id";
                 delete.Parameters.Clear();
-                delete.Parameters.AddWithValue("@id", id);
+                delete.Parameters.AddWithValue("@id", existing.Id);
                 delete.ExecuteNonQuery();
             }
         }
@@ -1519,6 +1556,19 @@ public sealed class StoreDb
                 """;
             marker.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
             marker.ExecuteNonQuery();
+        }
+        using (var selectionMarker = db.CreateCommand())
+        {
+            selectionMarker.Transaction = transaction;
+            selectionMarker.CommandText = """
+                IF EXISTS (SELECT 1 FROM settings WHERE [key]='catalog.manifest.selectedCount')
+                    UPDATE settings SET [value]=@count, [updated_at]=@now WHERE [key]='catalog.manifest.selectedCount';
+                ELSE
+                    INSERT INTO settings([key],[value],[updated_at]) VALUES('catalog.manifest.selectedCount',@count,@now);
+                """;
+            selectionMarker.Parameters.AddWithValue("@count", expectedCount.ToString());
+            selectionMarker.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+            selectionMarker.ExecuteNonQuery();
         }
         transaction.Commit();
     }

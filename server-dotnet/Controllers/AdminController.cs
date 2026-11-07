@@ -60,7 +60,12 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
     }
 
     [HttpGet("products")]
-    public IActionResult Products() => RequireAdmin() is null ? Unauthorized(new { error = "UNAUTHENTICATED" }) : Ok(new { products = db.Catalog(), total = db.Catalog().Count });
+    public IActionResult Products([FromQuery] int offset = 0, [FromQuery] int limit = 40, [FromQuery] string? q = null)
+    {
+        if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
+        var page = db.CatalogPage(offset, limit, q);
+        return Ok(new { products = page.Products, total = page.Total, offset = Math.Max(0, offset), limit = Math.Clamp(limit, 1, 100) });
+    }
 
     [HttpPost("products")]
     public IActionResult CreateProduct(AdminProductRequest request)

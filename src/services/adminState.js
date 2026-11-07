@@ -1,6 +1,6 @@
 /**
  * @codex-vn-doc
- * Tệp: src/pages/adminState.js
+ * Tệp: src/services/adminState.js
  * Mục đích: State helper cho session, dashboard, module và chat của admin.
  * Thành phần chính: adminConversationKey.
  * Liên kết trực tiếp: không có import/using trực tiếp được phát hiện.

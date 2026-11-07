@@ -11,7 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test": "node --test test/*.test.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
     "preview": "vite preview",
     "dev:api": "dotnet watch --project server-dotnet run --urls http://127.0.0.1:5000",
     "build:api": "dotnet build server-dotnet/server-dotnet.csproj"

@@ -6,9 +6,9 @@
  * Liên kết trực tiếp: react, ../api/chat, ../storefront/state, ./AdminCommerce.
  * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
-import { normalizeSearch } from '../storefront/state'
+import { normalizeSearch } from '../services/storefrontState'
 import { AdminCustomers, AdminFavorites, AdminOrders, AdminReviews, AdminVouchers } from './AdminCommerce'
 import './AdminModules.css'
 import ThemeEditor from './ThemeEditor'
@@ -98,20 +98,98 @@ function ProductEditor({ product, csrfToken, onSaved, onCancel }) {
 
 // Chức năng ProductsCatalog: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function ProductsCatalog({ csrfToken }) {
+  const PAGE_SIZE = 40
   const [products, setProducts] = useState([])
+  const [total, setTotal] = useState(0)
   const [filter, setFilter] = useState('')
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
   const [editor, setEditor] = useState(null)
-  useEffect(() => { const controller = new AbortController(); apiJson('/api/admin/products', { signal: controller.signal }).then((payload) => setProducts(payload.products || [])).catch((failure) => { if (!controller.signal.aborted) setError(failure.message) }).finally(() => { if (!controller.signal.aborted) setLoading(false) }); return () => controller.abort() }, [])
-  const visible = useMemo(() => { const needle = normalizeSearch(filter).trim(); return needle ? products.filter((product) => normalizeSearch(product.name + ' ' + product.category).includes(needle)) : products }, [filter, products])
-  // Chức năng remove: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
-  async function remove(product) { if (!window.confirm('Xóa sản phẩm ' + product.name + '?')) return; try { await apiJson('/api/admin/products/' + encodeURIComponent(product.id), { method: 'DELETE', headers: { 'x-csrf-token': csrfToken } }); setProducts((current) => current.filter((item) => item.id !== product.id)) } catch (failure) { setError(failure.message) } }
-  // Chức năng savedProduct: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
-  function savedProduct(product) { setProducts((current) => current.some((item) => item.id === product.id) ? current.map((item) => item.id === product.id ? { ...item, ...product } : item) : [product, ...current]); setEditor(null) }
-  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">DANH MỤC ĐỒNG BỘ</p><h2>Quản lý hàng hóa</h2><p>Thêm, sửa, xóa, tìm kiếm, tồn kho và giảm giá. Store đọc cùng catalog SQLite.</p></div><div className="admin-head-actions"><span className="admin-preview-badge">{products.length} sản phẩm</span><button type="button" onClick={() => setEditor({})}>+ Thêm sản phẩm</button></div></div>{editor && <ProductEditor product={editor.id ? editor : null} csrfToken={csrfToken} onSaved={savedProduct} onCancel={() => setEditor(null)} />}<div className="admin-module-toolbar"><label><span className="sr-only">Tìm sản phẩm</span><input className="admin-wide-search" type="search" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Tìm tên, danh mục hoặc mã sản phẩm…" /></label><span>{visible.length}/{products.length} mục</span></div>{loading && <p>Đang tải sản phẩm…</p>}{error && <p role="alert">Không tải được danh mục: {error}</p>}{!loading && !error && <div className="admin-table-wrap"><table><caption className="sr-only">Sản phẩm đã nhập</caption><thead><tr><th>Sản phẩm</th><th>Danh mục</th><th>Giá gốc</th><th>Giảm giá / tồn kho</th><th>Lượt xem</th><th>Thao tác</th></tr></thead><tbody>{visible.map((product) => <ProductOfferRow key={product.id} product={product} csrfToken={csrfToken} onSaved={(id, offer) => setProducts((current) => current.map((item) => item.id === id ? { ...item, ...offer } : item))} onEdit={setEditor} onDelete={remove} />)}</tbody></table>{visible.length === 0 && <p className="admin-empty">Không có sản phẩm phù hợp.</p>}</div>}<p className="admin-demo-note">Ảnh và metadata là dữ liệu mẫu; không đại diện tồn kho kinh doanh thực tế.</p></section>
-}
+  const tableRef = useRef(null)
+  const loadSequence = useRef(0)
+  const loadingMoreRef = useRef(false)
 
+  function productsUrl(offset, query) {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) })
+    if (query.trim()) params.set('q', query.trim())
+    return '/api/admin/products?' + params.toString()
+  }
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const sequence = ++loadSequence.current
+    const timer = window.setTimeout(async () => {
+      setLoading(true)
+      setError('')
+      setProducts([])
+      setTotal(0)
+      try {
+        const payload = await apiJson(productsUrl(0, filter), { signal: controller.signal })
+        if (controller.signal.aborted || sequence !== loadSequence.current) return
+        setProducts(payload.products || [])
+        setTotal(Number(payload.total || 0))
+      } catch (failure) {
+        if (!controller.signal.aborted && sequence === loadSequence.current) setError(failure.message)
+      } finally {
+        if (!controller.signal.aborted && sequence === loadSequence.current) setLoading(false)
+      }
+    }, 250)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [filter])
+
+  const loadMore = useCallback(async () => {
+    if (loading || loadingMoreRef.current || products.length >= total) return
+    loadingMoreRef.current = true
+    setLoadingMore(true)
+    const controller = new AbortController()
+    const sequence = loadSequence.current
+    try {
+      const payload = await apiJson(productsUrl(products.length, filter), { signal: controller.signal })
+      if (controller.signal.aborted || sequence !== loadSequence.current) return
+      setProducts((current) => [...current, ...(payload.products || [])])
+      setTotal(Number(payload.total || total))
+    } catch (failure) {
+      if (!controller.signal.aborted && sequence === loadSequence.current) setError(failure.message)
+    } finally {
+      loadingMoreRef.current = false
+      setLoadingMore(false)
+    }
+  }, [filter, loading, products.length, total])
+
+  useEffect(() => {
+    const root = tableRef.current
+    const sentinel = root?.querySelector('[data-products-sentinel]')
+    if (!root || !sentinel || typeof IntersectionObserver === 'undefined') return undefined
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) loadMore()
+    }, { root, rootMargin: '240px 0px' })
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [loadMore])
+
+  async function remove(product) {
+    if (!window.confirm('Xóa sản phẩm ' + product.name + '?')) return
+    try {
+      await apiJson('/api/admin/products/' + encodeURIComponent(product.id), { method: 'DELETE', headers: { 'x-csrf-token': csrfToken } })
+      setProducts((current) => current.filter((item) => item.id !== product.id))
+      setTotal((current) => Math.max(0, current - 1))
+    } catch (failure) { setError(failure.message) }
+  }
+
+  function savedProduct(product) {
+    setProducts((current) => current.some((item) => item.id === product.id)
+      ? current.map((item) => item.id === product.id ? { ...item, ...product } : item)
+      : [product, ...current])
+    setTotal((current) => products.some((item) => item.id === product.id) ? current : current + 1)
+    setEditor(null)
+  }
+
+  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">DANH MỤC ĐỒNG BỘ</p><h2>Quản lý hàng hóa</h2><p>Thêm, sửa, xóa, tìm kiếm, tồn kho và giảm giá. Dữ liệu được tải từng phần để bảng luôn nhẹ.</p></div><div className="admin-head-actions"><span className="admin-preview-badge">{products.length}/{total} sản phẩm</span><button type="button" onClick={() => setEditor({})}>+ Thêm sản phẩm</button></div></div>{editor && <ProductEditor product={editor.id ? editor : null} csrfToken={csrfToken} onSaved={savedProduct} onCancel={() => setEditor(null)} />}<div className="admin-module-toolbar"><label><span className="sr-only">Tìm sản phẩm</span><input className="admin-wide-search" type="search" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Tìm tên, danh mục hoặc mã sản phẩm…" /></label><span>{products.length}/{total} mục đã tải</span></div>{loading && <p>Đang tải phần đầu danh mục…</p>}{error && <p role="alert">Không tải được danh mục: {error}</p>}{!loading && !error && <div ref={tableRef} className="admin-table-wrap admin-product-table-wrap"><table><caption className="sr-only">Sản phẩm đã nhập</caption><thead><tr><th>Sản phẩm</th><th>Danh mục</th><th>Giá gốc</th><th>Giảm giá / tồn kho</th><th>Lượt xem</th><th>Thao tác</th></tr></thead><tbody>{products.map((product) => <ProductOfferRow key={product.id} product={product} csrfToken={csrfToken} onSaved={(id, offer) => setProducts((current) => current.map((item) => item.id === id ? { ...item, ...offer } : item))} onEdit={setEditor} onDelete={remove} />)}</tbody></table>{products.length < total && <div data-products-sentinel className="admin-load-sentinel" aria-live="polite">{loadingMore ? 'Đang tải thêm…' : 'Đang chờ phần tiếp theo…'}</div>}{products.length === 0 && <p className="admin-empty">Không có sản phẩm phù hợp.</p>}</div>}<p className="admin-demo-note">Ảnh và metadata là dữ liệu mẫu; không đại diện tồn kho kinh doanh thực tế.</p></section>
+}
 // Chức năng ProductViews: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function ProductViews() {
   const [report, setReport] = useState(null)

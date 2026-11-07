@@ -1,6 +1,6 @@
 /**
  * @codex-vn-doc
- * Tệp: src/storefront/state.js
+ * Tệp: src/services/storefrontState.js
  * Mục đích: Hàm thuần cho local state, giỏ hàng, route, tìm kiếm, lọc và tạo đơn demo.
  * Thành phần chính: loadJson, cartCount, cartTotal, addCartItem, setCartQuantity, routeName, productIdFromPath, normalizeSearch.
  * Liên kết trực tiếp: không có import/using trực tiếp được phát hiện.

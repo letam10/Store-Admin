@@ -21,3 +21,6 @@ html[data-admin-theme="dark"] .admin-dashboard-table .admin-module-head button{b
 html[data-admin-theme="dark"] .statistics-head-actions select{background:#0d1d15;border-color:#3a6048;color:#edf6ef}html[data-admin-theme="dark"] .statistics-visual{background:#11231a;border-color:#315340}html[data-admin-theme="dark"] .statistics-table__header span{color:#a7bcae}html[data-admin-theme="dark"] .admin-crud-insights>div{background:#193326;border-color:#315340}html[data-admin-theme="dark"] .admin-crud-insights b{color:#b9dfbf}
 .admin-chart-pie-layout--pie .admin-pie-chart{box-shadow:0 15px 35px #183a291c}.admin-chart-pie-layout--pie .admin-pie-chart span{display:none}.admin-chart-pie-layout--donut .admin-pie-chart{box-shadow:inset 0 0 0 40px #ffffffb3,0 15px 35px #183a291c}.admin-chart-pie-layout--donut .admin-pie-chart span{width:70px;height:70px;font-size:17px}
 html[data-admin-theme="dark"] .admin-chart-pie-layout--donut .admin-pie-chart{box-shadow:inset 0 0 0 40px #14281fb3,0 15px 35px #0006}
+
+.admin-load-sentinel{padding:14px;text-align:center;color:#6f8175;font-size:11px;background:var(--admin-surface,#fff);border-top:1px solid var(--admin-border,#dfe8e0)}
+html[data-admin-theme=dark] .admin-load-sentinel{color:#b5d0ba;background:var(--admin-surface,#14281f);border-color:var(--admin-border,#315340)}

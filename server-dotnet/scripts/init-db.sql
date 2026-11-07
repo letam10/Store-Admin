@@ -295,5 +295,5 @@ END
 GO
 
 -- catalog_products duoc dong bo tu shared/catalog-manifest.json boi StoreDb.SeedDefaultProducts.
--- Khong seed ban ghi mau rieng de tranh tao catalog ngoai 1000 ID da curation.
+-- Khong seed ban ghi mau rieng de tranh tao catalog ngoai cac ID da curation trong manifest.
 GO

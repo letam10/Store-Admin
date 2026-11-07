@@ -3,14 +3,14 @@
  * Tệp: test/frontend-state.test.js
  * Mục đích: Tệp kiểm thử tự động cho các luồng chính và tình huống biên của module này.
  * Thành phần chính: các hàm/lớp và xử lý nội bộ trong tệp.
- * Liên kết trực tiếp: node:assert/strict, node:test, ../src/api/requestGate.js, ../src/components/ui/customerSupportState.js, ../src/pages/adminState.js.
+ * Liên kết trực tiếp: node:assert/strict, node:test, ../src/api/requestGate.js, ../src/services/customerSupportState.js, ../src/services/adminState.js.
  * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createRequestGate } from '../src/api/requestGate.js'
-import { applyRestore, createRestoreGuard, mapServerMessages } from '../src/components/ui/customerSupportState.js'
-import { adminConversationKey } from '../src/pages/adminState.js'
+import { applyRestore, createRestoreGuard, mapServerMessages } from '../src/services/customerSupportState.js'
+import { adminConversationKey } from '../src/services/adminState.js'
 
 // Kiểm thử edge case: slow restore cannot overwrite first active streaming turn.
 test('slow restore cannot overwrite first active streaming turn', () => {

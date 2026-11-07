@@ -1,6 +1,6 @@
 /**
  * @codex-vn-doc
- * Tệp: src/components/ui/customerSupportState.js
+ * Tệp: src/services/customerSupportState.js
  * Mục đích: State helper cho lịch sử chat, streaming, retry và phục hồi giao diện hỗ trợ.
  * Thành phần chính: mapServerMessages, createRestoreGuard, applyRestore.
  * Liên kết trực tiếp: không có import/using trực tiếp được phát hiện.
