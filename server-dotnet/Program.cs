@@ -128,7 +128,7 @@ builder.Services.AddSwaggerGen(options => options.SwaggerDoc("v1", new OpenApiIn
 
 builder.Services.AddSingleton<StoreDb>();
 builder.Services.AddSingleton<StoreApi.Services.EmailService>();
-builder.Services.AddSingleton<StoreApi.Services.OrderEmailService>();
+builder.Services.AddHostedService<StoreApi.Services.NotificationWorker>();
 builder.Services.AddSingleton<StoreApi.Services.AiChatService>();
 
 builder.Services.AddHttpContextAccessor();
@@ -183,6 +183,8 @@ catch (Exception ex)
     Console.WriteLine($"[StoreDb] Cảnh báo khởi động: chưa đảm bảo được database. Chi tiết: {ex.Message}");
     Console.WriteLine("[StoreDb] Hãy kiểm tra SQL Server đang Running rồi chạy: powershell ./scripts/setup-db.ps1");
     Console.ResetColor();
+    Environment.ExitCode = 1;
+    return;
 }
 
 var isInteractive = Environment.UserInteractive && !Console.IsInputRedirected && !args.Contains("--no-menu") && !args.Contains("--server");

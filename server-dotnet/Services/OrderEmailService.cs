@@ -1,46 +1,11 @@
 using System.Globalization;
 using System.Text.Json;
-using StoreApi.Data;
 
 namespace StoreApi.Services;
 
-public sealed class OrderEmailService(StoreDb db, EmailService emailService)
+public static class OrderEmailService
 {
-    public void QueueInvoice(string orderId)
-    {
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await SendInvoiceIfNeededAsync(orderId);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Store Mailer] Invoice mail exception for {orderId}: {ex.Message}");
-            }
-        });
-    }
-
-    public async Task<bool> SendInvoiceIfNeededAsync(string orderId)
-    {
-        if (string.IsNullOrWhiteSpace(orderId)) return false;
-        if (db.HasInvoiceEmailBeenSent(orderId)) return true;
-
-        var email = db.FindCustomerEmailForOrder(orderId);
-        var order = db.FindCustomerOrder(orderId);
-        if (string.IsNullOrWhiteSpace(email) || order is null) return false;
-
-        var invoice = BuildInvoice(email, order);
-        var sent = await emailService.SendOrderInvoiceEmailAsync(email, invoice);
-        if (sent)
-        {
-            db.MarkInvoiceEmailSent(orderId);
-        }
-
-        return sent;
-    }
-
-    private static OrderInvoiceData BuildInvoice(string customerEmail, object order)
+    public static OrderInvoiceData BuildInvoice(string customerEmail, object order)
     {
         // Dựng lại hóa đơn từ bản ghi đã lưu để mọi nhánh thanh toán dùng cùng mẫu email.
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(order));

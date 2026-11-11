@@ -70,7 +70,8 @@ public sealed class AdminVouchersController(StoreDb db) : ControllerBase
     public IActionResult DeleteVoucher(string code)
     {
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
-        return db.DeleteAdminVoucher(VoucherPolicy.NormalizeCode(code)) ? Ok(new { ok = true }) : NotFound(new { error = "VOUCHER_NOT_FOUND" });
+        try { return db.DeleteAdminVoucher(VoucherPolicy.NormalizeCode(code)) ? Ok(new { ok = true }) : NotFound(new { error = "VOUCHER_NOT_FOUND" }); }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
     }
 
     private JsonElement? Find(string code)

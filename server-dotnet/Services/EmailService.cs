@@ -8,6 +8,7 @@ using MailKit.Security;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using MimeKit;
+using StoreApi.Security;
 
 namespace StoreApi.Services;
 
@@ -64,9 +65,9 @@ public sealed class EmailService
         return string.IsNullOrWhiteSpace(val) ? fallback : val.Trim();
     }
 
-    private string FrontendUrl => GetConfig("FRONTEND_URL", "http://127.0.0.1:5173").TrimEnd('/');
+    public string FrontendUrl => GetConfig("FRONTEND_URL", "http://127.0.0.1:5173").TrimEnd('/');
 
-    private string SupportEmail => GetConfig("SUPPORT_EMAIL", GetConfig("SMTP_USER"));
+    public string SupportEmail => GetConfig("SUPPORT_EMAIL", GetConfig("SMTP_USER"));
 
     public async Task<bool> SendWelcomeEmailAsync(string toEmail, string username)
     {
@@ -109,16 +110,19 @@ public sealed class EmailService
     public Task<bool> SendGoogleLoginEmailAsync(string toEmail, string username)
         => SendLoginNotificationEmailAsync(toEmail, username, "Google OAuth");
 
-    private async Task<bool> SendOrLogEmailAsync(string toEmail, string subject, string htmlBody, string logPrefix, string recipientName)
+    public Task<bool> SendQueuedAsync(string toEmail, string subject, string html, string key, string recipientName, CancellationToken cancellationToken)
+        => SendOrLogEmailAsync(toEmail, subject, html, Tokens.Sha256(key)[..16], recipientName, cancellationToken, key, savePreview: false);
+
+    private async Task<bool> SendOrLogEmailAsync(string toEmail, string subject, string htmlBody, string logPrefix, string recipientName, CancellationToken cancellationToken = default, string? messageKey = null, bool savePreview = true)
     {
         var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var sanitizedEmail = toEmail.Replace("@", "_at_").Replace(".", "_");
+        var sanitizedEmail = System.Text.RegularExpressions.Regex.Replace(toEmail, "[^A-Za-z0-9_.-]", "_");
         var fileName = $"{timestamp}_{logPrefix}_{sanitizedEmail}.html";
         var logFilePath = Path.Combine(_logsDirectory, fileName);
 
         try
         {
-            await File.WriteAllTextAsync(logFilePath, htmlBody, Encoding.UTF8);
+            if (savePreview) await File.WriteAllTextAsync(logFilePath, htmlBody, Encoding.UTF8, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -157,40 +161,41 @@ public sealed class EmailService
 
             message.To.Add(new MailboxAddress(recipientName ?? toEmail, toEmail));
             message.Subject = subject;
+            if (messageKey is not null) message.MessageId = Tokens.Sha256(messageKey) + "@store.local";
 
             var bodyBuilder = new BodyBuilder { HtmlBody = htmlBody };
             message.Body = bodyBuilder.ToMessageBody();
 
             using var client = new MailKit.Net.Smtp.SmtpClient();
             client.Timeout = 15000;
-            client.CheckCertificateRevocation = false;
-            client.ServerCertificateValidationCallback = (s, c, h, e) => true;
+            client.CheckCertificateRevocation = true;
 
             var secureOption = port == 465 
                 ? SecureSocketOptions.SslOnConnect 
                 : (port == 587 ? SecureSocketOptions.StartTls : SecureSocketOptions.Auto);
 
-            await client.ConnectAsync(smtpHost, port, secureOption);
+            await client.ConnectAsync(smtpHost, port, secureOption, cancellationToken);
 
             var cleanPass = smtpPass.Replace(" ", "");
             if (!string.IsNullOrWhiteSpace(smtpUser) && !string.IsNullOrWhiteSpace(cleanPass))
             {
-                await client.AuthenticateAsync(smtpUser, cleanPass);
+                await client.AuthenticateAsync(smtpUser, cleanPass, cancellationToken);
             }
 
-            await client.SendAsync(message);
-            await client.DisconnectAsync(true);
+            await client.SendAsync(message, cancellationToken);
+            await client.DisconnectAsync(true, cancellationToken);
 
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"[Store Mailer] Đã gửi email thành công qua SMTP ({smtpHost}) tới {toEmail} ('{subject}')");
             Console.ResetColor();
             return true;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
             var innerMsg = ex.InnerException != null ? $" -> {ex.InnerException.Message}" : "";
-            Console.WriteLine($"[Store Mailer] Gửi SMTP lỗi ({ex.Message}{innerMsg}). Email đã lưu tại: {logFilePath}");
+            Console.WriteLine($"[Store Mailer] Gửi SMTP lỗi ({ex.Message}{innerMsg}). Thông báo trong hàng đợi sẽ được thử lại");
             Console.ResetColor();
             return false;
         }

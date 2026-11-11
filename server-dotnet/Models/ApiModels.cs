@@ -58,7 +58,8 @@ public sealed record CreateOrderRequest(
     string? ScheduledAt,
     string? Recipient,
     string? Phone,
-    string? Address);
+    string? Address,
+    string? RequestId = null);
 
 
 public sealed record AdminProductRequest(
@@ -75,7 +76,8 @@ public sealed record AdminCustomerUpdateRequest(
 
 public sealed record ReviewReplyRequest(string? Reply);
 
-public sealed record OrderPaidRequest(string? Reference, bool? CounterConfirmed, bool? ReceivedConfirmed);
+public sealed record OrderPaidRequest(string? Reference, bool? CounterConfirmed, bool? ReceivedConfirmed,
+    int? ReceivedAmount = null, string? ReceivedAt = null);
 
 public sealed record OrderFulfillmentRequest(string? Status);
 

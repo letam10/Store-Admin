@@ -18,6 +18,17 @@ export class ApiStreamError extends Error {
 // Chức năng readError: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 async function readError(response) {
   const fallbackByCode = {
+    INVALID_PAYMENT_AMOUNT: 'Số tiền thực nhận chưa khớp giá trị đơn. Cần đối soát hoặc hoàn lại, không xác nhận thành công.',
+    INVALID_PAYMENT_TIME: 'Giờ tiền vào ngân hàng phải từ lúc tạo phiên đến hiện tại.',
+    PAYMENT_SESSION_EXPIRED: 'Tiền vào sau hạn QR. Cần xử lý hoàn tiền hoặc liên hệ khách, không xác nhận đơn này.',
+    PAYMENT_REFERENCE_USED: 'Mã giao dịch đã được ghi nhận cho đơn khác.',
+    PAYMENT_CONFIRMATION_REQUIRED: 'Cần xác nhận đã đối chiếu tiền thực nhận.',
+    PAYMENT_REFERENCE_REQUIRED: 'Nhập mã giao dịch thực tế từ sao kê.',
+    LEGACY_ORDER_REVIEW_REQUIRED: 'Đơn cũ thiếu dữ liệu đối soát. Kiểm tra riêng trước khi xử lý.',
+    INVALID_PAYMENT_SETTINGS: 'Kiểm tra tên ngân hàng, BIN 6 số, số tài khoản và tên người nhận.',
+    VOUCHER_RESERVED: 'Voucher đang được giữ cho một phiên thanh toán. Chờ xử lý phiên trước khi thu hồi.',
+    ACTION_NOT_ALLOWED: 'Trạng thái hiện tại không cho phép thao tác này.',
+    FORBIDDEN: 'Tài khoản không có quyền sử dụng chức năng này.',
     INVALID_PRODUCT: 'Du lieu san pham khong hop le.', INVALID_PRODUCT_OFFER: 'Gia tri giam gia hoac ton kho khong hop le.',
     INVALID_VOUCHER: 'Thong tin voucher khong hop le.', PRODUCT_UNAVAILABLE: 'San pham da het hang hoac khong du ton kho.',
     UNAUTHENTICATED: 'Phien dang nhap da het, vui long dang nhap lai.', CSRF_INVALID: 'Phien bao mat khong hop le, vui long tai lai trang.',

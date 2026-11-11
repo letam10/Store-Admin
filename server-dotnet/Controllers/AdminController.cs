@@ -20,7 +20,7 @@ namespace StoreApi.Controllers;
 [Route("api/admin")]
 [TypeFilter(typeof(AdminAccessFilter))]
 // Vai trò kiểu AdminController: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
-public sealed class AdminController(StoreDb db, AiChatService aiChatService, OrderEmailService orderEmailService) : ControllerBase
+public sealed class AdminController(StoreDb db, AiChatService aiChatService) : ControllerBase
 {
     private const string Cookie = "store_admin_session";
 
@@ -218,9 +218,9 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        var updated = db.MarkAdminOrderPaid(id, request?.Reference);
-        if (updated) orderEmailService.QueueInvoice(id);
-        return updated ? Ok(new { success = true, orderId = id }) : NotFound(new { error = "ORDER_NOT_FOUND" });
+        if (request is null) return BadRequest(new { error = "PAYMENT_CONFIRMATION_REQUIRED" });
+        try { db.SettleCheckout(id, request); return Ok(new { success = true, orderId = id, order = db.FindCustomerOrder(id) }); }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
     }
 
     [HttpPatch("customer-orders/{id}/fulfillment")]
@@ -228,7 +228,8 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        return db.UpdateAdminOrderFulfillment(id, request.Status ?? "ready") ? Ok(new { success = true, orderId = id }) : NotFound(new { error = "ORDER_NOT_FOUND" });
+        try { db.AdvanceFulfillment(id, request.Status ?? ""); return Ok(new { success = true, orderId = id }); }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
     }
 
     [HttpPatch("orders/{id}/cancel")]
@@ -236,7 +237,8 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        return db.CancelAdminOrder(id) ? Ok(new { cancelled = true }) : NotFound(new { error = "ORDER_NOT_FOUND" });
+        try { db.CancelCheckout(id); return Ok(new { cancelled = true }); }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
     }
 
     [HttpGet("orders/{id}/receipt")]
@@ -250,9 +252,9 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
 
         if (Request.Path.Value?.EndsWith(".html") == true || Request.Query["format"] == "html")
         {
-            return Content(RenderReceiptHtml(order), "text/html; charset=utf-8");
+            return Content(OrderReceiptHtml.Render(order), "text/html; charset=utf-8");
         }
-        return Ok(new { order, afterSales = Array.Empty<object>(), events = Array.Empty<object>(), store = new { name = "Store Mini Mart", address = "TP. Hồ Chí Minh", demo = true } });
+        return Ok(new { order, afterSales = Array.Empty<object>(), events = Array.Empty<object>(), store = new { name = "Store Mini Mart", address = "TP. Hồ Chí Minh", demo = false } });
     }
 
     [HttpGet("customers")]
@@ -311,8 +313,8 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        var settings = db.SavePaymentSettings(request.Mode ?? "demo", request.BankName, request.BankBin, request.AccountNumber, request.AccountName);
-        return Ok(new { settings });
+        try { return Ok(new { settings = db.SavePaymentSettings(request.Mode ?? "", request.BankName, request.BankBin, request.AccountNumber, request.AccountName) }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
     }
 
     [HttpGet("after-sales")]
@@ -479,57 +481,6 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
         await response.WriteAsync(json + "\n", ct);
         await response.Body.FlushAsync(ct);
     }
-
-    private static string RenderReceiptHtml(object order)
-    {
-        var json = JsonSerializer.Serialize(order);
-        return $$"""
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head>
-            <meta charset="utf-8" />
-            <title>Biên nhận đơn hàng</title>
-            <style>
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; color: #1e293b; max-width: 600px; margin: auto; }
-                h1 { font-size: 20px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
-                .meta { margin-bottom: 16px; font-size: 14px; color: #64748b; line-height: 1.6; }
-                .items { width: 100%; border-collapse: collapse; margin-top: 16px; }
-                .items th, .items td { text-align: left; padding: 8px; border-bottom: 1px solid #e2e8f0; }
-                .total { text-align: right; font-weight: bold; font-size: 18px; margin-top: 16px; }
-                @media print { button { display: none; } }
-            </style>
-        </head>
-        <body>
-            <button onclick="window.print()">In biên nhận (PDF)</button>
-            <h1>STORE MINI MART — BIÊN NHẬN ĐƠN HÀNG</h1>
-            <pre style="display:none;" id="data">{{json}}</pre>
-            <div id="content"></div>
-            <script>
-                try {
-                    const o = JSON.parse(document.getElementById('data').textContent);
-                    document.getElementById('content').innerHTML = `
-                        <div class="meta">
-                            <p>Mã đơn: <strong>${o.id || ''}</strong></p>
-                            <p>Khách hàng: <strong>${o.recipient || o.username || 'Khách'}</strong> (${o.phone || ''})</p>
-                            <p>Địa chỉ: ${o.address || 'Tại quầy'}</p>
-                            <p>Ngày tạo: ${o.createdAt || ''}</p>
-                            <p>Trạng thái: <strong>${o.status || ''}</strong> (${o.paymentMethod || ''})</p>
-                        </div>
-                        <table class="items">
-                            <thead><tr><th>Sản phẩm</th><th>SL</th><th>Giá</th></tr></thead>
-                            <tbody>
-                                ${(o.items || []).map(i => `<tr><td>${i.name || i.id}</td><td>${i.quantity || 1}</td><td>${(i.price || 0).toLocaleString('vi-VN')} ₫</td></tr>`).join('')}
-                            </tbody>
-                        </table>
-                        <div class="total">Tổng tiền: ${(o.total || 0).toLocaleString('vi-VN')} ₫</div>
-                    `;
-                } catch(e) {}
-            </script>
-        </body>
-        </html>
-        """;
-    }
-
 
     private (long Id, string Username)? RequireAdmin()
     {

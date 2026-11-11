@@ -6,7 +6,6 @@
  * Liên kết trực tiếp: Microsoft.AspNetCore.Mvc, StoreApi.Data.
  * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
  */
-using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using StoreApi.Data;
 using StoreApi.Models;
@@ -18,7 +17,7 @@ namespace StoreApi.Controllers;
 [ApiController]
 [Route("api/storefront")]
 // Vai trò kiểu StorefrontController: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
-public sealed class StorefrontController(StoreDb db, EmailService emailService) : ControllerBase
+public sealed class StorefrontController(StoreDb db) : ControllerBase
 {
     private const string Cookie = "store_customer_session";
 
@@ -51,24 +50,13 @@ public sealed class StorefrontController(StoreDb db, EmailService emailService) 
         var topic = (request.Topic ?? "Hỗ trợ mua hàng").Trim();
         var message = (request.Message ?? "").Trim();
 
-        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(message))
+        if (name.Length is < 2 or > 100 || topic.Length is < 1 or > 120 || message.Length is < 10 or > 2000
+            || email.Length > 254 || !System.Net.Mail.MailAddress.TryCreate(email, out var parsedEmail) || parsedEmail.Address != email)
         {
             return BadRequest(new { error = "INVALID_CONTACT" });
         }
 
-        var requestId = "CS-" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
-        var data = new Dictionary<string, object?>
-        {
-            ["customer"] = name,
-            ["customerId"] = customer.Value.Id,
-            ["topic"] = topic,
-            ["email"] = email,
-            ["message"] = message,
-            ["assignee"] = "Chưa phân công"
-        };
-        var dataJson = JsonSerializer.Serialize(data);
-        db.CreateAdminRecord("support", $"#{requestId} - {name} ({topic})", "Chờ duyệt", dataJson);
-
+        var requestId = "CS-" + Guid.NewGuid().ToString("N")[..12].ToUpperInvariant();
         var supportRequest = new SupportRequestData(
             requestId,
             name,
@@ -76,26 +64,7 @@ public sealed class StorefrontController(StoreDb db, EmailService emailService) 
             topic,
             message,
             DateTimeOffset.Now.ToString("dd/MM/yyyy HH:mm"));
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await emailService.SendSupportRequestEmailAsync(supportRequest);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Store Mailer] Support notification exception: {ex.Message}");
-            }
-
-            try
-            {
-                await emailService.SendSupportAcknowledgementEmailAsync(supportRequest);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Store Mailer] Support acknowledgement exception: {ex.Message}");
-            }
-        });
+        db.CreateSupportRequest(customer.Value.Id, supportRequest);
 
         return Ok(new { success = true, requestId });
     }

@@ -21,7 +21,7 @@ namespace StoreApi.Controllers;
 [ApiController]
 [Route("api/customer")]
 // Vai trò kiểu CustomerController: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
-public sealed class CustomerController(StoreDb db, IConfiguration configuration, EmailService emailService, OrderEmailService orderEmailService) : ControllerBase
+public sealed partial class CustomerController(StoreDb db, IConfiguration configuration, EmailService emailService) : ControllerBase
 {
     private const string Cookie = "store_customer_session";
 
@@ -39,14 +39,15 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
     [HttpPost("register")]
     public IActionResult Register(RegisterRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Username) || request.Username.Trim().Length < 3 || string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 6)
+        if (string.IsNullOrWhiteSpace(request.Username) || request.Username.Trim().Length is < 3 or > 100
+            || !System.Net.Mail.MailAddress.TryCreate(request.Email, out var address) || address.Address != request.Email.Trim()
+            || request.Email.Length > 254 || string.IsNullOrWhiteSpace(request.Password) || request.Password.Length is < 8 or > 128)
             return BadRequest(new { error = "INVALID_CUSTOMER" });
         if (db.FindCustomer(request.Username) is not null || db.FindCustomer(request.Email) is not null) return Conflict(new { error = "CUSTOMER_EXISTS" });
         var (salt, hash) = Tokens.HashPassword(request.Password);
         try
         {
             var id = db.CreateCustomer(request.Username.Trim(), request.Email.Trim(), salt, hash);
-            QueueWelcomeEmail(request.Email.Trim(), request.Username.Trim());
             return LoginInternal(request.Username.Trim(), id);
         }
         // Nhánh lỗi: chuyển ngoại lệ thành phản hồi an toàn, không làm lộ dữ liệu nhạy cảm.
@@ -97,14 +98,6 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         return res;
     }
 
-    [HttpGet("test-email")]
-    public async Task<IActionResult> TestEmail([FromQuery] string? email)
-    {
-        var target = string.IsNullOrWhiteSpace(email) ? "vietlun091@gmail.com" : email.Trim();
-        var success = await emailService.SendGoogleLoginEmailAsync(target, "Viet Lun");
-        return Ok(new { success, target });
-    }
-
     [HttpGet("auth/status")]
     public IActionResult AuthStatus()
     {
@@ -123,8 +116,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         if (found is not null)
         {
             var raw = Tokens.RandomToken();
-            db.CreatePasswordReset(Tokens.Sha256(raw), found.Value.Id, DateTimeOffset.UtcNow.AddMinutes(30));
-            Console.WriteLine("[Store mailer] Reset link cho " + email + ": /reset-password?token=" + raw);
+            db.QueuePasswordReset(found.Value.Id, found.Value.Username, email, raw);
         }
         return Ok(new { ok = true });
     }
@@ -133,13 +125,13 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
     public IActionResult Reset(PasswordResetRequest request)
     {
         var token = (request.Token ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(token) || token.Length > 200 || string.IsNullOrEmpty(request.Password) || request.Password.Length < 8 || request.Password.Length > 256)
+        if (string.IsNullOrWhiteSpace(token) || token.Length > 200 || string.IsNullOrEmpty(request.Password) || request.Password.Length < 8 || request.Password.Length > 128)
             return BadRequest(new { error = "INVALID_RESET" });
         var saved = db.FindPasswordReset(Tokens.Sha256(token));
         if (saved is null || saved.Value.UsedAt is not null || string.Compare(saved.Value.ExpiresAt, DateTimeOffset.UtcNow.ToString("o"), StringComparison.Ordinal) <= 0)
             return BadRequest(new { error = "RESET_EXPIRED" });
         var (salt, hash) = Tokens.HashPassword(request.Password);
-        db.ConsumePasswordReset(Tokens.Sha256(token), saved.Value.CustomerId, salt, hash);
+        if (!db.ConsumePasswordReset(Tokens.Sha256(token), saved.Value.CustomerId, salt, hash)) return BadRequest(new { error = "RESET_EXPIRED" });
         return Ok(new { ok = true });
     }
 
@@ -241,11 +233,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
             Response.Cookies.Append(Cookie, raw, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Lax, MaxAge = TimeSpan.FromDays(30), Path = "/" });
             
             var recipientName = !string.IsNullOrWhiteSpace(auth?.Username) ? auth.Value.Username : email;
-            if (createdByGoogle)
-            {
-                QueueWelcomeEmail(email, recipientName);
-            }
-            else
+            if (!createdByGoogle)
             {
                 SendLoginNotificationAsync(email, recipientName, "Google OAuth");
             }
@@ -348,7 +336,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
     public IActionResult Favorites() => RequireAccount(out var customer) ? Ok(new { ids = db.Favorites(customer.Id), favorites = db.Favorites(customer.Id) }) : Unauthorized(new { error = "LOGIN_REQUIRED" });
 
     [HttpGet("orders")]
-    // Đơn hàng: backend dotnet chưa full workflow nên trả danh sách rỗng để giữ phiên/avatar.
+    // Lịch sử mua chỉ hiển thị đơn đã ghi nhận tiền; phiên chờ có endpoint riêng.
     public IActionResult Orders() => RequireAccount(out var customer) ? Ok(new { orders = db.Orders(customer.Id) }) : Unauthorized(new { error = "LOGIN_REQUIRED" });
 
     [HttpPost("quote")]
@@ -384,47 +372,6 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
     }
 
-    [HttpPost("orders")]
-    public IActionResult CreateOrder(CreateOrderRequest request)
-    {
-        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
-        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-
-        var recipient = (request.Recipient ?? "").Trim();
-        var phone = (request.Phone ?? "").Trim();
-        var address = (request.Address ?? "").Trim();
-        if (recipient.Length < 2 || phone.Length < 8) return BadRequest(new { error = "INVALID_ORDER" });
-        if (request.Fulfillment == "delivery" && address.Length < 5) return BadRequest(new { error = "INVALID_ORDER" });
-
-        var quoteRequest = new OrderQuoteRequest(request.Items, request.Fulfillment, request.Region, request.DistanceKm, request.WeightKg, request.VoucherCodes);
-        QuoteComputation q;
-        try { q = ComputeQuote(customer, quoteRequest); }
-        catch (CatalogOutOfSyncException ex) { return Conflict(new { error = "CATALOG_OUT_OF_SYNC", missingIds = ex.MissingIds }); }
-        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
-        if (request.ExpectedTotal > 0 && request.ExpectedTotal != q.Total) return Conflict(new { error = "QUOTE_CHANGED" });
-
-        var orderId = "ST-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
-        var method = request.PaymentMethod ?? (q.Fulfillment == "pickup" ? "cash" : "cod");
-        var createdAt = DateTimeOffset.Now.ToString("dd/MM/yyyy HH:mm");
-        var itemsJson = JsonSerializer.Serialize(q.Items.Select(i => new { id = i.Id, name = i.Name, quantity = i.Quantity, price = i.Price }));
-        var voucherJson = JsonSerializer.Serialize(q.VoucherCodes);
-        var pointsEarned = Math.Max(1, q.Total / 10000);
-
-        db.CreateCustomerOrder(
-            orderId, customer.Id, itemsJson, recipient, phone,
-            q.Fulfillment == "pickup" ? "Nhận tại cửa hàng" : address,
-            q.Fulfillment, q.Region, q.DistanceKm, q.WeightKg,
-            q.Subtotal, q.Discount, q.GoodsTotal, q.ShippingFee, q.Total,
-            voucherJson, q.Tier, method, request.ScheduledAt, createdAt, pointsEarned);
-
-        if (q.VoucherCodes.Count > 0) db.ConsumeCustomerVouchers(customer.Id, q.VoucherCodes);
-        db.AddCustomerPoints(customer.Id, pointsEarned);
-
-        orderEmailService.QueueInvoice(orderId);
-
-        var createdOrder = db.FindCustomerOrder(orderId, customer.Id);
-        return StatusCode(StatusCodes.Status201Created, new { order = createdOrder });
-    }
     [HttpGet("orders/{id}/receipt")]
     [HttpGet("orders/{id}/receipt.html")]
     public IActionResult OrderReceipt(string id)
@@ -435,7 +382,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
 
         if (Request.Path.Value?.EndsWith(".html") == true || Request.Query["format"] == "html")
         {
-            return Content(RenderReceiptHtml(order), "text/html; charset=utf-8");
+            return Content(OrderReceiptHtml.Render(order), "text/html; charset=utf-8");
         }
 
         return Ok(new
@@ -443,7 +390,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
             order,
             afterSales = ListCustomerAfterSales(customer.Id, id),
             events = Array.Empty<object>(),
-            store = new { name = "Store Mini Mart", address = "TP. Hồ Chí Minh", demo = true }
+            store = new { name = "Store Mini Mart", address = "TP. Hồ Chí Minh", demo = false }
         });
     }
 
@@ -459,6 +406,10 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         var orderJson = JsonSerializer.Serialize(order);
         using var orderDocument = JsonDocument.Parse(orderJson);
         var root = orderDocument.RootElement;
+        if (root.GetProperty("status").GetString() is not ("paid" or "completed")) return Conflict(new { error = "PAYMENT_REQUIRED" });
+        var delivery = root.GetProperty("deliveryStatus").GetString();
+        if (kind == "cancel" && delivery is "shipped" or "delivered") return Conflict(new { error = "ALREADY_SHIPPED" });
+        if (kind is "return" or "merchant_fault" && delivery != "delivered") return Conflict(new { error = "DELIVERY_REQUIRED" });
         var quote = BuildAfterSalesQuote(root, kind);
         var caseId = "AS-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
         var data = new Dictionary<string, object?>
@@ -486,11 +437,17 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         if (!RequireAccount(out var customer)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
         var record = FindCustomerAfterSales(id, customer.Id);
         if (record is null) return NotFound(new { error = "AFTER_SALES_NOT_FOUND" });
-        var fee = ReadInt(record.Data, "quote", "feeAmount");
-        return Ok(new { orderId = id, amount = fee, expiresAt = DateTimeOffset.UtcNow.AddMinutes(2), payment = BuildPaymentInfo(id, fee) });
+        try
+        {
+            var window = db.AfterSalesPaymentWindow(record.Id, customer.Id);
+            var canPay = window.Bank is not null && window.ExpiresAt > DateTimeOffset.UtcNow && !window.Reported;
+            object? payment = window.Bank is null ? new { mode = "counter", amount = window.Amount, reference = id }
+                : canPay ? BankPayment.Info(window.Bank, id, window.Amount) : null;
+            return Ok(new { orderId = id, amount = window.Amount, window.ExpiresAt, canPay, status = window.Reported ? "reported" : canPay ? "pending" : "expired", serverTime = DateTimeOffset.UtcNow, payment });
+        }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
     }
 
-    [HttpPost("after-sales/{id}/demo-paid")]
     [HttpPost("after-sales/{id}/action")]
     public IActionResult AfterSalesAction(string id, AfterSalesActionRequest request)
     {
@@ -499,133 +456,23 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         var record = FindCustomerAfterSales(id, customer.Id);
         if (record is null) return NotFound(new { error = "AFTER_SALES_NOT_FOUND" });
         var action = (request.Action ?? "").Trim().ToLowerInvariant();
-        var status = action switch
-        {
-            "confirm" => "pending",
-            "cancel" => "cancelled",
-            "payment_report" or "fee_paid" => "awaiting_return",
-            "complete_return" => "resolved",
-            _ => record.Status
-        };
+        var currentStatus = ReadString(record.Data, "status") ?? "awaiting_confirmation";
+        var allowed = action == "confirm" && currentStatus == "awaiting_confirmation"
+            || action == "cancel" && (currentStatus is "awaiting_confirmation" or "pending" or "awaiting_payment")
+                && string.IsNullOrEmpty(ReadString(record.Data, "feePaidAt")) && string.IsNullOrEmpty(ReadString(record.Data, "feeReportedAt"))
+            || action == "payment_report" && currentStatus == "awaiting_payment";
+        if (!allowed) return Conflict(new { error = "ACTION_NOT_ALLOWED" });
+        if (action == "payment_report" && (request.Reference?.Trim().Length is null or < 3 or > 100))
+            return BadRequest(new { error = "PAYMENT_REFERENCE_REQUIRED" });
+        var status = action == "confirm" ? "pending" : action == "cancel" ? "cancelled" : "awaiting_payment";
         record.Data["status"] = status;
-        record.Data["note"] = request.Note ?? record.Data.GetValueOrDefault("note");
-        if (action is "payment_report" or "fee_paid") record.Data["feePaidAt"] = DateTimeOffset.UtcNow.ToString("O");
-        if (!string.IsNullOrWhiteSpace(request.Reference)) record.Data["refundReference"] = request.Reference.Trim();
+        if (action == "payment_report")
+        {
+            record.Data["feeReportedAt"] = DateTimeOffset.UtcNow.ToString("O");
+            record.Data["feePaymentReportedReference"] = request.Reference!.Trim();
+        }
         db.UpdateAdminRecord(record.Id, "after-sales", record.Title, StatusLabel(status), JsonSerializer.Serialize(record.Data));
         return Ok(new { success = true, id, status });
-    }
-
-    [HttpPost("payment-sessions")]
-    public IActionResult CreatePaymentSession(CreateOrderRequest request)
-    {
-        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
-        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-
-        var recipient = (request.Recipient ?? "").Trim();
-        var phone = (request.Phone ?? "").Trim();
-        var address = (request.Address ?? "").Trim();
-        if (recipient.Length < 2 || phone.Length < 8) return BadRequest(new { error = "INVALID_ORDER" });
-        if (request.Fulfillment == "delivery" && address.Length < 5) return BadRequest(new { error = "INVALID_ORDER" });
-
-        var quoteRequest = new OrderQuoteRequest(request.Items, request.Fulfillment, request.Region, request.DistanceKm, request.WeightKg, request.VoucherCodes);
-        QuoteComputation q;
-        try { q = ComputeQuote(customer, quoteRequest); }
-        catch (CatalogOutOfSyncException ex) { return Conflict(new { error = "CATALOG_OUT_OF_SYNC", missingIds = ex.MissingIds }); }
-        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
-        if (request.ExpectedTotal > 0 && request.ExpectedTotal != q.Total) return Conflict(new { error = "QUOTE_CHANGED" });
-
-        var orderId = "ST-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
-        var method = "bank_transfer";
-        var createdAt = DateTimeOffset.Now.ToString("dd/MM/yyyy HH:mm");
-        var itemsJson = JsonSerializer.Serialize(q.Items.Select(i => new { id = i.Id, name = i.Name, quantity = i.Quantity, price = i.Price }));
-        var voucherJson = JsonSerializer.Serialize(q.VoucherCodes);
-        var pointsEarned = Math.Max(1, q.Total / 10000);
-
-        db.CreateCustomerOrder(
-            orderId, customer.Id, itemsJson, recipient, phone,
-            q.Fulfillment == "pickup" ? "Nhận tại cửa hàng" : address,
-            q.Fulfillment, q.Region, q.DistanceKm, q.WeightKg,
-            q.Subtotal, q.Discount, q.GoodsTotal, q.ShippingFee, q.Total,
-            voucherJson, q.Tier, method, request.ScheduledAt, createdAt, pointsEarned);
-
-        if (q.VoucherCodes.Count > 0) db.ConsumeCustomerVouchers(customer.Id, q.VoucherCodes);
-        db.AddCustomerPoints(customer.Id, pointsEarned);
-
-        var createdOrder = db.FindCustomerOrder(orderId, customer.Id);
-        var expiresAt = DateTimeOffset.UtcNow.AddMinutes(2).ToString("o");
-        var payment = BuildPaymentInfo(orderId, q.Total);
-
-        return StatusCode(StatusCodes.Status201Created, new
-        {
-            sessionId = orderId,
-            expiresAt,
-            order = createdOrder,
-            payment
-        });
-    }
-
-    [HttpGet("payment-sessions/{id}")]
-    public IActionResult GetPaymentSession(string id)
-    {
-        if (!RequireAccount(out var customer)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
-        var order = db.FindCustomerOrder(id, customer.Id);
-        if (order is null) return NotFound(new { error = "PAYMENT_SESSION_NOT_FOUND" });
-
-        var json = JsonSerializer.Serialize(order);
-        using var doc = JsonDocument.Parse(json);
-        var total = doc.RootElement.GetProperty("total").GetInt32();
-        var status = doc.RootElement.GetProperty("status").GetString();
-        var expiresAt = DateTimeOffset.UtcNow.AddMinutes(2).ToString("o");
-
-        return Ok(new
-        {
-            sessionId = id,
-            order,
-            expiresAt,
-            status,
-            amount = total,
-            payment = BuildPaymentInfo(id, total)
-        });
-    }
-
-    [HttpDelete("payment-sessions/{id}")]
-    public IActionResult DeletePaymentSession(string id)
-    {
-        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
-        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        var order = db.FindCustomerOrder(id, customer.Id);
-        if (order is null) return NotFound(new { error = "PAYMENT_SESSION_NOT_FOUND" });
-
-        db.UpdateOrderStatus(id, "cancelled");
-        return Ok(new { ok = true, success = true, cancelled = true, sessionId = id });
-    }
-
-    [HttpPost("payment-sessions/{id}/simulate-pay")]
-    [HttpPost("payment-sessions/{id}/demo-paid")]
-    public IActionResult SimulatePaymentSessionPay(string id)
-    {
-        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
-        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        var order = db.FindCustomerOrder(id, customer.Id);
-        if (order is null) return NotFound(new { error = "PAYMENT_SESSION_NOT_FOUND" });
-
-        var now = DateTimeOffset.UtcNow.ToString("o");
-        db.UpdateOrderStatus(id, "paid", now);
-        orderEmailService.QueueInvoice(id);
-        var updatedOrder = db.FindCustomerOrder(id, customer.Id);
-        return Ok(new { success = true, orderId = id, order = updatedOrder, status = "paid" });
-    }
-
-    [HttpPost("payment-sessions/{id}/payment-report")]
-    public IActionResult ReportPaymentSession(string id, PaymentReportRequest? req)
-    {
-        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
-        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        var order = db.FindCustomerOrder(id, customer.Id);
-        if (order is null) return NotFound(new { error = "PAYMENT_SESSION_NOT_FOUND" });
-
-        var updatedOrder = db.FindCustomerOrder(id, customer.Id);
-        return Ok(new { success = true, orderId = id, order = updatedOrder, status = "pending" });
     }
 
     [HttpPost("spin")]
@@ -687,135 +534,6 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         });
     }
 
-    [HttpGet("orders/{id}/payment-info")]
-    public IActionResult OrderPaymentInfo(string id)
-    {
-        if (!RequireAccount(out var customer)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
-        var order = db.FindCustomerOrder(id, customer.Id);
-        if (order is null) return NotFound(new { error = "ORDER_NOT_FOUND" });
-        var json = JsonSerializer.Serialize(order);
-        var doc = JsonDocument.Parse(json);
-        var total = doc.RootElement.GetProperty("total").GetInt32();
-        var status = doc.RootElement.GetProperty("status").GetString();
-        var payment = BuildPaymentInfo(id, total);
-        return Ok(new { order, payment, orderId = id, amount = total, currency = "VND", status });
-    }
-
-    [HttpPost("orders/{id}/demo-paid")]
-    [HttpPost("orders/{id}/simulate-pay")]
-    public IActionResult SimulatePay(string id)
-    {
-        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
-        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        var order = db.FindCustomerOrder(id, customer.Id);
-        if (order is null) return NotFound(new { error = "ORDER_NOT_FOUND" });
-        db.UpdateOrderStatus(id, "paid", DateTimeOffset.UtcNow.ToString("o"));
-        orderEmailService.QueueInvoice(id);
-        return Ok(new { success = true, orderId = id, status = "paid" });
-    }
-
-    [HttpPost("orders/{id}/cancel-unpaid")]
-    public IActionResult CancelUnpaid(string id)
-    {
-        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
-        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        var order = db.FindCustomerOrder(id, customer.Id);
-        if (order is null) return NotFound(new { error = "ORDER_NOT_FOUND" });
-        db.UpdateOrderStatus(id, "cancelled");
-        return Ok(new { success = true, orderId = id, status = "cancelled" });
-    }
-
-    private object BuildPaymentInfo(string orderId, int total)
-    {
-        var rawSettings = db.GetPaymentSettings();
-        string mode = "demo";
-        string bankName = "MB Bank";
-        string bankBin = "970422";
-        string accountNumber = "0912345678";
-        string accountName = "STORE MINI MART";
-
-        if (rawSettings != null)
-        {
-            try
-            {
-                var json = JsonSerializer.Serialize(rawSettings);
-                using var doc = JsonDocument.Parse(json);
-                if (doc.RootElement.TryGetProperty("mode", out var m)) mode = m.GetString() ?? "demo";
-                if (doc.RootElement.TryGetProperty("bankName", out var bn)) bankName = bn.GetString() ?? "MB Bank";
-                if (doc.RootElement.TryGetProperty("bankBin", out var bb)) bankBin = bb.GetString() ?? "970422";
-                if (doc.RootElement.TryGetProperty("accountNumber", out var an)) accountNumber = an.GetString() ?? "0912345678";
-                if (doc.RootElement.TryGetProperty("accountName", out var acn)) accountName = acn.GetString() ?? "STORE MINI MART";
-            }
-            catch { }
-        }
-
-        var encodedAccName = Uri.EscapeDataString(accountName);
-        var qrImage = $"https://img.vietqr.io/image/{bankBin}-{accountNumber}-compact2.png?amount={total}&addInfo={orderId}&accountName={encodedAccName}";
-
-        return new
-        {
-            amount = total,
-            reference = orderId,
-            bankName,
-            accountNumber,
-            accountName,
-            purpose = "Thanh toan don hang " + orderId,
-            mode,
-            qrImage
-        };
-    }
-
-    private static string RenderReceiptHtml(object order)
-    {
-        var json = JsonSerializer.Serialize(order);
-        return $$"""
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head>
-            <meta charset="utf-8" />
-            <title>Biên nhận đơn hàng</title>
-            <style>
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; color: #1e293b; max-width: 600px; margin: auto; }
-                h1 { font-size: 20px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
-                .meta { margin-bottom: 16px; font-size: 14px; color: #64748b; line-height: 1.6; }
-                .items { width: 100%; border-collapse: collapse; margin-top: 16px; }
-                .items th, .items td { text-align: left; padding: 8px; border-bottom: 1px solid #e2e8f0; }
-                .total { text-align: right; font-weight: bold; font-size: 18px; margin-top: 16px; }
-                @media print { button { display: none; } }
-            </style>
-        </head>
-        <body>
-            <button onclick="window.print()">In biên nhận (PDF)</button>
-            <h1>STORE MINI MART — BIÊN NHẬN ĐƠN HÀNG</h1>
-            <pre style="display:none;" id="data">{{json}}</pre>
-            <div id="content"></div>
-            <script>
-                try {
-                    const o = JSON.parse(document.getElementById('data').textContent);
-                    document.getElementById('content').innerHTML = `
-                        <div class="meta">
-                            <p>Mã đơn: <strong>${o.id || ''}</strong></p>
-                            <p>Khách hàng: <strong>${o.recipient || o.username || 'Khách'}</strong> (${o.phone || ''})</p>
-                            <p>Địa chỉ: ${o.address || 'Tại quầy'}</p>
-                            <p>Ngày tạo: ${o.createdAt || ''}</p>
-                            <p>Trạng thái: <strong>${o.status || ''}</strong> (${o.paymentMethod || ''})</p>
-                        </div>
-                        <table class="items">
-                            <thead><tr><th>Sản phẩm</th><th>SL</th><th>Giá</th></tr></thead>
-                            <tbody>
-                                ${(o.items || []).map(i => `<tr><td>${i.name || i.id}</td><td>${i.quantity || 1}</td><td>${(i.price || 0).toLocaleString('vi-VN')} ₫</td></tr>`).join('')}
-                            </tbody>
-                        </table>
-                        <div class="total">Tổng tiền: ${(o.total || 0).toLocaleString('vi-VN')} ₫</div>
-                    `;
-                } catch(e) {}
-            </script>
-        </body>
-        </html>
-        """;
-    }
-
-
     [HttpPut("favorites/{id}")]
     public IActionResult SetFavorite(string id)
     {
@@ -876,22 +594,6 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         });
     }
 
-    private void QueueWelcomeEmail(string email, string username)
-    {
-        if (string.IsNullOrWhiteSpace(email)) return;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await emailService.SendWelcomeEmailAsync(email, username);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Store Mailer] Welcome email exception: {ex.Message}");
-            }
-        });
-    }
-
     private (long Id, string Username, string Email, int Points, int SpinCredits)? Current()
     {
         var raw = Request.Cookies[Cookie]; return string.IsNullOrWhiteSpace(raw) ? null : db.FindCustomerBySession(Tokens.Sha256(raw));
@@ -942,6 +644,10 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
 
     private QuoteComputation ComputeQuote((long Id, string Username, string Email, int Points, int SpinCredits) customer, OrderQuoteRequest req)
     {
+        if (req.Items is null || req.Items.Count is < 1 or > 100 || req.Items.Any(item => string.IsNullOrWhiteSpace(item.Id) || item.Quantity is < 1 or > 999)
+            || req.Items.Select(item => item.Id).Distinct().Count() != req.Items.Count) throw new InvalidOperationException("INVALID_ORDER");
+        if (req.Fulfillment is not ("pickup" or "delivery") || !double.IsFinite(req.WeightKg) || req.WeightKg is <= 0 or > 1000 || req.DistanceKm is < 0 or > 3000)
+            throw new InvalidOperationException("INVALID_DELIVERY_REGION");
         var fulfillment = req.Fulfillment == "pickup" ? "pickup" : "delivery";
         var region = fulfillment == "pickup" ? "pickup" : (req.Region ?? "hcm");
         var distanceKm = req.DistanceKm;
@@ -960,11 +666,15 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         foreach (var line in req.Items ?? [])
         {
             if (string.IsNullOrEmpty(line.Id) || !catalogMap.TryGetValue(line.Id, out var prod) || line.Quantity < 1) continue;
-            var price = (long)Math.Round(prod.Price * (100 - prod.DiscountPercent) / 1000.0) * 10;
+            if (line.Quantity > prod.StockCount) throw new InvalidOperationException("PRODUCT_UNAVAILABLE");
+            if (prod.Price > int.MaxValue) throw new InvalidOperationException("ORDER_TOTAL_TOO_LARGE");
+            var price = (long)decimal.Round((decimal)prod.Price * (100 - prod.DiscountPercent) / 1000M, 0, MidpointRounding.ToEven) * 10;
             items.Add(new QuoteItemResult(prod.Id, prod.Name, line.Quantity, price));
         }
 
-        var subtotal = (int)items.Sum(i => i.Price * i.Quantity);
+        var sum = items.Sum(item => item.Price * item.Quantity);
+        if (sum > int.MaxValue - 100000000 || sum < 0) throw new InvalidOperationException("ORDER_TOTAL_TOO_LARGE");
+        var subtotal = (int)sum;
         var tier = Tier(customer.Points);
         var voucherCodes = (req.VoucherCodes ?? []).Select(VoucherPolicy.NormalizeCode).ToList();
         if (voucherCodes.Any(string.IsNullOrEmpty) || voucherCodes.Count != voucherCodes.Distinct().Count())
@@ -1003,7 +713,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
             }
             else
             {
-                var discountAmount = v.Type == "percent" ? (int)(remainingGoods * v.Value / 100) : v.Value;
+                var discountAmount = v.Type == "percent" ? (int)((long)remainingGoods * v.Value / 100) : v.Value;
                 remainingGoods = Math.Max(0, remainingGoods - discountAmount);
             }
         }
@@ -1011,7 +721,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         int tierRate = tier switch { "diamond" => 5, "gold" => 2, "silver" => 1, _ => 0 };
         if (tierRate > 0)
         {
-            int tierDiscount = (int)(remainingGoods * tierRate / 100);
+            int tierDiscount = (int)((long)remainingGoods * tierRate / 100);
             remainingGoods = Math.Max(0, remainingGoods - tierDiscount);
         }
 
@@ -1019,7 +729,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         int finalShippingFee = originalShippingFee;
         foreach (var sv in shippingVouchers)
         {
-            int shipDiscount = sv.Type == "percent" ? (int)(finalShippingFee * sv.Value / 100) : sv.Value;
+            int shipDiscount = sv.Type == "percent" ? (int)((long)finalShippingFee * sv.Value / 100) : sv.Value;
             finalShippingFee = Math.Max(0, finalShippingFee - shipDiscount);
         }
 
