@@ -400,6 +400,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         QuoteComputation q;
         try { q = ComputeQuote(customer, quoteRequest); }
         catch (CatalogOutOfSyncException ex) { return Conflict(new { error = "CATALOG_OUT_OF_SYNC", missingIds = ex.MissingIds }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         if (request.ExpectedTotal > 0 && request.ExpectedTotal != q.Total) return Conflict(new { error = "QUOTE_CHANGED" });
 
         var orderId = "ST-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
@@ -530,6 +531,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         QuoteComputation q;
         try { q = ComputeQuote(customer, quoteRequest); }
         catch (CatalogOutOfSyncException ex) { return Conflict(new { error = "CATALOG_OUT_OF_SYNC", missingIds = ex.MissingIds }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         if (request.ExpectedTotal > 0 && request.ExpectedTotal != q.Total) return Conflict(new { error = "QUOTE_CHANGED" });
 
         var orderId = "ST-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
@@ -829,6 +831,20 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" }); db.SetFavorite(customer.Id, id, false); return Ok(new { ok = true });
     }
 
+    [HttpGet("vouchers/{code}")]
+    public IActionResult CheckVoucher(string code)
+    {
+        if (!RequireAccount(out var customer)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        code = VoucherPolicy.NormalizeCode(code);
+        foreach (var voucher in db.Vouchers(customer.Id))
+        {
+            var item = JsonSerializer.SerializeToElement(voucher);
+            if (string.Equals(item.GetProperty("code").GetString(), code, StringComparison.OrdinalIgnoreCase))
+                return Ok(new { voucher });
+        }
+        return NotFound(new { error = "INVALID_VOUCHER" });
+    }
+
     [HttpGet("vouchers")]
     // Chức năng Vouchers: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.
     public IActionResult Vouchers() => RequireAccount(out var customer) ? Ok(new { vouchers = db.Vouchers(customer.Id) }) : Unauthorized(new { error = "LOGIN_REQUIRED" });
@@ -950,7 +966,9 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
 
         var subtotal = (int)items.Sum(i => i.Price * i.Quantity);
         var tier = Tier(customer.Points);
-        var voucherCodes = req.VoucherCodes ?? [];
+        var voucherCodes = (req.VoucherCodes ?? []).Select(VoucherPolicy.NormalizeCode).ToList();
+        if (voucherCodes.Any(string.IsNullOrEmpty) || voucherCodes.Count != voucherCodes.Distinct().Count())
+            throw new InvalidOperationException("DUPLICATE_VOUCHER");
 
         var customerVouchers = db.Vouchers(customer.Id);
         var validVouchers = new Dictionary<string, (string Type, int Value, string Scope)>();
@@ -969,6 +987,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
         int remainingGoods = subtotal;
         var appliedCodes = new List<string>();
         var shippingVouchers = new List<(string Type, int Value)>();
+        var usedScopes = new HashSet<string>();
 
         foreach (var code in voucherCodes)
         {
@@ -976,6 +995,7 @@ public sealed class CustomerController(StoreDb db, IConfiguration configuration,
             {
                 throw new InvalidOperationException("INVALID_VOUCHER");
             }
+            if (!usedScopes.Add(v.Scope)) throw new InvalidOperationException("VOUCHER_SCOPE_LIMIT");
             appliedCodes.Add(code);
             if (v.Scope == "shipping")
             {

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StoreApi.Data;
 using StoreApi.Models;
+using StoreApi.Security;
 
 namespace StoreApi.Controllers;
 
@@ -38,8 +39,12 @@ public class ProductsController : ControllerBase
 
     // POST: /api/products
     [HttpPost]
+    [TypeFilter(typeof(AdminAccessFilter))]
     public async Task<ActionResult<Product>> CreateProduct(Product product)
     {
+        var raw = Request.Cookies["store_admin_session"];
+        if (string.IsNullOrEmpty(raw) || Request.Headers["x-csrf-token"] != Tokens.Sha256("csrf:" + raw))
+            return StatusCode(403, new { error = "CSRF_INVALID" });
         _context.Products.Add(product);
         await _context.SaveChangesAsync();
         return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, product);

@@ -9,6 +9,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using StoreApi.Models;
 using StoreApi.Security;
+using StoreApi.Services;
 
 namespace StoreApi.Data;
 
@@ -278,6 +279,9 @@ public sealed partial class StoreDb
                   status NVARCHAR(50) NOT NULL DEFAULT 'pending', points_earned INT NOT NULL DEFAULT 0,
                   created_at NVARCHAR(100) NOT NULL, paid_at NVARCHAR(100) NULL, invoice_email_sent_at NVARCHAR(100) NULL
                 );
+                IF COL_LENGTH('customer_orders', 'refund_amount') IS NULL
+                  ALTER TABLE customer_orders ADD refund_amount BIGINT NOT NULL DEFAULT 0;
+
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('customer_orders') AND name = 'payment_method')
                 ALTER TABLE customer_orders ADD payment_method NVARCHAR(100) NOT NULL DEFAULT 'bank_transfer';
 
@@ -1320,8 +1324,10 @@ public sealed partial class StoreDb
         using var db = Open();
         using var command = db.CreateCommand();
         command.CommandText = """
-            DELETE FROM customer_vouchers WHERE expires_at <= @now;
-            SELECT code,label,type,value,scope,expires_at,source FROM customer_vouchers WHERE customer_id=@id OR customer_id IS NULL ORDER BY expires_at;
+            SELECT code,label,type,value,scope,expires_at,source FROM customer_vouchers
+            WHERE (customer_id=@id OR customer_id IS NULL)
+                AND TRY_CONVERT(datetimeoffset,expires_at) > TRY_CONVERT(datetimeoffset,@now)
+            ORDER BY expires_at;
             """;
         command.Parameters.AddWithValue("@id", customerId);
         command.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
@@ -2090,7 +2096,7 @@ public sealed partial class StoreDb
                 customerId = reader.IsDBNull(8) ? (long?)null : Convert.ToInt64(reader.GetValue(8)),
                 username = reader.IsDBNull(9) ? "Mọi khách" : reader.GetString(9),
                 email = reader.IsDBNull(10) ? "Dùng được với mã này" : reader.GetString(10),
-                active = true
+                active = DateTimeOffset.TryParse(reader.GetString(5), out var expiry) && expiry > DateTimeOffset.UtcNow
             });
         }
         return list;
@@ -2098,9 +2104,13 @@ public sealed partial class StoreDb
 
     public object CreateAdminVoucher(string code, long? customerId, string label, string type, int value, string scope, string expiresAt, string source)
     {
+        code = VoucherPolicy.NormalizeCode(code);
+        expiresAt = VoucherPolicy.Validate(label, type, value, scope, expiresAt);
         var now = DateTimeOffset.UtcNow.ToString("O");
         using var db = Open();
+        using var transaction = db.BeginTransaction();
         using var cmd = db.CreateCommand();
+        cmd.Transaction = transaction;
         cmd.CommandText = """
             IF NOT EXISTS (SELECT 1 FROM voucher_codes WHERE code = @code)
                 INSERT INTO voucher_codes(code, created_at) VALUES(@code, @now);
@@ -2117,7 +2127,10 @@ public sealed partial class StoreDb
         cmd.Parameters.AddWithValue("@exp", expiresAt);
         cmd.Parameters.AddWithValue("@src", source);
         cmd.Parameters.AddWithValue("@now", now);
-        cmd.ExecuteNonQuery();
+        try { cmd.ExecuteNonQuery(); }
+        catch (SqlException ex) when (ex.Number is 2601 or 2627) { throw new InvalidOperationException("VOUCHER_EXISTS", ex); }
+        catch (SqlException ex) when (ex.Number == 547) { throw new InvalidOperationException("CUSTOMER_NOT_FOUND", ex); }
+        transaction.Commit();
         return new { code, label, type, value, scope, expiresAt, source, createdAt = now, customerId };
     }
 
@@ -2439,157 +2452,24 @@ public sealed partial class StoreDb
     }
 
 
-    public object CalculateAdminRevenue(string from, string to)
-    {
-        using var db = Open();
-        long custAll = 0, custInc = 0, custGross = 0, custNet = 0;
-        using (var cmd = db.CreateCommand())
-        {
-            cmd.CommandText = """
-                SELECT
-                    COUNT(*),
-                    SUM(CASE WHEN status IN ('paid', 'completed', 'delivered') THEN 1 ELSE 0 END),
-                    COALESCE(SUM(CASE WHEN status IN ('paid', 'completed', 'delivered') THEN CAST(total AS BIGINT) ELSE 0 END), 0)
-                FROM customer_orders
-                WHERE SUBSTRING(COALESCE(paid_at, created_at), 1, 10) BETWEEN @from AND @to
-                """;
-            cmd.Parameters.AddWithValue("@from", from);
-            cmd.Parameters.AddWithValue("@to", to);
-            using var r = cmd.ExecuteReader();
-            if (r.Read())
-            {
-                custAll = r.IsDBNull(0) ? 0 : Convert.ToInt64(r.GetValue(0));
-                custInc = r.IsDBNull(1) ? 0 : Convert.ToInt64(r.GetValue(1));
-                custGross = r.IsDBNull(2) ? 0 : Convert.ToInt64(r.GetValue(2));
-                custNet = custGross;
-            }
-        }
-
-        long ordAll = 0, ordInc = 0, ordGross = 0, ordRefund = 0, ordNet = 0, ordDemo = 0, ordReal = 0;
-        using (var cmd = db.CreateCommand())
-        {
-            cmd.CommandText = """
-                SELECT
-                    COUNT(*),
-                    SUM(CASE WHEN status IN ('paid', 'completed') THEN 1 ELSE 0 END),
-                    COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN CAST(total_amount AS BIGINT) ELSE 0 END), 0),
-                    COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN CAST(refund_amount AS BIGINT) ELSE 0 END), 0),
-                    COALESCE(SUM(CASE WHEN status IN ('paid', 'completed') THEN CAST(total_amount - refund_amount AS BIGINT) ELSE 0 END), 0),
-                    SUM(CASE WHEN is_demo = 1 THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN is_demo = 0 THEN 1 ELSE 0 END)
-                FROM orders
-                WHERE business_date BETWEEN @from AND @to
-                """;
-            cmd.Parameters.AddWithValue("@from", from);
-            cmd.Parameters.AddWithValue("@to", to);
-            using var r = cmd.ExecuteReader();
-            if (r.Read())
-            {
-                ordAll = r.IsDBNull(0) ? 0 : Convert.ToInt64(r.GetValue(0));
-                ordInc = r.IsDBNull(1) ? 0 : Convert.ToInt64(r.GetValue(1));
-                ordGross = r.IsDBNull(2) ? 0 : Convert.ToInt64(r.GetValue(2));
-                ordRefund = r.IsDBNull(3) ? 0 : Convert.ToInt64(r.GetValue(3));
-                ordNet = r.IsDBNull(4) ? 0 : Convert.ToInt64(r.GetValue(4));
-                ordDemo = r.IsDBNull(5) ? 0 : Convert.ToInt64(r.GetValue(5));
-                ordReal = r.IsDBNull(6) ? 0 : Convert.ToInt64(r.GetValue(6));
-            }
-        }
-
-        var allOrders = custAll + ordAll;
-        var includedOrders = custInc + ordInc;
-        var grossRevenue = custGross + ordGross;
-        var refunds = ordRefund;
-        var netRevenue = custNet + ordNet;
-        var realOrders = ordReal + custAll;
-        var demoOrders = ordDemo;
-
-        var dataMode = allOrders == 0 ? "none" : demoOrders == allOrders ? "demo" : realOrders == allOrders ? "real" : "mixed";
-
-        return new
-        {
-            from,
-            to,
-            timezone = "Asia/Ho_Chi_Minh",
-            includedStatuses = new[] { "paid", "completed" },
-            excludedStatuses = new[] { "cancelled" },
-            allOrders,
-            includedOrders,
-            grossRevenue,
-            refunds,
-            netRevenue,
-            currency = "VND",
-            dataMode
-        };
-    }
-
-
     public object GetAdminOverview()
     {
-        using var db = Open();
-        long grossRev = 0;
-        int incOrders = 0;
-        using (var cmd = db.CreateCommand())
-        {
-            cmd.CommandText = "SELECT COALESCE(SUM(CAST(total AS BIGINT)), 0), COUNT(*) FROM customer_orders WHERE status IN ('paid', 'completed', 'delivered')";
-            using var r = cmd.ExecuteReader();
-            if (r.Read())
-            {
-                grossRev = r.IsDBNull(0) ? 0 : Convert.ToInt64(r.GetValue(0));
-                incOrders = r.IsDBNull(1) ? 0 : Convert.ToInt32(r.GetValue(1));
-            }
-        }
-
-        var revenueByDay = new List<object>();
-        using (var cmd = db.CreateCommand())
-        {
-            cmd.CommandText = """
-                SELECT SUBSTRING(COALESCE(paid_at, created_at), 1, 10) AS dt,
-                       COALESCE(SUM(CAST(total AS BIGINT)), 0) AS rev,
-                       COUNT(*) AS ords
-                FROM customer_orders
-                WHERE status IN ('paid', 'completed', 'delivered')
-                GROUP BY SUBSTRING(COALESCE(paid_at, created_at), 1, 10)
-                ORDER BY dt ASC
-                """;
-            using var r = cmd.ExecuteReader();
-            while (r.Read())
-            {
-                revenueByDay.Add(new
-                {
-                    date = r.IsDBNull(0) ? "" : r.GetString(0),
-                    revenue = r.IsDBNull(1) ? 0 : Convert.ToInt64(r.GetValue(1)),
-                    orders = r.IsDBNull(2) ? 0 : Convert.ToInt32(r.GetValue(2))
-                });
-            }
-        }
-
-        var orderStatus = new List<object>();
-        using (var cmd = db.CreateCommand())
-        {
-            cmd.CommandText = "SELECT status, COUNT(*) FROM customer_orders GROUP BY status";
-            using var r = cmd.ExecuteReader();
-            while (r.Read())
-            {
-                orderStatus.Add(new
-                {
-                    status = r.GetString(0),
-                    count = Convert.ToInt32(r.GetValue(1))
-                });
-            }
-        }
-
+        var today = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)).ToString("yyyy-MM-dd");
+        var report = CalculateAdminRevenue("0001-01-01", today);
         return new
         {
             products = ProductCount(),
             customers = CustomerCount(),
-            orders = OrderCount(),
+            orders = report.AllOrders,
             totalViews = TotalViews(),
             favorites = ListAdminFavorites().Count,
             records = ListAdminRecords().Count,
-            revenue = grossRev,
-            includedOrders = incOrders,
-            revenueByDay,
-            orderStatus
+            revenue = report.NetRevenue,
+            grossRevenue = report.GrossRevenue,
+            refunds = report.Refunds,
+            includedOrders = report.IncludedOrders,
+            revenueByDay = report.RevenueByDay,
+            orderStatus = report.OrderStatus
         };
     }
 

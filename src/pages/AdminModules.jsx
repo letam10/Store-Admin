@@ -13,6 +13,7 @@ import { AdminCustomers, AdminFavorites, AdminOrders, AdminReviews, AdminVoucher
 import './AdminModules.css'
 import ThemeEditor from './ThemeEditor'
 import AdminStaff from './AdminStaff'
+import AdminStatistics from './AdminStatistics'
 import { canOpenModule } from '../services/adminAccess'
 import { AdminAfterSales } from './AdminOrderWorkflow'
 import DropdownMenu from '../components/ui/DropdownMenu'
@@ -27,15 +28,6 @@ const dashboardChartOptions = (en) => [
   ['bars-h', en ? 'Horizontal bars' : 'Cột ngang'],
   ['pie', en ? 'Pie' : 'Hình tròn'],
   ['donut', en ? 'Donut' : 'Cái bánh'],
-  ['2.5d', '2.5D'],
-  ['3d', '3D'],
-]
-
-const statisticsChartOptions = [
-  ['area', 'Đồi núi'],
-  ['line', 'Đường thẳng'],
-  ['bars-v', 'Cột đứng'],
-  ['bars-h', 'Cột ngang'],
   ['2.5d', '2.5D'],
   ['3d', '3D'],
 ]
@@ -226,7 +218,7 @@ function Dashboard({ onNavigate, language = 'vi' }) {
   useEffect(() => { let active = true; apiJson('/api/admin/overview').then((payload) => { if (active) setOverview(payload.overview) }).catch(() => {}); return () => { active = false } }, [])
   const en = language === 'en'
   const currency = new Intl.NumberFormat(en ? 'en-US' : 'vi-VN')
-  const cards = [[en ? 'Products' : 'Sản phẩm', overview?.products ?? '—', en ? 'current catalog' : 'danh mục hiện tại'], [en ? 'Customers' : 'Khách hàng', overview?.customers ?? '—', en ? 'registered accounts' : 'tài khoản đã đăng ký'], [en ? 'Orders' : 'Đơn thanh toán', overview?.orders ?? '—', en ? 'orders in system' : 'đơn trong hệ thống'], [en ? 'Revenue' : 'Doanh thu đã thu', overview ? currency.format(overview.revenue || 0) + ' ₫' : '—', en ? 'paid orders' : 'đơn đã thanh toán']]
+  const cards = [[en ? 'Products' : 'Sản phẩm', overview?.products ?? '—', en ? 'current catalog' : 'danh mục hiện tại'], [en ? 'Customers' : 'Khách hàng', overview?.customers ?? '—', en ? 'registered accounts' : 'tài khoản đã đăng ký'], [en ? 'Orders' : 'Đơn thanh toán', overview?.orders ?? '—', en ? 'orders in system' : 'đơn trong hệ thống'], [en ? 'Revenue' : 'Doanh thu ròng', overview ? currency.format(overview.revenue || 0) + ' ₫' : '—', en ? 'after recorded refunds' : 'sau hoàn tiền đã ghi nhận']]
   const revenue = overview?.revenueByDay || []
   const highest = Math.max(1, ...revenue.map((item) => Number(item.revenue) || 0))
   const statuses = overview?.orderStatus || []
@@ -239,23 +231,6 @@ function Dashboard({ onNavigate, language = 'vi' }) {
   const latestRevenue = [...revenue].slice(-8).reverse()
   const latestStatuses = [...statuses].sort((a, b) => Number(b.count || 0) - Number(a.count || 0))
   return <><div className="admin-kpi-grid">{cards.map(([label, value, note]) => <article key={label}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>)}</div><section className="admin-dashboard-grid admin-dashboard-grid--hero"><section className="admin-module-card admin-dashboard-chart"><div className="admin-module-head"><div><p className="admin-eyebrow">{en ? 'OPERATIONS OVERVIEW' : 'TỔNG QUAN VẬN HÀNH'}</p><h2>{en ? 'Interactive dashboard' : 'Dashboard tổng quan'}</h2><p>{en ? 'Switch chart styles for different operational views.' : 'Chọn kiểu biểu đồ để xem số liệu theo nhu cầu.'}</p></div><div className="admin-dashboard-chart__tools"><span className="admin-preview-badge">{overview?.includedOrders ?? 0} {en ? 'paid orders' : 'đơn đã thanh toán'}</span><label><span className="sr-only">{en ? 'Chart type' : 'Kiểu biểu đồ'}</span><DropdownMenu value={chartType} options={dashboardChartOptions(en)} onChange={setChartType} ariaLabel={en ? 'Chart type' : 'Kiểu biểu đồ'} /></label></div></div><DashboardChart revenue={revenue} statuses={statuses} chartType={chartType} en={en} highest={highest} chartWidth={chartWidth} chartHeight={chartHeight} linePoints={linePoints} areaPoints={areaPoints} pieGradient={pieGradient} currency={currency} overview={overview} /></section><section className="admin-module-card admin-status-chart"><div className="admin-module-head"><div><p className="admin-eyebrow">{en ? 'ORDER MIX' : 'SO SÁNH ĐƠN'}</p><h2>{en ? 'Order status' : 'Trạng thái đơn'}</h2><p>{en ? 'Live breakdown of the current order pipeline.' : 'Phân bổ trực tiếp các trạng thái đơn hiện có.'}</p></div><span className="admin-preview-badge">{statuses.reduce((sum, item) => sum + Number(item.count || 0), 0)} {en ? 'orders' : 'đơn'}</span></div><div className="admin-status-list">{statuses.map((item) => <div className="admin-status-row" key={item.status}><span>{item.status}</span><div><i style={{ '--status-width': `${Math.min(100, Number(item.count) / Math.max(1, ...statuses.map((entry) => Number(entry.count || 0))) * 100)}%` }} /></div><b>{item.count}</b></div>)}</div>{!statuses.length && <p className="admin-empty">{en ? 'No order data yet.' : 'Chưa có dữ liệu đơn.'}</p>}</section></section><section className="admin-dashboard-tables"><section className="admin-module-card admin-dashboard-table"><div className="admin-module-head"><div><p className="admin-eyebrow">{en ? 'RECENT REVENUE' : 'DOANH THU GẦN ĐÂY'}</p><h2>{en ? 'Daily revenue' : 'Doanh thu theo ngày'}</h2></div><button type="button" onClick={() => onNavigate('statistics')}>{en ? 'Open statistics' : 'Mở thống kê'} →</button></div><div className="admin-table-wrap"><table><thead><tr><th>{en ? 'Date' : 'Ngày'}</th><th>{en ? 'Orders' : 'Đơn'}</th><th>{en ? 'Revenue' : 'Doanh thu'}</th><th>{en ? 'Average' : 'Trung bình'}</th></tr></thead><tbody>{latestRevenue.map((item) => <tr key={item.date}><td>{item.date}</td><td>{item.orders || 0}</td><td>{currency.format(item.revenue || 0)} ₫</td><td>{currency.format(item.orders ? Math.round(item.revenue / item.orders) : 0)} ₫</td></tr>)}</tbody></table>{!latestRevenue.length && <p className="admin-empty">{en ? 'No daily revenue.' : 'Chưa có dữ liệu theo ngày.'}</p>}</div></section><section className="admin-module-card admin-dashboard-table"><div className="admin-module-head"><div><p className="admin-eyebrow">{en ? 'PIPELINE HEALTH' : 'SỨC KHỎE ĐƠN HÀNG'}</p><h2>{en ? 'Status detail' : 'Chi tiết trạng thái'}</h2></div><button type="button" onClick={() => onNavigate('customer-orders')}>{en ? 'Open orders' : 'Mở đơn hàng'} →</button></div><div className="admin-table-wrap"><table><thead><tr><th>{en ? 'Status' : 'Trạng thái'}</th><th>{en ? 'Orders' : 'Số đơn'}</th><th>{en ? 'Share' : 'Tỷ lệ'}</th><th>{en ? 'Signal' : 'Tín hiệu'}</th></tr></thead><tbody>{latestStatuses.map((item) => { const total = latestStatuses.reduce((sum, entry) => sum + Number(entry.count || 0), 0) || 1; const share = Math.round(Number(item.count || 0) / total * 100); return <tr key={item.status}><td><span className="admin-status-chip">{item.status}</span></td><td>{item.count}</td><td>{share}%</td><td><span className={'admin-signal admin-signal--' + (share > 60 ? 'good' : share > 20 ? 'watch' : 'quiet')}>{share > 60 ? 'Ổn định' : share > 20 ? 'Theo dõi' : 'Ít dữ liệu'}</span></td></tr> })}</tbody></table>{!latestStatuses.length && <p className="admin-empty">{en ? 'No status detail.' : 'Chưa có dữ liệu trạng thái.'}</p>}</div></section></section><section className="admin-dashboard-grid admin-dashboard-grid--bottom"><section className="admin-module-card"><p className="admin-eyebrow">{en ? 'LIVE OVERVIEW' : 'TỔNG QUAN LIVE'}</p><h2>{en ? 'Central operations' : 'Vận hành tập trung'}</h2><div className="admin-task-list"><div><b>{overview?.totalViews ?? '—'}</b><span>{en ? 'Product views' : 'Lượt xem sản phẩm'}</span></div><div><b>{overview?.favorites ?? '—'}</b><span>{en ? 'Favorites' : 'Lượt yêu thích'}</span></div><div><b>{overview?.records ?? '—'}</b><span>{en ? 'Operations records' : 'Bản ghi vận hành'}</span></div></div></section><section className="admin-module-card"><p className="admin-eyebrow">{en ? 'SHORTCUTS' : 'LỐI TẮT'}</p><h2>{en ? 'Open modules' : 'Mở nhanh các mục'}</h2><div className="admin-quick-actions"><button type="button" onClick={() => onNavigate('products')}>{en ? 'Products' : 'Quản lý hàng hóa'}</button><button type="button" onClick={() => onNavigate('product-views')}>{en ? 'Most viewed' : 'Sản phẩm xem nhiều'}</button><button type="button" onClick={() => onNavigate('favorites')}>{en ? 'Favorites' : 'Yêu thích'}</button><button type="button" onClick={() => onNavigate('rewards-wheel')}>{en ? 'Voucher' : 'Voucher'}</button></div></section></section></>
-}
-
-// Chức năng Statistics: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
-function Statistics() {
-  const [overview, setOverview] = useState(null)
-  const [chartType, setChartType] = useState('area')
-  useEffect(() => { let active = true; apiJson('/api/admin/overview').then((payload) => { if (active) setOverview(payload.overview) }).catch(() => {}); return () => { active = false } }, [])
-  const revenue = overview?.revenueByDay || []
-  const totalOrders = overview?.includedOrders || 0
-  const average = totalOrders ? Math.round((overview?.revenue || 0) / totalOrders) : 0
-  const highest = Math.max(1, ...revenue.map((item) => Number(item.revenue) || 0))
-  const chartWidth = 640; const chartHeight = 220
-  const linePoints = revenue.map((item, index) => `${revenue.length === 1 ? chartWidth / 2 : (index / (revenue.length - 1)) * chartWidth},${chartHeight - ((Number(item.revenue) || 0) / highest) * (chartHeight - 28)}`).join(' ')
-  const areaPoints = linePoints ? `0,${chartHeight} ${linePoints} ${chartWidth},${chartHeight}` : ''
-  function exportExcel() { window.open('/api/admin/stats/export?format=csv', '_blank', 'noopener') }
-  function printPdf() { window.open('/api/admin/stats/export?format=html', '_blank', 'noopener') }
-  return <section className="admin-module-card statistics-module"><div className="admin-module-head"><div><p className="admin-eyebrow">STORE ANALYTICS</p><h2>Thống kê tổng hợp</h2><p>So sánh doanh thu, số đơn và hành vi truy cập từ dữ liệu cửa hàng.</p></div><div className="statistics-head-actions"><button type="button" onClick={printPdf}>In / lưu PDF</button><button type="button" onClick={exportExcel}>Xuất Excel</button><span className="admin-preview-badge">Cập nhật trực tiếp</span><DropdownMenu value={chartType} options={statisticsChartOptions} onChange={setChartType} ariaLabel="Kiểu biểu đồ thống kê" /></div></div><div className="statistics-summary"><div><small>Doanh thu ròng</small><b>{new Intl.NumberFormat('vi-VN').format(overview?.revenue || 0)} ₫</b><span className="statistics-trend">{overview?.revenue ? 'Đang ghi nhận' : 'Chưa có giao dịch'}</span></div><div><small>Đơn đã ghi nhận</small><b>{totalOrders}</b><span className="statistics-trend">{overview?.includedOrders ? 'Có dữ liệu' : 'Đang chờ'}</span></div><div><small>Giá trị đơn trung bình</small><b>{new Intl.NumberFormat('vi-VN').format(average)} ₫</b><span className="statistics-trend">Theo đơn</span></div><div><small>Lượt xem sản phẩm</small><b>{overview?.totalViews || 0}</b><span className="statistics-trend">Tương tác</span></div></div><div className="statistics-visual"><DashboardChart revenue={revenue} statuses={overview?.orderStatus || []} chartType={chartType} en={false} highest={highest} chartWidth={chartWidth} chartHeight={chartHeight} linePoints={linePoints} areaPoints={areaPoints} pieGradient="conic-gradient(#5ca575 0 100%)" currency={new Intl.NumberFormat('vi-VN')} overview={overview} /></div><div className="statistics-table"><div className="statistics-table__header"><h3>Doanh thu theo ngày</h3><span>{revenue.length} ngày</span></div>{revenue.length ? revenue.map((item) => <div key={item.date}><span>{item.date}</span><span>{item.orders} đơn</span><b>{new Intl.NumberFormat('vi-VN').format(item.revenue)} ₫</b></div>) : <p className="admin-empty">Chưa có dữ liệu thống kê.</p>}</div></section>
 }
 
 // Chức năng AppearanceEditor: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
@@ -304,7 +279,7 @@ export default function AdminModule({ module, csrfToken, onNavigate, language = 
   if (!canOpenModule(role, module)) return <p role="alert">Bạn không có quyền sử dụng chức năng này.</p>
   if (module === 'staff') return <><AdminStaff csrfToken={csrfToken} /><CrudModule module="staff" csrfToken={csrfToken} /></>
   if (module === 'dashboard') return <Dashboard onNavigate={onNavigate} language={language} />
-  if (module === 'statistics') return <Statistics />
+  if (module === 'statistics') return <AdminStatistics Chart={DashboardChart} />
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (module === 'products') return <ProductsCatalog csrfToken={csrfToken} readOnly={role !== 'admin'} />
   if (module === 'product-views') return <ProductViews />

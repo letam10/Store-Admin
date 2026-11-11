@@ -18,7 +18,7 @@ const money = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND
 // Chức năng adminErrorMessage: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function adminErrorMessage(failure, fallback = 'Co loi xay ra, vui long thu lai.') {
   const code = String(failure?.code || '').toUpperCase()
-  const known = { INVALID_PRODUCT: 'Dữ liệu sản phẩm không hợp lệ.', INVALID_PRODUCT_OFFER: 'Giá trị giảm giá hoặc tồn kho không hợp lệ.', INVALID_VOUCHER: 'Mã voucher không hợp lệ hoặc đã hết hạn.', CUSTOMER_NOT_FOUND: 'Không tìm thấy khách hàng.', CUSTOMER_EXISTS: 'Tên đăng nhập hoặc email đã tồn tại.', INVALID_CUSTOMER: 'Thông tin khách hàng không hợp lệ.', UNAUTHENTICATED: 'Phiên đăng nhập đã hết, vui lòng đăng nhập lại.' }
+  const known = { INVALID_PRODUCT: 'Dữ liệu sản phẩm không hợp lệ.', INVALID_PRODUCT_OFFER: 'Giá trị giảm giá hoặc tồn kho không hợp lệ.', INVALID_VOUCHER_CODE: 'Mã mới phải gồm đúng 8 ký tự A–Z hoặc 0–9.', VOUCHER_EXISTS: 'Mã này đã tồn tại. Hãy chọn mã khác.', INVALID_VOUCHER: 'Mã voucher không hợp lệ hoặc đã hết hạn.', CUSTOMER_NOT_FOUND: 'Không tìm thấy khách hàng.', CUSTOMER_EXISTS: 'Tên đăng nhập hoặc email đã tồn tại.', INVALID_CUSTOMER: 'Thông tin khách hàng không hợp lệ.', UNAUTHENTICATED: 'Phiên đăng nhập đã hết, vui lòng đăng nhập lại.' }
   return known[code] || (failure?.message && !/^[A-Z0-9_ -]+$/.test(String(failure.message)) ? failure.message : fallback)
 }
 
@@ -80,6 +80,7 @@ export function AdminVouchers({ csrfToken }) {
   const { data: voucherData, error: voucherError, reload } = useReport('/api/admin/vouchers')
   const dateInput = (value) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value))
   const [customerId, setCustomerId] = useState('0')
+  const [code, setCode] = useState('')
   const [scope, setScope] = useState('goods')
   const [type, setType] = useState('amount')
   const [value, setValue] = useState(100000)
@@ -97,6 +98,7 @@ export function AdminVouchers({ csrfToken }) {
 
   function edit(voucher) {
     setPendingDelete(null)
+    setCode(voucher.code)
     setEditing(voucher.code); setCustomerId(String(voucher.customerId || 0))
     setScope(voucher.scope || 'goods')
     setType(voucher.scope === 'shipping' && voucher.type === 'percent' && Number(voucher.value) === 100 ? 'free' : voucher.type)
@@ -112,12 +114,12 @@ export function AdminVouchers({ csrfToken }) {
       const voucherType = type === 'free' ? 'percent' : type
       const numericValue = type === 'free' ? 100 : Number(value)
       if (!Number.isInteger(numericValue) || numericValue < 1 || numericValue > (voucherType === 'amount' ? 10000000 : 100)) throw new Error('Giá trị voucher không hợp lệ.')
-      const body = { customerId: Number(customerId) || 0, type: voucherType, scope, value: numericValue, expiresAt: new Date(expiresOn + 'T23:59:59+07:00').toISOString() }
+      const body = { code: code.trim().toUpperCase(), customerId: Number(customerId) || 0, type: voucherType, scope, value: numericValue, expiresAt: new Date(expiresOn + 'T23:59:59+07:00').toISOString() }
       const payload = await apiJson('/api/admin/vouchers' + (editing ? '/' + encodeURIComponent(editing) : ''), {
         method: editing ? 'PATCH' : 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(body),
       })
       setNotice((editing ? 'Đã cập nhật ' : 'Đã cấp ') + payload.voucher.label + ' · ' + payload.voucher.code)
-      setEditing(null); setCustomerId('0'); await reload()
+      setEditing(null); setCode(''); setCustomerId('0'); await reload()
     } catch (failure) { setSubmitError(adminErrorMessage(failure, 'Không lưu được voucher.')) }
     finally { mutationGate.current = false; setBusy(false) }
   }
@@ -139,12 +141,13 @@ export function AdminVouchers({ csrfToken }) {
     {error && <p role="alert">{error}</p>}
     <div className="voucher-editor-head"><h3>{editing ? 'Sửa voucher ' + editing : 'Cấp voucher mới'}</h3><div><button type="button" disabled={busy} onClick={() => { setScope('shipping'); setType('percent'); setValue(50) }}>Giảm 50% ship</button><button type="button" disabled={busy} onClick={() => { setScope('shipping'); setType('free'); setValue(100) }}>Miễn phí ship</button></div></div>
     <form id="voucher-editor" className="admin-commerce-form" onSubmit={submit}>
+      <label>Mã giảm giá (8 ký tự)<input value={code} onChange={event => setCode(event.target.value.toUpperCase())} disabled={busy || Boolean(editing)} minLength="8" maxLength="8" pattern="[A-Z0-9]{8}" placeholder="Để trống để tự tạo" autoCapitalize="characters" /></label>
       <label>Khách hàng<DropdownMenu value={customerId} options={[['0', 'Mọi khách có mã'], ...(data?.customers || []).map(item => [String(item.id), item.username])]} onChange={setCustomerId} ariaLabel="Khách hàng" disabled={Boolean(editing) || busy} /></label>
       <label>Áp dụng cho<DropdownMenu value={scope} options={[['goods', 'Hàng hóa'], ['shipping', 'Phí vận chuyển']]} onChange={value => { setScope(value); if (type === 'free') { setType('percent'); setValue(20) } }} ariaLabel="Áp dụng cho" disabled={busy} /></label>
       <label>Loại ưu đãi<DropdownMenu value={type} options={[['amount', 'Giảm số tiền'], ['percent', 'Giảm phần trăm'], ...(scope === 'shipping' ? [['free', 'Miễn phí ship']] : [])]} onChange={value => { setType(value); setValue(value === 'amount' ? 30000 : value === 'free' ? 100 : 50) }} ariaLabel="Loại ưu đãi" disabled={busy} /></label>
       {type !== 'free' && <label>Giá trị {type === 'percent' ? '(%)' : '(₫)'}<input disabled={busy} type="number" min="1" max={type === 'amount' ? '10000000' : '100'} step="1" value={value} onChange={event => setValue(event.target.value)} required /></label>}
       <label>Hạn sử dụng<input disabled={busy} type="date" value={expiresOn} min={today} onChange={event => setExpiresOn(event.target.value)} required /></label>
-      <div className="voucher-editor-actions"><button type="submit" disabled={busy || !customerId}>{busy ? 'Đang lưu…' : editing ? 'Lưu thay đổi' : 'Cấp voucher'}</button>{editing && <button type="button" disabled={busy} onClick={() => { setEditing(null); setCustomerId('0') }}>Hủy sửa</button>}</div>
+      <div className="voucher-editor-actions"><button type="submit" disabled={busy || !customerId}>{busy ? 'Đang lưu…' : editing ? 'Lưu thay đổi' : 'Cấp voucher'}</button>{editing && <button type="button" disabled={busy} onClick={() => { setEditing(null); setCode(''); setCustomerId('0') }}>Hủy sửa</button>}</div>
     </form>
     {submitError && <p role="alert">{submitError}</p>}{notice && <p role="status">{notice}</p>}
     {pendingDelete && <div className="admin-detail-panel" role="group" aria-label="Xác nhận xóa voucher"><p>Xóa voucher <b>{pendingDelete.code}</b> của {pendingDelete.username}?</p><div className="voucher-editor-actions"><button type="button" disabled={busy} onClick={() => remove(pendingDelete)}>Xác nhận xóa</button><button type="button" disabled={busy} onClick={() => setPendingDelete(null)}>Giữ voucher</button></div></div>}

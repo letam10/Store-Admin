@@ -176,3 +176,25 @@ test('staff sees only permitted modules and cannot edit customer credentials or 
     assert.ok(!urls.some(url => /settings|overview|appearance|events|conversations/.test(url)))
   })
 })
+
+
+test('statistics exports the displayed date range as XLSX and printable HTML', async () => {
+  let loadedQuery
+  await mounted(async url => {
+    if (url === '/api/admin/session') return json(session('admin'))
+    if (url.startsWith('/api/admin/stats?')) {
+      loadedQuery = url.split('?')[1]
+      const range = Object.fromEntries(new URLSearchParams(loadedQuery))
+      return json({ report: { ...range, grossRevenue: 350000, refunds: 100000, netRevenue: 250000, includedOrders: 3, revenueByDay: [], orderStatus: [] } })
+    }
+    return json({ overview: {}, appearance: {} })
+  }, async ({ click, dom }) => {
+    const opened = []
+    dom.window.open = url => opened.push(url)
+    await click('Thống kê')
+    assert.match(document.querySelector('.statistics-summary').textContent, /250.000/)
+    await click('Xuất Excel')
+    await click('In / lưu PDF')
+    assert.deepEqual(opened, ['/api/admin/stats/export?' + loadedQuery + '&format=xlsx', '/api/admin/stats/export?' + loadedQuery + '&format=html'])
+  })
+})

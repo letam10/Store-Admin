@@ -152,10 +152,10 @@ public sealed class AiChatService
             {
                 var json = JsonSerializer.Serialize(report);
                 using var doc = JsonDocument.Parse(json);
-                gross = doc.RootElement.GetProperty("gross").GetInt64();
-                net = doc.RootElement.GetProperty("net").GetInt64();
+                gross = doc.RootElement.GetProperty("grossRevenue").GetInt64();
+                net = doc.RootElement.GetProperty("netRevenue").GetInt64();
                 allOrders = doc.RootElement.GetProperty("allOrders").GetInt64();
-                incomeOrders = doc.RootElement.GetProperty("incomeOrders").GetInt64();
+                incomeOrders = doc.RootElement.GetProperty("includedOrders").GetInt64();
             }
             catch { }
 

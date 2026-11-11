@@ -7,7 +7,6 @@
  * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
  */
 using System.Text.Json;
-using System.Text;
 
 using Microsoft.AspNetCore.Mvc;
 using StoreApi.Data;
@@ -272,55 +271,6 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
         catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
     }
 
-    [HttpPost("customers/{id:long}/vouchers")]
-    public IActionResult CreateCustomerVoucher(long id, AdminVoucherRequest request)
-    {
-        if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
-        if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-
-        var code = string.IsNullOrWhiteSpace(request.Code) ? Guid.NewGuid().ToString("N")[..10].ToUpperInvariant() : request.Code.Trim().ToUpperInvariant();
-        var label = string.IsNullOrWhiteSpace(request.Label) ? "Ưu đãi thành viên" : request.Label.Trim();
-        var type = string.IsNullOrWhiteSpace(request.Type) ? "percent" : request.Type.Trim();
-        var scope = string.IsNullOrWhiteSpace(request.Scope) ? "goods" : request.Scope.Trim();
-        var expiresAt = string.IsNullOrWhiteSpace(request.ExpiresAt) ? DateTimeOffset.UtcNow.AddDays(30).ToString("yyyy-MM-dd") : request.ExpiresAt.Trim();
-        var voucher = db.CreateAdminVoucher(code, id, label, type, request.Value ?? 10, scope, expiresAt, "admin");
-        return StatusCode(StatusCodes.Status201Created, new { voucher });
-    }
-
-    [HttpGet("vouchers")]
-    public IActionResult Vouchers() => RequireAdmin() is null ? Unauthorized(new { error = "UNAUTHENTICATED" }) : Ok(new { vouchers = db.ListAdminVouchers() });
-
-    [HttpPost("vouchers")]
-    public IActionResult CreateVoucher(AdminVoucherRequest request)
-    {
-        if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
-        if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-
-        var code = string.IsNullOrWhiteSpace(request.Code) ? Guid.NewGuid().ToString("N")[..10].ToUpperInvariant() : request.Code.Trim().ToUpperInvariant();
-        var label = string.IsNullOrWhiteSpace(request.Label) ? "Ưu đãi Store" : request.Label.Trim();
-        var type = string.IsNullOrWhiteSpace(request.Type) ? "percent" : request.Type.Trim();
-        var scope = string.IsNullOrWhiteSpace(request.Scope) ? "goods" : request.Scope.Trim();
-        var expiresAt = string.IsNullOrWhiteSpace(request.ExpiresAt) ? DateTimeOffset.UtcNow.AddDays(30).ToString("yyyy-MM-dd") : request.ExpiresAt.Trim();
-        var voucher = db.CreateAdminVoucher(code, request.CustomerId is > 0 ? request.CustomerId : null, label, type, request.Value ?? 10, scope, expiresAt, "admin");
-        return StatusCode(StatusCodes.Status201Created, new { voucher });
-    }
-
-    [HttpPatch("vouchers/{code}")]
-    public IActionResult UpdateVoucher(string code, AdminVoucherRequest request)
-    {
-        if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
-        if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        return db.UpdateAdminVoucher(code.ToUpperInvariant(), request.Label, request.Type, request.Value, request.Scope, request.ExpiresAt) ? Ok(new { ok = true, code }) : NotFound(new { error = "VOUCHER_NOT_FOUND" });
-    }
-
-    [HttpDelete("vouchers/{code}")]
-    public IActionResult DeleteVoucher(string code)
-    {
-        if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
-        if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        return db.DeleteAdminVoucher(code.ToUpperInvariant()) ? Ok(new { ok = true, code }) : NotFound(new { error = "VOUCHER_NOT_FOUND" });
-    }
-
     [HttpGet("favorites")]
     public IActionResult Favorites() => RequireAdmin() is null ? Unauthorized(new { error = "UNAUTHENTICATED" }) : Ok(new { favorites = db.ListAdminFavorites() });
 
@@ -363,47 +313,6 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
         var settings = db.SavePaymentSettings(request.Mode ?? "demo", request.BankName, request.BankBin, request.AccountNumber, request.AccountName);
         return Ok(new { settings });
-    }
-
-    [HttpGet("stats")]
-    public IActionResult Stats([FromQuery] string? from, [FromQuery] string? to)
-    {
-        if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
-        var fromDate = string.IsNullOrWhiteSpace(from) ? DateTimeOffset.UtcNow.AddDays(-30).ToString("yyyy-MM-dd") : from.Trim();
-        var toDate = string.IsNullOrWhiteSpace(to) ? DateTimeOffset.UtcNow.ToString("yyyy-MM-dd") : to.Trim();
-        var report = db.CalculateAdminRevenue(fromDate, toDate);
-        return Ok(new { report, source = aiChatService.ModelName });
-    }
-
-    [HttpGet("stats/export")]
-    public IActionResult ExportStats([FromQuery] string? from, [FromQuery] string? to, [FromQuery] string? format)
-    {
-        if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
-        var fromDate = string.IsNullOrWhiteSpace(from) ? DateTimeOffset.UtcNow.AddDays(-30).ToString("yyyy-MM-dd") : from.Trim();
-        var toDate = string.IsNullOrWhiteSpace(to) ? DateTimeOffset.UtcNow.ToString("yyyy-MM-dd") : to.Trim();
-        var report = db.CalculateAdminRevenue(fromDate, toDate);
-        if (string.Equals(format, "html", StringComparison.OrdinalIgnoreCase))
-        {
-            var json = JsonSerializer.Serialize(report);
-            return Content($"<!doctype html><html lang='vi'><head><meta charset='utf-8'><title>Báo cáo Store</title><style>body{{font-family:Arial,sans-serif;padding:32px;color:#17382c}}table{{border-collapse:collapse;width:100%;max-width:760px}}td,th{{border:1px solid #cbd8ce;padding:10px;text-align:left}}@media print{{button{{display:none}}}}</style></head><body><button onclick='print()'>In / Lưu PDF</button><h1>Báo cáo Store</h1><p>{fromDate} → {toDate}</p><pre>{System.Net.WebUtility.HtmlEncode(json)}</pre></body></html>", "text/html; charset=utf-8");
-        }
-
-        using var document = JsonDocument.Parse(JsonSerializer.Serialize(report));
-        var root = document.RootElement;
-        var rows = new[]
-        {
-            "Chỉ tiêu,Giá trị",
-            $"Từ ngày,{fromDate}",
-            $"Đến ngày,{toDate}",
-            $"Tổng đơn,{root.GetProperty("allOrders").GetInt64()}",
-            $"Đơn được tính,{root.GetProperty("includedOrders").GetInt64()}",
-            $"Doanh thu gộp,{root.GetProperty("grossRevenue").GetInt64()}",
-            $"Hoàn tiền,{root.GetProperty("refunds").GetInt64()}",
-            $"Doanh thu ròng,{root.GetProperty("netRevenue").GetInt64()}",
-            $"Chế độ dữ liệu,{root.GetProperty("dataMode").GetString()}"
-        };
-        var csv = string.Join("\r\n", rows) + "\r\n";
-        return File(Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv)).ToArray(), "text/csv; charset=utf-8", $"store-statistics-{fromDate}-{toDate}.csv");
     }
 
     [HttpGet("after-sales")]

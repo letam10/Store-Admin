@@ -493,7 +493,7 @@ export default function Admin() {
             <section className="admin-panel"><div className="admin-panel__heading"><div><p className="admin-eyebrow">SỐ LIỆU GỐC</p><h2>Doanh thu backend</h2></div><span>Asia/Ho_Chi_Minh</span></div>
               <form className="admin-range" onSubmit={loadStats}><label>Từ<input type="date" value={range.from} onChange={(event) => setRange((current) => ({ ...current, from: event.target.value }))} /></label><label>Đến<input type="date" value={range.to} onChange={(event) => setRange((current) => ({ ...current, to: event.target.value }))} /></label><button type="submit">Tải số liệu</button></form>
               {report ? <dl className="admin-stats"><div><dt>Doanh thu gộp</dt><dd>{formatMoney(report.grossRevenue)}</dd></div><div><dt>Hoàn tiền đã trừ</dt><dd>{formatMoney(report.refunds)}</dd></div><div><dt>Doanh thu ròng</dt><dd>{formatMoney(report.netRevenue)}</dd></div><div><dt>Đơn được tính</dt><dd>{report.includedOrders}</dd></div></dl> : <p className="admin-muted">Chọn khoảng thời gian để lấy số liệu backend.</p>}
-              {report && <p className="admin-source">Nguồn: backend SQLite · {report.from} → {report.to} · dữ liệu: {report.dataMode}</p>}
+              {report && <p className="admin-source">Dữ liệu cửa hàng · {report.from} → {report.to} · dữ liệu: {report.dataMode}</p>}
             </section>
             <section className="admin-panel admin-chat"><div className="admin-panel__heading"><div><p className="admin-eyebrow">AI NHẬN XÉT</p><h2>Chat admin</h2></div><span>Thinking: {thinkingEnabled ? thinkingMode : 'Tắt'}</span></div>
               <div ref={logRef} className="admin-chat__log" role="log" aria-live="polite">
