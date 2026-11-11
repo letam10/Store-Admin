@@ -27,7 +27,7 @@ const Admin = componentModule.exports.default
 // Chức năng json: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 const json = (value) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } })
 // Chức năng session: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
-const session = (username) => ({ authenticated: true, username, csrfToken: 'csrf-' + username })
+const session = (username) => ({ authenticated: true, role: 'admin', username, csrfToken: 'csrf-' + username })
 const settings = { model: 'test-model', contextSize: 8192, allowedContextSizes: [8192, 16384] }
 
 // Chức năng mounted: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
@@ -146,5 +146,33 @@ test('grouped admin navigation and dashboard shortcut open top-view analytics', 
     await click('Sản phẩm xem nhiều')
     assert.match(document.querySelector('.admin-main').textContent, /20 sản phẩm được xem nhiều nhất/)
     assert.match(document.querySelector('.admin-view-list').textContent, /Tai nghe Everyday/)
+  })
+})
+
+
+test('staff sees only permitted modules and cannot edit customer credentials or products', async () => {
+  const urls = []
+  await mounted(async url => {
+    urls.push(url)
+    if (url === '/api/admin/session') return json({ ...session('support-agent'), role: 'staff' })
+    if (url === '/api/admin/records/support') return json({ records: [] })
+    if (url === '/api/admin/customers') return json({ customers: [{ id: 1, username: 'Test Customer', email: 'test@example.invalid', points: 0, paidGoodsTotal: 0, spinCredits: 0 }] })
+    if (url.startsWith('/api/admin/products')) return json({ products: [{ id: 'test', name: 'Test Product', price: 5000, stockCount: 4 }], total: 1 })
+    throw new Error('Forbidden/unexpected URL ' + url)
+  }, async ({ click }) => {
+    const labels = [...document.querySelectorAll('nav button')].map(button => button.textContent)
+    assert.equal(labels.length, 5)
+    for (const label of ['Tổng quan', 'Thống kê', 'AI local', 'Nhân viên', 'Voucher']) {
+      assert.ok(labels.every(text => !text.includes(label)), label)
+    }
+    await click('Khách hàng')
+    await click('Test Customer')
+    assert.doesNotMatch(document.body.textContent, /Sửa thông tin|Đổi mật khẩu/)
+    await click('Hàng hóa')
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)) })
+    assert.match(document.body.textContent, /Test Product/)
+    assert.doesNotMatch(document.body.textContent, /Thêm sản phẩm/)
+    assert.equal(document.querySelectorAll('.admin-offer-form').length, 0)
+    assert.ok(!urls.some(url => /settings|overview|appearance|events|conversations/.test(url)))
   })
 })

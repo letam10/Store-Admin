@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
 import { AdminOrders as OrderManager } from './AdminOrderWorkflow'
+import CustomerPasswordEditor from './CustomerPasswordEditor'
 import DropdownMenu from '../components/ui/DropdownMenu'
 import './AdminCommerce.css'
 
@@ -37,7 +38,7 @@ function useReport(path) {
 }
 
 // Chức năng AdminCustomers: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
-export function AdminCustomers({ csrfToken }) {
+export function AdminCustomers({ csrfToken, readOnly = false }) {
   const { data, error, reload } = useReport('/api/admin/customers')
   // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
   const [query, setQuery] = useState('')
@@ -57,7 +58,7 @@ export function AdminCustomers({ csrfToken }) {
   const activeSpinCredits = customers.reduce((sum, item) => sum + Number(item.spinCredits || 0), 0)
   async function saveCustomer(event) {
     event.preventDefault(); setEditBusy(true); setEditError('')
-    try { await apiJson('/api/admin/customers/' + editing.id, { method: 'PATCH', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ ...editForm, points: Number(editForm.points), spinCredits: Number(editForm.spinCredits) }) }); setEditing(null); setEditForm(null); await reload() }
+    try { await apiJson('/api/admin/customers/' + editing.id, { method: 'PATCH', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ ...editForm, points: Number(editForm.points), spinCredits: Number(editForm.spinCredits) }) }); setSelected(null); setEditing(null); setEditForm(null); await reload() }
     catch (failure) { setEditError(adminErrorMessage(failure, 'Không lưu được thông tin khách hàng.')) }
     finally { setEditBusy(false) }
   }
@@ -67,7 +68,8 @@ export function AdminCustomers({ csrfToken }) {
     <div className="admin-module-toolbar"><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm tên hoặc email" /><label>Điểm tối thiểu <input type="number" min="0" value={minPoints} onChange={(event) => setMinPoints(event.target.value)} /></label></div>
     {error && <p role="alert">{error}</p>}{!data && !error && <p>Đang tải…</p>}
      {data && <div className="admin-table-wrap"><table><thead><tr><th>Khách</th><th>Điểm</th><th>Hạng</th><th>Tiền hàng đã thanh toán</th><th>Lượt quay</th></tr></thead><tbody>{rows.map((item) => <tr key={item.id} className="admin-clickable-row" onClick={() => setSelected(item)}><td><button className="admin-link-button" type="button" onClick={() => setSelected(item)}>{item.username}</button><small>{item.email}</small></td><td><b>{item.points.toLocaleString('vi-VN')}</b></td><td>{item.tier}</td><td>{money.format(item.paidGoodsTotal)}</td><td>{item.spinCredits}</td></tr>)}</tbody></table></div>}
-     {selected && <section className="admin-detail-panel"><div><p className="admin-eyebrow">HỒ SƠ TÀI KHOẢN</p><h3>{selected.username}</h3></div><button type="button" onClick={() => setSelected(null)}>Đóng</button><dl><div><dt>ID</dt><dd>{selected.id}</dd></div><div><dt>Email đăng ký</dt><dd>{selected.email}</dd></div><div><dt>Tài khoản đăng nhập</dt><dd>{selected.username} hoặc {selected.email}</dd></div><div><dt>Ngày đăng ký</dt><dd>{selected.createdAt ? new Date(selected.createdAt).toLocaleString('vi-VN') : '—'}</dd></div><div><dt>Mật khẩu</dt><dd>Không hiển thị · backend lưu dạng băm</dd></div><div><dt>Hạng / điểm</dt><dd>{selected.tier} · {selected.points.toLocaleString('vi-VN')} điểm</dd></div><div><dt>Trạng thái</dt><dd>Đang hoạt động</dd></div></dl><button type="button" onClick={() => { setEditing(selected); setEditForm({ username: selected.username, email: selected.email, points: selected.points, spinCredits: selected.spinCredits }); setEditError('') }}>Sửa thông tin</button></section>}
+     {selected && <section className="admin-detail-panel"><div><p className="admin-eyebrow">HỒ SƠ TÀI KHOẢN</p><h3>{selected.username}</h3></div><button type="button" onClick={() => setSelected(null)}>Đóng</button><dl><div><dt>ID</dt><dd>{selected.id}</dd></div><div><dt>Email đăng ký</dt><dd>{selected.email}</dd></div><div><dt>Tài khoản đăng nhập</dt><dd>{selected.username} hoặc {selected.email}</dd></div><div><dt>Ngày đăng ký</dt><dd>{selected.createdAt ? new Date(selected.createdAt).toLocaleString('vi-VN') : '—'}</dd></div><div><dt>Mật khẩu</dt><dd>Không hiển thị · backend lưu dạng băm</dd></div><div><dt>Hạng / điểm</dt><dd>{selected.tier} · {selected.points.toLocaleString('vi-VN')} điểm</dd></div><div><dt>Trạng thái</dt><dd>Đang hoạt động</dd></div></dl>{!readOnly && <button type="button" onClick={() => { setEditing(selected); setEditForm({ username: selected.username, email: selected.email, points: selected.points, spinCredits: selected.spinCredits }); setEditError('') }}>Sửa thông tin</button>}</section>}
+     {selected && !readOnly && <CustomerPasswordEditor key={selected.id} customer={selected} csrfToken={csrfToken} />}
      {editing && <form className="admin-detail-panel admin-commerce-form" onSubmit={saveCustomer}><h3>Sửa khách hàng #{editing.id}</h3><label>Tên đăng nhập<input required minLength="3" value={editForm.username} onChange={(event) => setEditForm({ ...editForm, username: event.target.value })} /></label><label>Email<input required type="email" value={editForm.email} onChange={(event) => setEditForm({ ...editForm, email: event.target.value })} /></label><label>Điểm<input type="number" min="0" value={editForm.points} onChange={(event) => setEditForm({ ...editForm, points: event.target.value })} /></label><label>Lượt quay<input type="number" min="0" value={editForm.spinCredits} onChange={(event) => setEditForm({ ...editForm, spinCredits: event.target.value })} /></label>{editError && <p role="alert">{editError}</p>}<div className="voucher-editor-actions"><button type="submit" disabled={editBusy}>{editBusy ? 'Đang lưu…' : 'Lưu thông tin'}</button><button type="button" onClick={() => setEditing(null)}>Hủy</button></div></form>}
   </section>
 }

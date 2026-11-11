@@ -7,6 +7,7 @@
  * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { canOpenModule, landingModule } from '../services/adminAccess'
 import { apiJson, streamChat } from '../api/chat'
 import { createRequestGate } from '../api/requestGate'
 import { adminConversationKey } from '../services/adminState'
@@ -19,6 +20,7 @@ import DropdownMenu from '../components/ui/DropdownMenu'
 import './Admin.css'
 import './AdminPolish.css'
 import './AdminTheme.css'
+import './AdminLayout.css'
 
 const moduleGroups = [
   { title: 'Tổng quan', ids: ['dashboard', 'customer-orders', 'statistics', 'ai-local'] },
@@ -68,7 +70,8 @@ export default function Admin() {
   const [compactStatus, setCompactStatus] = useState('not_needed')
   const [report, setReport] = useState(null)
   const [range, setRange] = useState({ from: today.slice(0, 8) + '01', to: today })
-  const [activeModule, setActiveModule] = useState('dashboard')
+  const [selectedModule, setActiveModule] = useState('dashboard')
+  const activeModule = landingModule(session?.role, selectedModule)
   const [adminSearch, setAdminSearch] = useState('')
   const [realtimeEvents, setRealtimeEvents] = useState([])
   const logRef = useRef(null)
@@ -161,7 +164,7 @@ export default function Admin() {
     const restoreEpoch = ++restoreEpochRef.current
     const reportEpoch = statsEpochRef.current
 
-    apiJson('/api/admin/appearance')
+    if (session.role === 'admin') apiJson('/api/admin/appearance')
       .then((payload) => {
         const nextTheme = normalizeTheme(payload.adminTheme || payload.theme || payload.appearance?.theme)
         setAdminThemeConfig(nextTheme)
@@ -176,7 +179,7 @@ export default function Admin() {
       })
 
     const saved = sessionStorage.getItem(key)
-    if (saved) {
+    if (saved && session.role === 'admin') {
       apiJson('/api/admin/conversations/' + encodeURIComponent(saved))
         .then((payload) => {
           if (epoch !== loadEpochRef.current || restoreEpoch !== restoreEpochRef.current || gateRef.current.locked) return
@@ -196,10 +199,10 @@ export default function Admin() {
     return () => { loadEpochRef.current += 1 }
   // Session identity is the lifecycle boundary for all private UI data.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.authenticated, session?.username])
+  }, [session?.authenticated, session?.username, session?.role])
 
   useEffect(() => {
-    if (!session?.authenticated) return undefined
+    if (!session?.authenticated || session.role !== 'admin') return undefined
     let es
     try {
       es = new EventSource('/api/admin/events/stream')
@@ -246,7 +249,7 @@ export default function Admin() {
       void _err
     }
     return () => { es?.close() }
-  }, [session?.authenticated])
+  }, [session?.authenticated, session?.role])
 
   useEffect(() => {
     if (!session?.authenticated || activeModule !== 'ai-local') return undefined
@@ -438,6 +441,8 @@ export default function Admin() {
   )
 
   const moduleEnglish = { dashboard: 'Dashboard', customers: 'Customers', favorites: 'Favorites', reviews: 'Reviews', 'customer-orders': 'Orders', products: 'Products', 'product-views': 'Most viewed', logistics: 'Logistics', inventory: 'Inventory', appearance: 'Storefront', returns: 'Returns', statistics: 'Statistics', 'ai-local': 'Local AI', 'order-types': 'Order types', support: 'Support', 'rewards-wheel': 'Voucher', staff: 'Staff', overtime: 'Overtime & rewards' }
+  const visibleModules = adminModules.filter(([id]) => canOpenModule(session.role, id))
+  const visibleGroups = moduleGroups.map(group => ({ ...group, ids: group.ids.filter(id => canOpenModule(session.role, id)) })).filter(group => group.ids.length)
   const currentLabel = language === 'en' ? (moduleEnglish[activeModule] || 'Dashboard') : (adminModules.find(([id]) => id === activeModule)?.[1] || 'Tổng quan')
 
   return (
@@ -445,9 +450,9 @@ export default function Admin() {
       <div className="admin-workspace-card">
       <aside className="admin-sidebar">
         <a className="admin-brand" href="/admin">store<span>.</span><small>ADMIN</small></a>
-        <div className="admin-sidebar__profile"><span>{String(session.username || 'A').slice(0, 1).toUpperCase()}</span><div><b>{session.username}</b><small>Quản trị viên</small></div></div>
+        <div className="admin-sidebar__profile"><span>{String(session.username || 'A').slice(0, 1).toUpperCase()}</span><div><b>{session.username}</b><small>{session.role === 'staff' ? 'Nhân viên' : 'Quản trị viên'}</small></div></div>
         <nav aria-label="Điều hướng quản trị">
-          {moduleGroups.map((group) => <div className="admin-nav-group" key={group.title}><p>{group.title}</p>{group.ids.map((id) => {
+          {visibleGroups.map((group) => <div className="admin-nav-group" key={group.title}><p>{group.title}</p>{group.ids.map((id) => {
             const [, label, icon] = moduleById.get(id)
             const displayLabel = language === 'en' ? ({ dashboard: 'Dashboard', statistics: 'Statistics', 'ai-local': 'Local AI', products: 'Products', 'product-views': 'Most viewed', inventory: 'Inventory', logistics: 'Logistics', appearance: 'Storefront', returns: 'Returns', customers: 'Customers', favorites: 'Favorites', reviews: 'Reviews', 'rewards-wheel': 'Voucher', 'customer-orders': 'Orders', support: 'Support', 'order-types': 'Order types', staff: 'Staff', overtime: 'Overtime & rewards' }[id] || label) : label
             return <button key={id} type="button" aria-current={activeModule === id ? 'page' : undefined} className={activeModule === id ? 'is-active' : ''} onClick={() => setActiveModule(id)}><span aria-hidden="true">{icon}</span>{displayLabel}</button>
@@ -463,7 +468,7 @@ export default function Admin() {
             <span aria-hidden="true">⌕</span>
             <input ref={adminSearchRef} type="search" value={adminSearch} onChange={(event) => setAdminSearch(event.target.value)} placeholder={copy.searching} aria-label={copy.searching} />
             <kbd>Ctrl K</kbd>
-            {adminSearch && <div className="admin-search-results">{adminModules.filter(([,label]) => normalizeSearch(label).includes(normalizeSearch(adminSearch))).slice(0,6).map(([id,label,icon]) => <button key={id} type="button" onClick={() => { setActiveModule(id); setAdminSearch('') }}><span aria-hidden="true">{icon}</span>{label}</button>)}{adminModules.filter(([,label]) => normalizeSearch(label).includes(normalizeSearch(adminSearch))).length === 0 && <p>Không tìm thấy module.</p>}</div>}
+            {adminSearch && <div className="admin-search-results">{visibleModules.filter(([,label]) => normalizeSearch(label).includes(normalizeSearch(adminSearch))).slice(0,6).map(([id,label,icon]) => <button key={id} type="button" onClick={() => { setActiveModule(id); setAdminSearch('') }}><span aria-hidden="true">{icon}</span>{label}</button>)}{visibleModules.filter(([,label]) => normalizeSearch(label).includes(normalizeSearch(adminSearch))).length === 0 && <p>Không tìm thấy module.</p>}</div>}
           </div>
           <div className="admin-header__actions"><span className="admin-live-dot">{copy.local}</span><ThemeLanguageControls /><button type="button" onClick={logout}>{copy.signOut}</button></div>
         </header>
@@ -475,7 +480,7 @@ export default function Admin() {
           </div>
         )}
         {pageError && <p className="admin-error" role="alert">{pageError}</p>}
-        {activeModule !== 'ai-local' && <AdminModule module={activeModule} csrfToken={session.csrfToken} onNavigate={setActiveModule} language={language} />}
+        {activeModule !== 'ai-local' && <AdminModule role={session.role} module={activeModule} csrfToken={session.csrfToken} onNavigate={setActiveModule} language={language} />}
         {activeModule === 'ai-local' && <>
           <section className="admin-meta" aria-label="Cấu hình AI">
             <div><small>Model</small><strong>{settings?.model || 'qwen3.5:4b'}</strong></div>

@@ -19,6 +19,7 @@ namespace StoreApi.Controllers;
 
 [ApiController]
 [Route("api/admin")]
+[TypeFilter(typeof(AdminAccessFilter))]
 // Vai trò kiểu AdminController: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
 public sealed class AdminController(StoreDb db, AiChatService aiChatService, OrderEmailService orderEmailService) : ControllerBase
 {
@@ -32,14 +33,16 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
         if (admin is null || !Tokens.VerifyPassword(request.Password, admin.Value.Salt, admin.Value.Hash)) return Unauthorized(new { error = "LOGIN_FAILED" });
         var adminId = db.AdminId(request.Username); if (adminId is null) return Unauthorized(new { error = "LOGIN_FAILED" });
         var raw = Tokens.RandomToken(); var expires = DateTimeOffset.UtcNow.AddHours(12); db.CreateAdminSession(Tokens.Sha256(raw), adminId.Value, expires); Response.Cookies.Append(Cookie, raw, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, MaxAge = TimeSpan.FromHours(12), Path = "/" });
-        return Ok(new { authenticated = true, username = request.Username.Trim(), csrfToken = Tokens.Sha256("csrf:" + raw), expiresAt = expires });
+        var actor = db.FindAdminActor(Tokens.Sha256(raw))!;
+        return Ok(new { authenticated = true, username = actor.Username, role = actor.Role, csrfToken = Tokens.Sha256("csrf:" + raw), expiresAt = expires });
     }
 
     [HttpGet("session")]
     public IActionResult Session()
     {
-        var raw = Request.Cookies[Cookie]; var admin = string.IsNullOrWhiteSpace(raw) ? null : db.FindAdminBySession(Tokens.Sha256(raw));
-        return admin is null ? Unauthorized(new { authenticated = false }) : Ok(new { authenticated = true, username = admin.Value.Username, csrfToken = Tokens.Sha256("csrf:" + raw), expiresAt = DateTimeOffset.UtcNow.AddHours(12) });
+        var raw = Request.Cookies[Cookie];
+        var admin = HttpContext.Items["AdminActor"] as StoreDb.AdminActor;
+        return admin is null ? Unauthorized(new { authenticated = false }) : Ok(new { authenticated = true, username = admin.Username, role = admin.Role, csrfToken = Tokens.Sha256("csrf:" + raw) });
     }
 
     [HttpPost("logout")]
@@ -203,7 +206,7 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        return db.DeleteAdminRecord(id) ? Ok(new { ok = true, id }) : NotFound(new { error = "RECORD_NOT_FOUND" });
+        return db.DeleteAdminRecord(id, module) ? Ok(new { ok = true, id }) : NotFound(new { error = "RECORD_NOT_FOUND" });
     }
 
     [HttpGet("orders")]
@@ -419,6 +422,9 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Ord
         var record = db.ListAdminRecords("after-sales").Select(ParseAfterSalesRecord).FirstOrDefault(item => item is not null && string.Equals(ReadDataString(item.Data, "id"), id, StringComparison.OrdinalIgnoreCase));
         if (record is null) return NotFound(new { error = "AFTER_SALES_NOT_FOUND" });
         var action = (request.Action ?? "").Trim().ToLowerInvariant();
+        if (HttpContext.Items["AdminActor"] is StoreDb.AdminActor { Role: "staff" }
+            && action == "approve" && ReadDataString(record.Data, "kind") != "return")
+            return StatusCode(403, new { error = "FORBIDDEN" });
         var status = action switch
         {
             "approve" => ReadDataInt(record.Data, "quote", "feeAmount") > 0 ? "awaiting_payment" : ReadDataString(record.Data, "kind") == "return" ? "awaiting_return" : "resolved",

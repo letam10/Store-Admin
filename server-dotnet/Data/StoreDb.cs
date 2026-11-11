@@ -12,7 +12,7 @@ using StoreApi.Security;
 
 namespace StoreApi.Data;
 
-public sealed class StoreDb
+public sealed partial class StoreDb
 {
     private readonly string _connectionString;
 
@@ -181,6 +181,15 @@ public sealed class StoreDb
                   expires_at NVARCHAR(100) NOT NULL,
                   created_at NVARCHAR(100) NOT NULL
                 );
+
+                IF COL_LENGTH('admins', 'role') IS NULL
+                  ALTER TABLE admins ADD role NVARCHAR(20) NOT NULL DEFAULT 'admin';
+                IF COL_LENGTH('admins', 'display_name') IS NULL
+                  ALTER TABLE admins ADD display_name NVARCHAR(255) NOT NULL DEFAULT '';
+                IF COL_LENGTH('admins', 'email') IS NULL
+                  ALTER TABLE admins ADD email NVARCHAR(255) NOT NULL DEFAULT '';
+                IF COL_LENGTH('admins', 'active') IS NULL
+                  ALTER TABLE admins ADD active BIT NOT NULL DEFAULT 1;
 
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'customers')
                 CREATE TABLE customers (
@@ -996,7 +1005,7 @@ public sealed class StoreDb
     {
         using var db = Open();
         using var command = db.CreateCommand();
-        command.CommandText = "SELECT TOP 1 password_salt,password_hash FROM admins WHERE LOWER(username)=LOWER(@u)";
+        command.CommandText = "SELECT TOP 1 password_salt,password_hash FROM admins WHERE LOWER(username)=LOWER(@u) AND active=1";
         command.Parameters.AddWithValue("@u", username.Trim());
         using var reader = command.ExecuteReader();
         return reader.Read() ? (reader.GetString(0), reader.GetString(1)) : null;
@@ -1051,7 +1060,7 @@ public sealed class StoreDb
     {
         using var db = Open();
         using var command = db.CreateCommand();
-        command.CommandText = "SELECT TOP 1 a.id,a.username FROM admin_sessions s JOIN admins a ON a.id=s.admin_id WHERE s.token_hash=@hash AND s.expires_at>@now";
+        command.CommandText = "SELECT TOP 1 a.id,a.username FROM admin_sessions s JOIN admins a ON a.id=s.admin_id WHERE s.token_hash=@hash AND s.expires_at>@now AND a.active=1";
         command.Parameters.AddWithValue("@hash", tokenHash);
         command.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
         using var reader = command.ExecuteReader();
@@ -1967,14 +1976,15 @@ public sealed class StoreDb
         cmd.CommandText = """
             UPDATE admin_records
             SET title = @title, status = @status, data_json = @dataJson, updated_at = @now
-            WHERE id = @id;
-            SELECT module, created_at FROM admin_records WHERE id = @id;
+            WHERE id = @id AND module = @module;
+            SELECT module, created_at FROM admin_records WHERE id = @id AND module = @module;
             """;
         cmd.Parameters.AddWithValue("@id", id);
         cmd.Parameters.AddWithValue("@title", title);
         cmd.Parameters.AddWithValue("@status", status);
         cmd.Parameters.AddWithValue("@dataJson", dataJson);
         cmd.Parameters.AddWithValue("@now", now);
+        cmd.Parameters.AddWithValue("@module", module ?? "");
         using var reader = cmd.ExecuteReader();
         if (!reader.Read()) return null;
         var actualModule = reader.GetString(0);
@@ -1985,12 +1995,13 @@ public sealed class StoreDb
         return new { id, module = actualModule, title, data = dataObj, status, createdAt, updatedAt = now };
     }
 
-    public bool DeleteAdminRecord(int id)
+    public bool DeleteAdminRecord(int id, string? module = null)
     {
         using var db = Open();
         using var cmd = db.CreateCommand();
-        cmd.CommandText = "DELETE FROM admin_records WHERE id = @id";
+        cmd.CommandText = "DELETE FROM admin_records WHERE id = @id AND (@module IS NULL OR module = @module)";
         cmd.Parameters.AddWithValue("@id", id);
+        cmd.Parameters.AddWithValue("@module", (object?)module ?? DBNull.Value);
         return cmd.ExecuteNonQuery() > 0;
     }
 
@@ -2025,21 +2036,31 @@ public sealed class StoreDb
         if (current is null) return null;
         var nextUsername = string.IsNullOrWhiteSpace(username) ? current.Value.Username : username.Trim();
         var nextEmail = string.IsNullOrWhiteSpace(email) ? current.Value.Email : email.Trim().ToLowerInvariant();
-        if (nextUsername.Length < 3 || nextEmail.Length < 5 || !nextEmail.Contains('@')) throw new InvalidOperationException("INVALID_CUSTOMER");
-
-        using var db = Open();
-        using var cmd = db.CreateCommand();
-        cmd.CommandText = "UPDATE customers SET username=@username,email=@email,points=@points,spin_credits=@spinCredits WHERE id=@id";
-        cmd.Parameters.AddWithValue("@id", id);
-        cmd.Parameters.AddWithValue("@username", nextUsername);
-        cmd.Parameters.AddWithValue("@email", nextEmail);
-        cmd.Parameters.AddWithValue("@points", Math.Max(0, points ?? 0));
-        cmd.Parameters.AddWithValue("@spinCredits", Math.Max(0, spinCredits ?? 0));
-        try { if (cmd.ExecuteNonQuery() == 0) return null; }
-        catch (SqlException ex) when (ex.Number is 2601 or 2627) { throw new InvalidOperationException("CUSTOMER_EXISTS", ex); }
-        var updated = FindCustomerFull(id);
-        if (updated is null) return null;
-        return new { id, username = updated.Value.Username, email = updated.Value.Email, points = points ?? 0, spinCredits = spinCredits ?? 0 };
+        if (nextUsername.Length is < 3 or > 255 || nextEmail.Length > 255 || !System.Net.Mail.MailAddress.TryCreate(nextEmail, out _)
+            || points < 0 || spinCredits < 0) throw new InvalidOperationException("INVALID_CUSTOMER");
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        // PATCH chỉ đổi trường đã gửi; không làm mất điểm hoặc lượt quay khi sửa email.
+        command.CommandText = """
+            UPDATE customers SET username=@username,email=@email,
+                points=COALESCE(@points,points),spin_credits=COALESCE(@credits,spin_credits)
+            OUTPUT inserted.username,inserted.email,inserted.points,inserted.spin_credits
+            WHERE id=@id
+            """;
+        command.Parameters.AddWithValue("@id", id);
+        command.Parameters.AddWithValue("@username", nextUsername);
+        command.Parameters.AddWithValue("@email", nextEmail);
+        command.Parameters.AddWithValue("@points", (object?)points ?? DBNull.Value);
+        command.Parameters.AddWithValue("@credits", (object?)spinCredits ?? DBNull.Value);
+        try
+        {
+            using var reader = command.ExecuteReader();
+            return reader.Read() ? new { id, username = reader.GetString(0), email = reader.GetString(1), points = reader.GetInt32(2), spinCredits = reader.GetInt32(3) } : null;
+        }
+        catch (SqlException ex) when (ex.Number is 2601 or 2627)
+        {
+            throw new InvalidOperationException("CUSTOMER_EXISTS", ex);
+        }
     }
 
     public IReadOnlyList<object> ListAdminVouchers()
