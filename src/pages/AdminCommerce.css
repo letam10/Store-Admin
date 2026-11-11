@@ -1,4 +1,22 @@
 .admin-commerce-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.admin-after-sales .admin-commerce-list article { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; align-items: center; }
+.admin-after-sales .admin-commerce-list small { display: block; margin-top: 6px; }
+.admin-after-sales .admin-commerce-list p { overflow-wrap: anywhere; margin-bottom: 0; }
+.admin-after-sales .admin-fee-list { grid-template-columns: 1fr; }
+.admin-after-sales .admin-fee-list dt { font-size: 13px; }
+.admin-after-sales .admin-fee-list dd { font-size: 14px; text-align: right; }
+.admin-after-actions fieldset { margin: 0; padding: 16px; min-width: 0; border: 1px solid #94b59d; border-radius: 10px; }
+.admin-after-actions legend { padding: 0 6px; font-weight: 700; }
+.admin-after-history { margin-top: 20px; }
+.admin-after-history summary { cursor: pointer; }
+.admin-after-history p { border-top: 1px solid var(--admin-line, #d9e3db); padding-top: 10px; }
+@media (max-width: 700px) {
+  .admin-after-sales .admin-commerce-list article { grid-template-columns: 1fr; gap: 9px; }
+  .admin-after-sales .admin-commerce-list button { justify-self: start; }
+  .admin-after-sales .admin-order-detail > header { align-items: flex-start; }
+  .admin-after-sales h3 { overflow-wrap: anywhere; }
+  .admin-after-sales .admin-fee-list > div { flex-wrap: wrap; gap: 6px; }
+}
 .admin-commerce-form label { display: grid; gap: 5px; min-width: 160px; flex: 1; }
 .admin-commerce-form input, .admin-commerce-form select, .admin-commerce-list textarea { width: 100%; padding: 9px 10px; border: 1px solid #bdcfc2; border-radius: 8px; background: white; color: #173b28; font: inherit; }
 .admin-commerce-form button, .admin-commerce-list button { padding: 10px 14px; border: 0; border-radius: 8px; background: #256a43; color: white; font-weight: 700; cursor: pointer; }

@@ -83,9 +83,12 @@ public sealed record OrderFulfillmentRequest(string? Status);
 
 public sealed record AfterSalesActionRequest(
     string? Action, string? Note, string? Reference,
-    bool? Received, bool? CounterConfirmed, bool? RefundConfirmed, string? RefundReference);
+    bool? Received, bool? CounterConfirmed, bool? RefundConfirmed, string? RefundReference,
+    long? ReceivedAmount = null, string? ReceivedAt = null, long? RefundAmount = null,
+    string? RefundedAt = null, bool? Restock = null, bool? AcceptLatePayment = null);
 
-public sealed record AfterSalesCreateRequest(string? Kind, string? Reason, string? ScheduledAt);
+public sealed record AfterSalesCreateRequest(string? Kind, string? Reason, string? ScheduledAt,
+    List<QuoteItemRequest>? ReplacementItems = null);
 
 public sealed record PaymentSettingsRequest(
     string? Mode, string? BankName, string? BankBin, string? AccountNumber, string? AccountName);

@@ -107,7 +107,8 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
         if (id is "1" or "2" or "3" or "4") return BadRequest(new { error = "FEATURED_PRODUCT_PROTECTED" });
 
-        return db.DeleteCatalogProduct(id) ? Ok(new { ok = true, id }) : NotFound(new { error = "PRODUCT_NOT_FOUND" });
+        try { return db.DeleteCatalogProduct(id) ? Ok(new { ok = true, id }) : NotFound(new { error = "PRODUCT_NOT_FOUND" }); }
+        catch (InvalidOperationException ex) when (ex.Message == "PRODUCT_IN_USE") { return Conflict(new { error = ex.Message }); }
     }
 
     [HttpGet("product-views")]
@@ -305,7 +306,7 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
     public IActionResult PaymentSettings()
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
-        return Ok(new { settings = db.GetPaymentSettings(), policy = new { cancellationPercent = 1, returnDays = 7, rescheduleDays = 3 } });
+        return Ok(new { settings = db.GetPaymentSettings(), policy = AfterSalesPolicy.Description });
     }
 
     [HttpPut("payment-settings")]
@@ -321,8 +322,7 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
     public IActionResult AfterSales()
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
-        var requests = db.ListAdminRecords("after-sales").Select(ParseAfterSales).Where(item => item is not null).Select(item => item!).ToArray();
-        return Ok(new { requests, policy = new { cancellationPercent = 1, returnDays = 7, rescheduleDays = 3 } });
+        return Ok(new { requests = db.AfterSalesCases(), policy = AfterSalesPolicy.Description });
     }
 
     [HttpPost("after-sales/{id}/action")]
@@ -330,25 +330,13 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        var record = db.ListAdminRecords("after-sales").Select(ParseAfterSalesRecord).FirstOrDefault(item => item is not null && string.Equals(ReadDataString(item.Data, "id"), id, StringComparison.OrdinalIgnoreCase));
-        if (record is null) return NotFound(new { error = "AFTER_SALES_NOT_FOUND" });
-        var action = (request.Action ?? "").Trim().ToLowerInvariant();
-        if (HttpContext.Items["AdminActor"] is StoreDb.AdminActor { Role: "staff" }
-            && action == "approve" && ReadDataString(record.Data, "kind") != "return")
-            return StatusCode(403, new { error = "FORBIDDEN" });
-        var status = action switch
+        var actor = (StoreDb.AdminActor)HttpContext.Items["AdminActor"]!;
+        try { return Ok(new { request = db.AdminAfterSalesAction(actor, id, request) }); }
+        catch (InvalidOperationException ex)
         {
-            "approve" => ReadDataInt(record.Data, "quote", "feeAmount") > 0 ? "awaiting_payment" : ReadDataString(record.Data, "kind") == "return" ? "awaiting_return" : "resolved",
-            "fee_paid" => "awaiting_return",
-            "complete_return" => "resolved",
-            "reject" => "rejected",
-            _ => record.Status
-        };
-        record.Data["status"] = status;
-        record.Data["note"] = request.Note ?? ReadDataString(record.Data, "note");
-        if (!string.IsNullOrWhiteSpace(request.Reference)) record.Data["refundReference"] = request.Reference.Trim();
-        db.UpdateAdminRecord(record.Id, "after-sales", record.Title, AfterSalesStatusLabel(status), JsonSerializer.Serialize(record.Data));
-        return Ok(new { updated = true, id, status });
+            return StatusCode(ex.Message == "FORBIDDEN" ? 403 : ex.Message.EndsWith("NOT_FOUND", StringComparison.Ordinal) ? 404 : 409,
+                new { error = ex.Message });
+        }
     }
 
     [HttpGet("events/stream")]
@@ -486,71 +474,6 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
     {
         var raw = Request.Cookies[Cookie]; return string.IsNullOrWhiteSpace(raw) ? null : db.FindAdminBySession(Tokens.Sha256(raw));
     }
-
-    private static object? ParseAfterSales(object value)
-    {
-        var record = ParseAfterSalesRecord(value);
-        if (record is null) return null;
-        return new
-        {
-            id = ReadDataString(record.Data, "id") ?? record.Id.ToString(),
-            orderId = ReadDataString(record.Data, "orderId"),
-            kind = ReadDataString(record.Data, "kind"),
-            reason = ReadDataString(record.Data, "reason"),
-            scheduledAt = ReadDataString(record.Data, "scheduledAt"),
-            status = ReadDataString(record.Data, "status") ?? record.Status,
-            username = "Khách hàng #" + ReadDataString(record.Data, "customerId"),
-            quote = ReadDataObject(record.Data, "quote"),
-            note = ReadDataString(record.Data, "note"),
-            refundReference = ReadDataString(record.Data, "refundReference")
-        };
-    }
-
-    private static AfterSalesRecord? ParseAfterSalesRecord(object value)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(value));
-            var root = doc.RootElement;
-            var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(root.GetProperty("data").GetRawText()) ?? [];
-            return new AfterSalesRecord(root.GetProperty("id").GetInt32(), root.GetProperty("title").GetString() ?? "", root.GetProperty("status").GetString() ?? "", data);
-        }
-        catch { return null; }
-    }
-
-    private static string? ReadDataString(Dictionary<string, object?> data, string key)
-    {
-        return data.TryGetValue(key, out var value) ? value switch
-        {
-            JsonElement element when element.ValueKind == JsonValueKind.String => element.GetString(),
-            null => null,
-            _ => Convert.ToString(value)
-        } : null;
-    }
-
-    private static int ReadDataInt(Dictionary<string, object?> data, string parent, string key)
-    {
-        if (!data.TryGetValue(parent, out var value)) return 0;
-        var element = value is JsonElement json ? json : JsonSerializer.SerializeToElement(value);
-        return element.ValueKind == JsonValueKind.Object && element.TryGetProperty(key, out var field) && field.TryGetInt32(out var number) ? number : 0;
-    }
-
-    private static object? ReadDataObject(Dictionary<string, object?> data, string key)
-    {
-        return data.TryGetValue(key, out var value) && value is JsonElement element ? JsonSerializer.Deserialize<object>(element.GetRawText()) : value;
-    }
-
-    private static string AfterSalesStatusLabel(string status) => status switch
-    {
-        "awaiting_payment" => "Chờ thanh toán phí",
-        "awaiting_return" => "Chờ nhận hàng trả",
-        "resolved" => "Đã xử lý",
-        "rejected" => "Đã từ chối",
-        "cancelled" => "Đã hủy yêu cầu",
-        _ => "Chờ cửa hàng duyệt"
-    };
-
-    private sealed record AfterSalesRecord(int Id, string Title, string Status, Dictionary<string, object?> Data);
 
     private static JsonElement Property(JsonElement source, string name)
     {

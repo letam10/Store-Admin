@@ -37,7 +37,7 @@ public static class OrderEmailService
             Text(root, "paymentMethod"),
             items,
             Number(root, "subtotal"),
-            Number(root, "discount"),
+            Math.Max(0, Number(root, "subtotal") - Number(root, "goodsTotal")),
             Number(root, "shippingFee"),
             Number(root, "total"),
             Text(root, "tier"),

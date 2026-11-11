@@ -211,11 +211,11 @@ public static class EmailTemplates
                         <td align="right" style="padding:3px 0;font-weight:700;color:#0f172a;">{invoice.Subtotal:N0} ₫</td>
                       </tr>
                       <tr>
-                        <td style="padding:3px 0;color:#64748b;">Giảm voucher:</td>
+                        <td style="padding:3px 0;color:#64748b;">Giảm tiền hàng:</td>
                         <td align="right" style="padding:3px 0;font-weight:700;color:#e11d48;">- {invoice.Discount:N0} ₫</td>
                       </tr>
                       <tr>
-                        <td style="padding:3px 0;color:#64748b;">Phí vận chuyển:</td>
+                        <td style="padding:3px 0;color:#64748b;">Phí vận chuyển sau giảm:</td>
                         <td align="right" style="padding:3px 0;font-weight:700;color:#0f172a;">{invoice.ShippingFee:N0} ₫</td>
                       </tr>
                       <tr>

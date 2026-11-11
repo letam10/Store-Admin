@@ -388,7 +388,8 @@ public sealed partial class CustomerController(StoreDb db, IConfiguration config
         return Ok(new
         {
             order,
-            afterSales = ListCustomerAfterSales(customer.Id, id),
+            afterSales = db.AfterSalesCases(customer.Id, id),
+            policy = AfterSalesPolicy.Description,
             events = Array.Empty<object>(),
             store = new { name = "Store Mini Mart", address = "TP. Hồ Chí Minh", demo = false }
         });
@@ -399,53 +400,16 @@ public sealed partial class CustomerController(StoreDb db, IConfiguration config
     {
         if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
         if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        var order = db.FindCustomerOrder(id, customer.Id);
-        if (order is null) return NotFound(new { error = "ORDER_NOT_FOUND" });
-        var kind = (request.Kind ?? "").Trim().ToLowerInvariant();
-        if (kind is not ("cancel" or "return" or "reschedule" or "merchant_fault") || string.IsNullOrWhiteSpace(request.Reason)) return BadRequest(new { error = "INVALID_AFTER_SALES" });
-        var orderJson = JsonSerializer.Serialize(order);
-        using var orderDocument = JsonDocument.Parse(orderJson);
-        var root = orderDocument.RootElement;
-        if (root.GetProperty("status").GetString() is not ("paid" or "completed")) return Conflict(new { error = "PAYMENT_REQUIRED" });
-        var delivery = root.GetProperty("deliveryStatus").GetString();
-        if (kind == "cancel" && delivery is "shipped" or "delivered") return Conflict(new { error = "ALREADY_SHIPPED" });
-        if (kind is "return" or "merchant_fault" && delivery != "delivered") return Conflict(new { error = "DELIVERY_REQUIRED" });
-        var quote = BuildAfterSalesQuote(root, kind);
-        var caseId = "AS-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
-        var data = new Dictionary<string, object?>
-        {
-            ["id"] = caseId,
-            ["customerId"] = customer.Id,
-            ["orderId"] = id,
-            ["kind"] = kind,
-            ["reason"] = request.Reason.Trim(),
-            ["scheduledAt"] = request.ScheduledAt,
-            ["status"] = "awaiting_confirmation",
-            ["quote"] = quote,
-            ["feePaidAt"] = null,
-            ["refundReference"] = null,
-            ["note"] = "",
-            ["compensation"] = Array.Empty<object>()
-        };
-        var record = db.CreateAdminRecord("after-sales", "#" + caseId + " · " + id, "Chờ khách xác nhận phí", JsonSerializer.Serialize(data));
-        return StatusCode(StatusCodes.Status201Created, new { request = record });
+        try { return StatusCode(201, new { request = db.CreateAfterSalesCase(customer.Id, id, request) }); }
+        catch (InvalidOperationException ex) { return AfterSalesError(ex); }
     }
 
     [HttpGet("after-sales/{id}/payment")]
     public IActionResult AfterSalesPayment(string id)
     {
         if (!RequireAccount(out var customer)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
-        var record = FindCustomerAfterSales(id, customer.Id);
-        if (record is null) return NotFound(new { error = "AFTER_SALES_NOT_FOUND" });
-        try
-        {
-            var window = db.AfterSalesPaymentWindow(record.Id, customer.Id);
-            var canPay = window.Bank is not null && window.ExpiresAt > DateTimeOffset.UtcNow && !window.Reported;
-            object? payment = window.Bank is null ? new { mode = "counter", amount = window.Amount, reference = id }
-                : canPay ? BankPayment.Info(window.Bank, id, window.Amount) : null;
-            return Ok(new { orderId = id, amount = window.Amount, window.ExpiresAt, canPay, status = window.Reported ? "reported" : canPay ? "pending" : "expired", serverTime = DateTimeOffset.UtcNow, payment });
-        }
-        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+        try { return Ok(db.AfterSalesPaymentWindow(id, customer.Id)); }
+        catch (InvalidOperationException ex) { return AfterSalesError(ex); }
     }
 
     [HttpPost("after-sales/{id}/action")]
@@ -453,27 +417,13 @@ public sealed partial class CustomerController(StoreDb db, IConfiguration config
     {
         if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
         if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        var record = FindCustomerAfterSales(id, customer.Id);
-        if (record is null) return NotFound(new { error = "AFTER_SALES_NOT_FOUND" });
-        var action = (request.Action ?? "").Trim().ToLowerInvariant();
-        var currentStatus = ReadString(record.Data, "status") ?? "awaiting_confirmation";
-        var allowed = action == "confirm" && currentStatus == "awaiting_confirmation"
-            || action == "cancel" && (currentStatus is "awaiting_confirmation" or "pending" or "awaiting_payment")
-                && string.IsNullOrEmpty(ReadString(record.Data, "feePaidAt")) && string.IsNullOrEmpty(ReadString(record.Data, "feeReportedAt"))
-            || action == "payment_report" && currentStatus == "awaiting_payment";
-        if (!allowed) return Conflict(new { error = "ACTION_NOT_ALLOWED" });
-        if (action == "payment_report" && (request.Reference?.Trim().Length is null or < 3 or > 100))
-            return BadRequest(new { error = "PAYMENT_REFERENCE_REQUIRED" });
-        var status = action == "confirm" ? "pending" : action == "cancel" ? "cancelled" : "awaiting_payment";
-        record.Data["status"] = status;
-        if (action == "payment_report")
-        {
-            record.Data["feeReportedAt"] = DateTimeOffset.UtcNow.ToString("O");
-            record.Data["feePaymentReportedReference"] = request.Reference!.Trim();
-        }
-        db.UpdateAdminRecord(record.Id, "after-sales", record.Title, StatusLabel(status), JsonSerializer.Serialize(record.Data));
-        return Ok(new { success = true, id, status });
+        try { return Ok(new { request = db.CustomerAfterSalesAction(customer.Id, id, request) }); }
+        catch (InvalidOperationException ex) { return AfterSalesError(ex); }
     }
+
+    private IActionResult AfterSalesError(InvalidOperationException error) => StatusCode(
+        error.Message is "ORDER_NOT_FOUND" or "AFTER_SALES_NOT_FOUND" ? 404
+        : error.Message.StartsWith("INVALID_", StringComparison.Ordinal) ? 400 : 409, new { error = error.Message });
 
     [HttpPost("spin")]
     public IActionResult Spin(CustomerSpinRequest request)
@@ -752,115 +702,6 @@ public sealed partial class CustomerController(StoreDb db, IConfiguration config
         if (region == "far") return 60000 + distanceKm * 1000;
         return 60000;
     }
-
-    private IReadOnlyList<object> ListCustomerAfterSales(long customerId, string orderId)
-    {
-        return db.ListAdminRecords("after-sales")
-            .Select(item => ParseAfterSalesRecord(item))
-            .Where(item => item is not null && ReadLong(item!.Data, "customerId") == customerId && string.Equals(ReadString(item.Data, "orderId"), orderId, StringComparison.OrdinalIgnoreCase))
-            .Select(item => MapAfterSales(item!))
-            .ToArray();
-    }
-
-    private AfterSalesRecord? FindCustomerAfterSales(string id, long customerId)
-    {
-        return db.ListAdminRecords("after-sales")
-            .Select(item => ParseAfterSalesRecord(item))
-            .FirstOrDefault(item => item is not null && ReadLong(item.Data, "customerId") == customerId && string.Equals(ReadString(item.Data, "id"), id, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static object MapAfterSales(AfterSalesRecord record)
-    {
-        return new
-        {
-            id = ReadString(record.Data, "id") ?? record.Id.ToString(),
-            orderId = ReadString(record.Data, "orderId"),
-            kind = ReadString(record.Data, "kind"),
-            reason = ReadString(record.Data, "reason"),
-            scheduledAt = ReadString(record.Data, "scheduledAt"),
-            status = ReadString(record.Data, "status") ?? record.Status,
-            quote = GetObject(record.Data, "quote"),
-            feePaidAt = ReadString(record.Data, "feePaidAt"),
-            refundReference = ReadString(record.Data, "refundReference"),
-            note = ReadString(record.Data, "note"),
-            compensation = GetObject(record.Data, "compensation") ?? Array.Empty<object>()
-        };
-    }
-
-    private static AfterSalesRecord? ParseAfterSalesRecord(object value)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(value));
-            var root = doc.RootElement;
-            var id = root.GetProperty("id").GetInt32();
-            var title = root.GetProperty("title").GetString() ?? "";
-            var status = root.GetProperty("status").GetString() ?? "";
-            var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(root.GetProperty("data").GetRawText()) ?? [];
-            return new AfterSalesRecord(id, title, status, data);
-        }
-        catch { return null; }
-    }
-
-    private static object BuildAfterSalesQuote(JsonElement order, string kind)
-    {
-        var total = Number(order, "total");
-        var goods = Number(order, "goodsTotal");
-        var shipping = Number(order, "shippingFee");
-        var fee = kind == "cancel" ? Math.Max(1000, goods / 100) : 0;
-        var refund = kind == "merchant_fault" ? total : kind == "return" ? Math.Max(0, total - shipping) : kind == "cancel" ? Math.Max(0, total - fee) : 0;
-        var breakdown = new List<object>();
-        if (kind == "cancel") breakdown.Add(new { label = "Phí hủy trước giao (1%)", amount = fee });
-        if (kind == "return") breakdown.Add(new { label = "Phí gửi trả dự kiến", amount = shipping });
-        if (kind == "merchant_fault") breakdown.Add(new { label = "Miễn phí do lỗi cửa hàng", amount = 0 });
-        if (kind == "reschedule") breakdown.Add(new { label = "Phí đổi lịch", amount = 0 });
-        return new { feeAmount = fee, refundAmount = refund, additionalDue = fee, breakdown };
-    }
-
-    private static int Number(JsonElement root, string property)
-    {
-        return root.TryGetProperty(property, out var value) && value.TryGetInt32(out var number) ? number : 0;
-    }
-
-    private static string? ReadString(Dictionary<string, object?> data, string key)
-    {
-        return data.TryGetValue(key, out var value) ? value switch
-        {
-            JsonElement element when element.ValueKind == JsonValueKind.String => element.GetString(),
-            null => null,
-            _ => Convert.ToString(value)
-        } : null;
-    }
-
-    private static long ReadLong(Dictionary<string, object?> data, string key)
-    {
-        return long.TryParse(ReadString(data, key), out var value) ? value : 0;
-    }
-
-    private static int ReadInt(Dictionary<string, object?> data, string parent, string key)
-    {
-        if (!data.TryGetValue(parent, out var value)) return 0;
-        var raw = value is JsonElement element ? element : JsonSerializer.SerializeToElement(value);
-        return raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty(key, out var field) && field.TryGetInt32(out var number) ? number : 0;
-    }
-
-    private static object? GetObject(Dictionary<string, object?> data, string key)
-    {
-        return data.TryGetValue(key, out var value) && value is JsonElement element ? JsonSerializer.Deserialize<object>(element.GetRawText()) : value;
-    }
-
-    private static string StatusLabel(string status) => status switch
-    {
-        "pending" => "Chờ cửa hàng duyệt",
-        "awaiting_payment" => "Chờ thanh toán phí",
-        "awaiting_return" => "Chờ nhận hàng trả",
-        "resolved" => "Đã xử lý",
-        "rejected" => "Đã từ chối",
-        "cancelled" => "Đã hủy yêu cầu",
-        _ => "Chờ khách xác nhận phí"
-    };
-
-    private sealed record AfterSalesRecord(int Id, string Title, string Status, Dictionary<string, object?> Data);
 
     private string GetConfig(string key, string fallback = "")
     {

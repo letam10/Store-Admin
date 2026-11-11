@@ -39,4 +39,4 @@ Khởi động thường chỉ nạp catalog mẫu khi DB rỗng. Đồng bộ/x
 
 Biên nhận HTML mã hóa các trường tên/địa chỉ/sản phẩm, không dựng HTML từ dữ liệu khách bằng JavaScript. Checkout lấy lại báo giá nếu giá thay đổi và chờ khách xác nhận tổng mới.
 
-Luồng xử lý đổi/trả, hoàn tiền sau bán hàng và các chính sách phí cần được kiểm tra cùng bước đối soát của tác vụ triển khai; không coi việc sinh được QR là bằng chứng ngân hàng đã nhận tiền.
+Luồng đổi/trả, khoản bù, hoàn tiền và quyền nhân viên được mô tả tại [Đổi / trả hàng](DOI-TRA-HANG.md). Không coi việc sinh được QR hoặc khách báo chuyển khoản là bằng chứng ngân hàng đã nhận tiền.

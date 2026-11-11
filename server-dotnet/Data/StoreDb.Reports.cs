@@ -17,7 +17,7 @@ public sealed partial class StoreDb
         using var connection = Open();
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT id,status,total,refund_amount,paid_at,created_at FROM customer_orders";
+            command.CommandText = "SELECT id,status,CAST(total AS BIGINT)+extra_paid,refund_amount,paid_at,created_at FROM customer_orders";
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {

@@ -43,7 +43,7 @@ public sealed class AdminAccessFilter(StoreDb db) : IAsyncActionFilter
         "Session" or "Logout" or "Products" or "Customers" or "AfterSales" or "Reviews" or "ReplyReview" => true,
         "Records" or "CreateRecord" or "UpdateRecord" => module == "support",
         // Thu phí, hoàn tiền và quyết định tài chính vẫn do admin xác nhận.
-        "AfterSalesAction" => afterSalesAction?.Trim().ToLowerInvariant() is "approve" or "reject",
+        "AfterSalesAction" => afterSalesAction?.Trim().ToLowerInvariant() is "approve" or "reject" or "receive_return" or "ship_exchange" or "complete_exchange",
         _ => false
     };
 }

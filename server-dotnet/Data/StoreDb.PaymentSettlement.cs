@@ -102,7 +102,15 @@ public sealed partial class StoreDb
             || (current == "ready" && next == "shipped" && delivery && (paid || cod))
             || (next == "delivered" && paid && (current == "shipped" || (current == "ready" && !delivery))));
         if (!allowed) throw new InvalidOperationException("ACTION_NOT_ALLOWED");
-        using var update = CheckoutCommand(connection, transaction, "UPDATE customer_orders SET delivery_status=@next,status=CASE WHEN @next='delivered' THEN 'completed' ELSE status END WHERE id=@id", ("@next", next), ("@id", id));
+        using var activeCase = CheckoutCommand(connection, transaction, """
+            SELECT COUNT(*) FROM admin_records WHERE module='after-sales' AND JSON_VALUE(data_json,'$.orderId')=@id
+              AND JSON_VALUE(data_json,'$.status') NOT IN ('awaiting_confirmation','resolved','rejected','cancelled')
+            """, ("@id", id));
+        if (Convert.ToInt32(activeCase.ExecuteScalar()) > 0) throw new InvalidOperationException("AFTER_SALES_ALREADY_OPEN");
+        using var update = CheckoutCommand(connection, transaction, """
+            UPDATE customer_orders SET delivery_status=@next,status=CASE WHEN @next='delivered' THEN 'completed' ELSE status END,
+              delivered_at=CASE WHEN @next='delivered' THEN @now ELSE delivered_at END WHERE id=@id
+            """, ("@next", next), ("@id", id), ("@now", DateTimeOffset.UtcNow));
         update.ExecuteNonQuery();
         transaction.Commit();
     }

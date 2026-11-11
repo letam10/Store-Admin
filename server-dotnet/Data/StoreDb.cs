@@ -92,6 +92,7 @@ public sealed partial class StoreDb
             EnsureDatabaseExists();
             EnsureCustomerTables();
             EnsureCheckoutTables();
+            EnsureAfterSalesTables();
             return TryCheckHealth();
         }
         catch (Exception ex)
@@ -1132,7 +1133,8 @@ public sealed partial class StoreDb
         SELECT o.id,o.items_json,o.recipient,o.phone,o.address,o.fulfillment,o.region,o.subtotal,o.discount,o.goods_total,
           o.shipping_fee,o.total,o.tier,o.status,o.payment_method,o.scheduled_at,o.created_at,o.paid_at,c.username,
           o.delivery_status,o.refund_amount,i.state AS payment_state,i.expires_at,i.report_reference,i.reported_at,
-          i.payment_reference,i.received_at,o.invoice_email_sent_at,nc.status AS customer_mail_status,na.status AS admin_mail_status
+          i.payment_reference,i.received_at,o.invoice_email_sent_at,nc.status AS customer_mail_status,na.status AS admin_mail_status,
+          o.extra_paid,o.delivered_at,COALESCE(o.current_items_json,o.items_json),COALESCE(o.current_goods_total,o.goods_total)
         FROM customer_orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN checkout_intents i ON i.order_id=o.id
         LEFT JOIN notification_outbox nc ON nc.job_key='invoice:customer:'+o.id
         OUTER APPLY (
@@ -1197,7 +1199,9 @@ public sealed partial class StoreDb
             subtotal = reader.GetInt32(7), discount = reader.GetInt32(8), goodsTotal = reader.GetInt32(9), shippingFee = reader.GetInt32(10),
             total = reader.GetInt32(11), tier = S(12), status, deliveryStatus, paymentMethod = S(14), paymentMode = "manual",
             scheduledAt = reader.IsDBNull(15) ? null : S(15), createdAt = S(16), paidAt = reader.IsDBNull(17) ? null : S(17),
-            username = S(18), extraPaid = 0, refundAmount = Convert.ToInt64(reader.GetValue(20)), paymentState = S(21),
+            username = S(18), extraPaid = reader.GetInt64(30), refundAmount = Convert.ToInt64(reader.GetValue(20)), paymentState = S(21),
+            deliveredAt = reader.IsDBNull(31) ? (DateTimeOffset?)null : reader.GetDateTimeOffset(31),
+            currentItems = JsonSerializer.Deserialize<List<CheckoutLine>>(S(32), CheckoutJson), currentGoodsTotal = Convert.ToInt64(reader.GetValue(33)),
             expiresAt = reader.IsDBNull(22) ? (DateTimeOffset?)null : reader.GetDateTimeOffset(22),
             paymentReportedReference = S(23), paymentReportedAt = reader.IsDBNull(24) ? (DateTimeOffset?)null : reader.GetDateTimeOffset(24),
             paymentReference = S(25), receivedAt = reader.IsDBNull(26) ? (DateTimeOffset?)null : reader.GetDateTimeOffset(26),
@@ -2313,7 +2317,27 @@ public sealed partial class StoreDb
         if (existing is null) return false;
 
         using var db = Open();
+        using var transaction = db.BeginTransaction();
+        LockCheckout(db, transaction);
+        // Không xóa hàng còn cần cho giữ kho, giao hàng hoặc xử lý đổi/trả.
+        using var inUse = CheckoutCommand(db, transaction, """
+            SELECT CASE WHEN EXISTS(
+              SELECT 1 FROM customer_orders o CROSS APPLY OPENJSON(COALESCE(o.current_items_json,o.items_json)) j
+              WHERE JSON_VALUE(j.value,'$.id')=@id AND (o.status IN ('pending','paid') OR
+                (o.status='completed' AND (o.delivered_at IS NULL OR o.delivered_at>=DATEADD(day,-7,SYSDATETIMEOFFSET()))))
+            ) OR EXISTS(
+              SELECT 1 FROM admin_records r CROSS APPLY OPENJSON(r.data_json,'$.replacementItems') j
+              WHERE r.module='after-sales' AND JSON_VALUE(j.value,'$.id')=@id
+                AND JSON_VALUE(r.data_json,'$.status') NOT IN ('resolved','rejected','cancelled')
+            ) OR EXISTS(
+              SELECT 1 FROM admin_records r CROSS APPLY OPENJSON(r.data_json,'$.originalItems') j
+              WHERE r.module='after-sales' AND JSON_VALUE(j.value,'$.id')=@id
+                AND JSON_VALUE(r.data_json,'$.status') NOT IN ('resolved','rejected','cancelled')
+            ) THEN 1 ELSE 0 END
+            """, ("@id", id));
+        if (Convert.ToInt32(inUse.ExecuteScalar()) != 0) throw new InvalidOperationException("PRODUCT_IN_USE");
         using var cmd = db.CreateCommand();
+        cmd.Transaction = transaction;
         cmd.CommandText = """
             DELETE FROM catalog_products WHERE id = @id;
             DELETE FROM product_views WHERE product_id = @id;
@@ -2321,7 +2345,9 @@ public sealed partial class StoreDb
             """;
         cmd.Parameters.AddWithValue("@id", id);
         cmd.Parameters.AddWithValue("@name", existing.Name);
-        return cmd.ExecuteNonQuery() > 0;
+        var deleted = cmd.ExecuteNonQuery() > 0;
+        transaction.Commit();
+        return deleted;
     }
 
 
