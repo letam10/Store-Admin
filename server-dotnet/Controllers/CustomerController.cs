@@ -382,13 +382,14 @@ public sealed partial class CustomerController(StoreDb db, IConfiguration config
 
         if (Request.Path.Value?.EndsWith(".html") == true || Request.Query["format"] == "html")
         {
-            return Content(OrderReceiptHtml.Render(order), "text/html; charset=utf-8");
+            return Content(OrderReceiptHtml.Render(order, db.UnmatchedPayments(id, customer.Id)), "text/html; charset=utf-8");
         }
 
         return Ok(new
         {
             order,
             afterSales = db.AfterSalesCases(customer.Id, id),
+            unmatchedPayments = db.UnmatchedPayments(id, customer.Id),
             policy = AfterSalesPolicy.Description,
             events = Array.Empty<object>(),
             store = new { name = "Store Mini Mart", address = "TP. Hồ Chí Minh", demo = false }

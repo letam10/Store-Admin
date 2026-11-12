@@ -43,7 +43,7 @@ public sealed partial class StoreDb
         {
             if (proof.ReceivedConfirmed != true) throw new InvalidOperationException("PAYMENT_CONFIRMATION_REQUIRED");
             if (reference.Length is < 3 or > 100) throw new InvalidOperationException("PAYMENT_REFERENCE_REQUIRED");
-            if (!DateTimeOffset.TryParse(proof.ReceivedAt, out received) || received > now.AddMinutes(1) || received < created)
+            if (!DateTimeOffset.TryParse(proof.ReceivedAt, out received) || received > now.AddMinutes(1) || PaymentTime.BeforeRecordedSecond(received, created))
                 throw new InvalidOperationException("INVALID_PAYMENT_TIME");
             if (!expires.HasValue || received > expires)
                 throw new InvalidOperationException("PAYMENT_SESSION_EXPIRED");
@@ -58,7 +58,7 @@ public sealed partial class StoreDb
             transaction.Commit();
             return;
         }
-        if (state == "refunded_unmatched" || (method != "bank_transfer" && state != "pending"))
+        if (state is "refunded_unmatched" or "unmatched_received" || (method != "bank_transfer" && state != "pending"))
             throw new InvalidOperationException("ACTION_NOT_ALLOWED");
         points = LoyaltyPolicy.AwardPoints(goods, tier);
         if (method == "bank_transfer")
@@ -67,6 +67,7 @@ public sealed partial class StoreDb
                 INSERT INTO bank_payment_receipts(reference_hash,order_id,reference,amount,received_at)
                 SELECT @hash,@id,@reference,@amount,@received
                 WHERE NOT EXISTS(SELECT 1 FROM bank_payment_receipts WHERE reference_hash=@hash OR order_id=@id)
+                  AND NOT EXISTS(SELECT 1 FROM after_sales_refunds WHERE reference_hash=@hash)
                 """, ("@hash", Tokens.Sha256(reference)), ("@id", id), ("@reference", reference), ("@amount", total), ("@received", received));
             if (receipt.ExecuteNonQuery() != 1) throw new InvalidOperationException("PAYMENT_REFERENCE_USED");
         }

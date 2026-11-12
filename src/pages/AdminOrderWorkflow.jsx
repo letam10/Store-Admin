@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
 import './AdminCommerce.css'
+import AdminUnmatchedPayments from './AdminUnmatchedPayments'
 
 const money = value => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(value || 0)
 const date = value => value ? new Date(value).toLocaleString('vi-VN') : 'Chưa hẹn'
 const mailStates = { sent: 'Đã gửi', queued: 'Đang chờ gửi / thử lại', not_sent: 'Chưa gửi' }
-const statuses = { expired: 'Hết hạn QR', needs_review: 'Cần đối soát riêng', reported: 'Khách báo đã chuyển', pending: 'Chờ thanh toán', paid: 'Đã thanh toán', completed: 'Đã nhận hàng', cancelled: 'Đã hủy', refunded: 'Đã hoàn tiền' }
+const statuses = { unmatched_received: 'Đã nhận khoản cần hoàn', refunded_unmatched: 'Đã hoàn khoản chuyển không khớp', expired: 'Hết hạn QR', needs_review: 'Cần đối soát riêng', reported: 'Khách báo đã chuyển', pending: 'Chờ thanh toán', paid: 'Đã thanh toán', completed: 'Đã nhận hàng', cancelled: 'Đã hủy', refunded: 'Đã hoàn tiền' }
 const delivery = { processing: 'Đang chuẩn bị', ready: 'Sẵn sàng nhận', shipped: 'Đang giao', delivered: 'Đã giao / nhận', returned: 'Đã nhận hàng trả', cancelled: 'Đã dừng giao' }
 
 function useData(path) {
@@ -47,7 +48,7 @@ export function AdminOrders({ csrfToken }) {
       <p>Email biên nhận khách: {mailStates[order.invoiceEmailStatus] || 'Chưa gửi'} · Thông báo admin: {mailStates[order.adminEmailStatus] || 'Chưa gửi'}</p>
       <ul>{order.items.map(item => <li key={item.id}>{item.name} × {item.quantity} — {money(item.price * item.quantity)}</li>)}</ul>
       <a href={'/api/admin/orders/' + order.id + '/receipt.html'} target="_blank" rel="noopener noreferrer">Mở biên nhận / in PDF ↗</a>
-      {order.paymentState && !['paid','refunded_unmatched'].includes(order.paymentState) && <form onSubmit={event => { event.preventDefault(); act('/paid', { reference, receivedAmount: Number(receivedAmount), receivedAt: receivedAt ? new Date(receivedAt).toISOString() : null, counterConfirmed: confirmed, receivedConfirmed: confirmed }) }}><h4>{order.paymentMethod === 'cash' ? 'Xác nhận thu tiền trực tiếp tại quầy' : order.paymentMethod === 'cod' ? 'Xác nhận tiền đã thu khi giao' : 'Đối soát chuyển khoản'}</h4>
+      {order.paymentState && !['paid','refunded_unmatched','unmatched_received'].includes(order.paymentState) && <form onSubmit={event => { event.preventDefault(); act('/paid', { reference, receivedAmount: Number(receivedAmount), receivedAt: receivedAt ? new Date(receivedAt).toISOString() : null, counterConfirmed: confirmed, receivedConfirmed: confirmed }) }}><h4>{order.paymentMethod === 'cash' ? 'Xác nhận thu tiền trực tiếp tại quầy' : order.paymentMethod === 'cod' ? 'Xác nhận tiền đã thu khi giao' : 'Đối soát chuyển khoản'}</h4>
         {order.paymentMethod === 'bank_transfer' && <label>Mã giao dịch đã đối soát<input value={reference} onChange={event => setReference(event.target.value)} minLength="3" maxLength="100" required /></label>}
         <label>Số tiền thực nhận (đ)<input required type="number" min="0" step="1" value={receivedAmount} onChange={event => setReceivedAmount(event.target.value)} /></label>
         {order.paymentMethod === 'bank_transfer' && <label>Thời gian tiền vào ngân hàng<input required type="datetime-local" step="1" value={receivedAt} onChange={event => setReceivedAt(event.target.value)} /></label>}
@@ -55,6 +56,7 @@ export function AdminOrders({ csrfToken }) {
         {order.paymentReportedReference && <p>Khách khai mã: <code>{order.paymentReportedReference}</code> — đối chiếu sao kê trước khi xác nhận.</p>}
         <label className="admin-confirm-check"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} required />Tôi xác nhận đã nhận đủ {money(order.total)}.</label><button type="submit" disabled={busy || !confirmed}>{busy ? 'Đang xác nhận…' : 'Xác nhận đã thu tiền'}</button>
       </form>}
+      <AdminUnmatchedPayments key={order.id} order={order} csrfToken={csrfToken} onChanged={reload} />
       {['pending','paid'].includes(order.status) && <div className="admin-order-actions">{Object.entries(delivery).filter(([key]) => ['ready','shipped','delivered'].includes(key) && Object.keys(delivery).indexOf(key) > Object.keys(delivery).indexOf(order.deliveryStatus) && (key !== 'shipped' || (order.fulfillment === 'delivery' && (order.status === 'paid' || order.paymentMethod === 'cod'))) && (key !== 'delivered' || order.status === 'paid')).map(([key, label]) => <button type="button" key={key} disabled={busy} onClick={() => act('/fulfillment', { status: key }, 'PATCH')}>{label}</button>)}</div>}
     </section>}
     <details className="admin-module-card"><summary>Cấu hình ngân hàng nhận tiền</summary><AdminPaymentSettings csrfToken={csrfToken} /></details>

@@ -46,21 +46,22 @@ public sealed partial class StoreDb
         if (proof.CounterConfirmed != true) throw new InvalidOperationException("PAYMENT_CONFIRMATION_REQUIRED");
         var reference = (proof.Reference ?? "").Trim().ToUpperInvariant();
         if (reference.Length is < 3 or > 100) throw new InvalidOperationException("PAYMENT_REFERENCE_REQUIRED");
-        if (!DateTimeOffset.TryParse(proof.ReceivedAt, out var received) || received < item.CreatedAt || received > DateTimeOffset.UtcNow.AddMinutes(1))
+        if (!DateTimeOffset.TryParse(proof.ReceivedAt, out var received) || PaymentTime.BeforeRecordedSecond(received, item.CreatedAt) || received > DateTimeOffset.UtcNow.AddMinutes(1))
             throw new InvalidOperationException("INVALID_PAYMENT_TIME");
         if (order.Method == "bank_transfer")
         {
             var periods = item.FeePaymentPeriods;
             if (periods.Count == 0 && item.FeePaymentCreatedAt.HasValue && item.FeePaymentExpiresAt.HasValue)
                 periods = [new(item.FeePaymentCreatedAt.Value, item.FeePaymentExpiresAt.Value)];
-            var inWindow = periods.Any(period => received >= period.CreatedAt && received <= period.ExpiresAt);
-            if (!inWindow && (periods.Count == 0 || received < periods[0].CreatedAt || proof.AcceptLatePayment != true || (proof.Note ?? "").Trim().Length < 5))
+            var inWindow = periods.Any(period => !PaymentTime.BeforeRecordedSecond(received, period.CreatedAt) && received <= period.ExpiresAt);
+            if (!inWindow && (periods.Count == 0 || PaymentTime.BeforeRecordedSecond(received, periods[0].CreatedAt) || proof.AcceptLatePayment != true || (proof.Note ?? "").Trim().Length < 5))
                 throw new InvalidOperationException("PAYMENT_SESSION_EXPIRED");
         }
         using var receipt = CheckoutCommand(connection, transaction, """
             INSERT INTO bank_payment_receipts(reference_hash,order_id,reference,amount,received_at)
             SELECT @hash,@id,@reference,@amount,@received WHERE NOT EXISTS
               (SELECT 1 FROM bank_payment_receipts WHERE reference_hash=@hash OR order_id=@id)
+              AND NOT EXISTS(SELECT 1 FROM after_sales_refunds WHERE reference_hash=@hash)
             """, ("@hash", Tokens.Sha256(reference)), ("@id", item.Id), ("@reference", reference),
             ("@amount", item.Quote.AdditionalDue), ("@received", received));
         if (receipt.ExecuteNonQuery() != 1) throw new InvalidOperationException("PAYMENT_REFERENCE_USED");
@@ -83,7 +84,7 @@ public sealed partial class StoreDb
             if (proof.RefundAmount != amount) throw new InvalidOperationException("INVALID_REFUND_AMOUNT");
             var reference = (proof.RefundReference ?? "").Trim().ToUpperInvariant();
             if (reference.Length is < 3 or > 100) throw new InvalidOperationException("REFUND_REFERENCE_REQUIRED");
-            if (!DateTimeOffset.TryParse(proof.RefundedAt, out var refunded) || refunded < item.CreatedAt
+            if (!DateTimeOffset.TryParse(proof.RefundedAt, out var refunded) || PaymentTime.BeforeRecordedSecond(refunded, item.CreatedAt)
                 || refunded > DateTimeOffset.UtcNow.AddMinutes(1)) throw new InvalidOperationException("INVALID_REFUND_TIME");
             using var receipt = CheckoutCommand(connection, transaction, """
                 INSERT INTO after_sales_refunds(case_id,reference_hash,reference,amount,refunded_at)

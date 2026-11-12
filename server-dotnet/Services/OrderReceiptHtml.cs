@@ -1,12 +1,13 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using StoreApi.Models;
 
 namespace StoreApi.Services;
 
 public static class OrderReceiptHtml
 {
-    public static string Render(object order)
+    public static string Render(object order, IReadOnlyList<UnmatchedPayment>? unmatched = null)
     {
         var data = JsonSerializer.SerializeToElement(order);
         static string Text(JsonElement element, string name) => element.TryGetProperty(name, out var value) ? value.ToString() : "";
@@ -17,7 +18,15 @@ public static class OrderReceiptHtml
             ? time.ToOffset(TimeSpan.FromHours(7)).ToString("dd/MM/yyyy HH:mm:ss") : value;
         var status = Text(data, "status");
         var paid = status is "paid" or "completed" or "delivered" or "refunded";
-        var title = paid ? "Biên nhận thanh toán" : "Thông tin yêu cầu đặt hàng";
+        var title = paid ? "Biên nhận thanh toán" : unmatched is { Count: > 0 } ? "Phiếu đối soát khoản chuyển không khớp" : "Thông tin yêu cầu đặt hàng";
+        var unmatchedSection = unmatched is { Count: > 0 }
+            ? "<h2>Khoản chuyển đối soát riêng</h2><p>Các khoản này không cộng vào doanh thu hoặc giá trị đơn đã thanh toán.</p>" +
+              "<table><thead><tr><th>Mã nhận / thời điểm</th><th>Số tiền nhận</th><th>Hoàn tiền</th></tr></thead><tbody>" +
+              string.Join("", unmatched.Select(item => "<tr><td>" + Escape(item.Reference) + "<br>" + Escape(LocalTime(item.ReceivedAt.ToString("O"))) +
+                  "<br>" + Escape(item.Reason) + "</td><td>" + Money(item.Amount) + "</td><td>" +
+                  (item.RefundedAt.HasValue ? "Đã hoàn đủ " + Money(item.Amount) + "<br>" + Escape(item.RefundReference ?? "") + "<br>" + Escape(LocalTime(item.RefundedAt.Value.ToString("O"))) : "Chờ hoàn tiền") + "</td></tr>")) +
+              "</tbody></table><p class='total'>Còn cần hoàn riêng: " + Money(unmatched.Where(item => !item.RefundedAt.HasValue).Sum(item => item.Amount)) + "</p>"
+            : "";
         var items = data.TryGetProperty("items", out var array) ? array.EnumerateArray().Select(item =>
             $"<tr><td>{Escape(Text(item, "name"))}</td><td>{Number(item, "quantity")}</td><td>{Money(Number(item, "price"))}</td><td>{Money(Number(item, "price") * Number(item, "quantity"))}</td></tr>") : [];
         var statusLabel = status switch { "paid" => "Đã thanh toán", "completed" or "delivered" => "Đã nhận hàng", "refunded" => "Đã hoàn tiền", "cancelled" => "Đã hủy / hết hạn", _ => "Chưa xác nhận thanh toán" };
@@ -34,7 +43,8 @@ public static class OrderReceiptHtml
             <p>Khoản bù / phí sau mua đã thu: {{{Money(Number(data, "extraPaid"))}}}</p>
             <p>Hoàn tiền đã ghi nhận: {{{Money(Number(data, "refundAmount"))}}}</p>
             {{{(paid ? "<p class='total'>Số tiền thực giữ sau thu / hoàn: " + Money(Number(data, "total") + Number(data, "extraPaid") - Number(data, "refundAmount")) + "</p>" : "")}}}
-            <p>{{{(paid ? "Biên nhận phản ánh trạng thái đã được cửa hàng ghi nhận." : "Đây là yêu cầu đặt hàng, chưa xác nhận cửa hàng đã nhận tiền.")}}}</p></body></html>
+            {{{unmatchedSection}}}
+            <p>{{{(paid ? "Biên nhận phản ánh trạng thái đã được cửa hàng ghi nhận." : unmatched is { Count: > 0 } ? "Đơn chưa được ghi nhận thành mua hàng. Các khoản tiền thực nhận và hoàn riêng được đối soát ở bảng trên." : "Đây là yêu cầu đặt hàng, chưa xác nhận cửa hàng đã nhận tiền.")}}}</p></body></html>
             """;
     }
 }

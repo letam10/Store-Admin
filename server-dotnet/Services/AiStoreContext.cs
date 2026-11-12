@@ -41,6 +41,11 @@ public static class AiStoreContext
         var online = db.OnlineSupportStaff();
         var now = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7));
         var query = Normalize(message);
+        var nextMonthOnly = (query.Contains("thang sau") || query.Contains("thang sao"))
+            && !query.Contains("thang nay") && !query.Contains("hien tai");
+        var stockQuestion = query.Contains("het hang") || query.Contains("het kho");
+        var namedProduct = catalog.Where(p => query.Contains(Normalize(p.Name), StringComparison.Ordinal))
+            .OrderByDescending(p => p.Name.Length).FirstOrDefault();
         var categories = catalog.Select(p => p.Category).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var selectedCategory = categories.OrderByDescending(c => c.Length)
             .FirstOrDefault(c => query.Contains(Normalize(c), StringComparison.Ordinal));
@@ -88,7 +93,8 @@ public static class AiStoreContext
             var terms = Regex.Matches(query, @"[a-z0-9]+").Select(m => m.Value).Where(t => t.Length > 1 && !ignored.Contains(t)).Distinct().ToArray();
             var scored = matches.Select(p => new { Item = p, Score = terms.Count(t => Regex.IsMatch(Normalize(p.Name + " " + p.Category), @"\b" + Regex.Escape(t) + @"\b")) }).ToArray();
             if (scored.Any(p => p.Score > 0) && selectedCategory is null && !onSale)
-                matches = scored.Where(p => p.Score > 0).OrderByDescending(p => p.Score).ThenByDescending(p => p.Item.StockCount > 0).Select(p => p.Item);
+                matches = scored.Where(p => p.Score > 0).OrderByDescending(p => p.Item.Id == namedProduct?.Id)
+                    .ThenByDescending(p => p.Score).ThenByDescending(p => p.Item.StockCount > 0).Select(p => p.Item);
             else if (onSale) matches = matches.OrderByDescending(p => p.DiscountPercent).ThenBy(SalePrice);
             else matches = matches.OrderByDescending(p => p.StockCount > 0).ThenBy(p => p.Id);
         }
@@ -113,8 +119,11 @@ public static class AiStoreContext
                 minimum = catalog.OrderBy(SalePrice).Take(1).Select(Product), maximum = catalog.OrderByDescending(SalePrice).Take(1).Select(Product),
                 query = new { selectedCategory, onSale, cheapest, expensive, similar, requestedCount = count,
                     matchingCount = matching.Length, needsProductName = similar && anchor is null },
-                referenceProduct = anchor is null ? null : Product(anchor), products = selected.Select(Product),
-                restockSchedule = (string?)null
+                referenceProduct = anchor is null ? null : Product(anchor),
+                products = stockQuestion && namedProduct is null ? [] : selected.Select(Product),
+                restockSchedule = (string?)null,
+                stockPolicy = new { checkoutRequiresAvailableStock = true, reserveOutOfStockSupported = false,
+                    similarProductSearchAvailable = true, restockInquiryPage = "/contact", restockDateGuaranteed = false }
             },
             publicVouchers = new { activeCount = vouchers.Count, items = vouchers, scope = "Mã công khai còn hạn, không gồm mã riêng của khách" },
             promotions = new { month = now.ToString("MM/yyyy"),
@@ -141,7 +150,7 @@ public static class AiStoreContext
         // Chỉ đưa nhóm dữ kiện liên quan vào lượt hỏi; không bắt model phân tích cả cửa hàng khi chỉ hỏi voucher/ngày giờ.
         bool Has(params string[] words) => words.Any(query.Contains);
         var fields = new HashSet<string> { "observedAt", "today", "timeZone", "currency", "assistant" };
-        if (Has("san pham", "hang hoa", "mat hang", "gia", "tuong tu", "het hang", "dien tu", "laptop") || selectedCategory is not null)
+        if (Has("san pham", "hang hoa", "mat hang", "gia", "tuong tu", "het hang", "dien tu", "laptop") || selectedCategory is not null || namedProduct is not null)
             fields.Add("catalog");
         if (Has("voucher", "ma giam", "uu dai", "khuyen mai")) fields.Add("publicVouchers");
         if (Has("uu dai", "khuyen mai", "thang")) fields.Add("promotions");
@@ -154,6 +163,16 @@ public static class AiStoreContext
         if (!fields.Contains("catalog")) sources.RemoveRange(1, sources.Count - 1);
         var snapshot = JsonSerializer.SerializeToElement(facts, JsonOptions);
         var relevant = snapshot.EnumerateObject().Where(p => fields.Contains(p.Name)).ToDictionary(p => p.Name, p => p.Value);
+        if (nextMonthOnly)
+        {
+            // Chương trình tương lai chưa công bố khác với số ưu đãi đang hoạt động hôm nay.
+            relevant["promotions"] = JsonSerializer.SerializeToElement(new
+            {
+                requestedMonth = now.AddMonths(1).ToString("MM/yyyy"), publishedCampaigns = (object?)null,
+                publishedVoucherCodes = (object?)null, sourceStatus = "Chưa có lịch ưu đãi được công bố cho tháng được hỏi"
+            }, JsonOptions);
+            relevant.Remove("publicVouchers");
+        }
         return new(JsonSerializer.Serialize(relevant, JsonOptions), sources, report);
     }
 }

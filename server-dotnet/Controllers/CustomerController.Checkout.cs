@@ -88,7 +88,8 @@ public sealed partial class CustomerController
         return new
         {
             sessionId = id, order, status = intent.State, intent.ExpiresAt, canPay, serverTime = DateTimeOffset.UtcNow,
-            payment = canPay ? BankPayment.Info(intent.Bank!, id, total) : null
+            payment = canPay ? BankPayment.Info(intent.Bank!, id, total) : null,
+            unmatchedPayments = db.UnmatchedPayments(id, customerId)
         };
     }
 

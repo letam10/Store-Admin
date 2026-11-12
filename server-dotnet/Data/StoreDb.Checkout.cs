@@ -217,7 +217,8 @@ public sealed partial class StoreDb
         using var command = CheckoutCommand(connection, transaction, """
             UPDATE checkout_intents SET state=CASE WHEN state IN ('expired','cancelled','needs_review') THEN 'needs_review' ELSE 'reported' END,
               report_reference=@reference,reported_at=COALESCE(reported_at,SYSDATETIMEOFFSET())
-            WHERE order_id=@id AND customer_id=@customer AND bank_json IS NOT NULL AND state NOT IN ('paid','refunded_unmatched')
+            WHERE order_id=@id AND customer_id=@customer AND bank_json IS NOT NULL
+              AND state IN ('pending','reported','expired','cancelled','needs_review')
             """, ("@reference", reference), ("@id", id), ("@customer", customerId));
         if (command.ExecuteNonQuery() == 0) throw new InvalidOperationException("ACTION_NOT_ALLOWED");
         transaction.Commit();

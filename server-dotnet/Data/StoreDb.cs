@@ -93,6 +93,7 @@ public sealed partial class StoreDb
             EnsureCustomerTables();
             EnsureCheckoutTables();
             EnsureAfterSalesTables();
+            EnsureUnmatchedPaymentTables();
             return TryCheckHealth();
         }
         catch (Exception ex)
@@ -1154,7 +1155,8 @@ public sealed partial class StoreDb
           o.shipping_fee,o.total,o.tier,o.status,o.payment_method,o.scheduled_at,o.created_at,o.paid_at,c.username,
           o.delivery_status,o.refund_amount,i.state AS payment_state,i.expires_at,i.report_reference,i.reported_at,
           i.payment_reference,i.received_at,o.invoice_email_sent_at,nc.status AS customer_mail_status,na.status AS admin_mail_status,
-          o.extra_paid,o.delivered_at,COALESCE(o.current_items_json,o.items_json),COALESCE(o.current_goods_total,o.goods_total)
+          o.extra_paid,o.delivered_at,COALESCE(o.current_items_json,o.items_json),COALESCE(o.current_goods_total,o.goods_total),
+          COALESCE(um.received,0),COALESCE(um.refunded,0)
         FROM customer_orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN checkout_intents i ON i.order_id=o.id
         LEFT JOIN notification_outbox nc ON nc.job_key='invoice:customer:'+o.id
         OUTER APPLY (
@@ -1162,6 +1164,10 @@ public sealed partial class StoreDb
           FROM notification_outbox WHERE kind='invoice.admin' AND status IN ('pending','sent')
             AND (job_key='invoice:admin:'+o.id OR job_key LIKE 'invoice:admin:'+o.id+':%')
         ) na
+        OUTER APPLY (
+          SELECT SUM(amount) AS received,SUM(CASE WHEN refunded_at IS NOT NULL THEN amount ELSE 0 END) AS refunded
+          FROM checkout_unmatched_payments WHERE order_id=o.id
+        ) um
         """;
 
     public object? FindCustomerOrder(string orderId, long? customerId = null)
@@ -1193,7 +1199,7 @@ public sealed partial class StoreDb
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = OrderReadSql + """
-             WHERE o.customer_id=@id AND (i.state IN ('pending','reported','needs_review')
+             WHERE o.customer_id=@id AND (i.state IN ('pending','reported','needs_review','unmatched_received','refunded_unmatched')
                OR (i.state IN ('expired','cancelled') AND o.payment_method='bank_transfer'
                    AND TRY_CONVERT(datetimeoffset,o.created_at)>DATEADD(day,-1,SYSDATETIMEOFFSET())))
              ORDER BY CASE WHEN i.state IN ('reported','needs_review') THEN 0 WHEN i.state='pending' THEN 1 ELSE 2 END,o.created_at DESC
@@ -1222,6 +1228,8 @@ public sealed partial class StoreDb
             username = S(18), extraPaid = reader.GetInt64(30), refundAmount = Convert.ToInt64(reader.GetValue(20)), paymentState = S(21),
             deliveredAt = reader.IsDBNull(31) ? (DateTimeOffset?)null : reader.GetDateTimeOffset(31),
             currentItems = JsonSerializer.Deserialize<List<CheckoutLine>>(S(32), CheckoutJson), currentGoodsTotal = Convert.ToInt64(reader.GetValue(33)),
+            unmatchedReceived = reader.GetInt64(34), unmatchedRefunded = reader.GetInt64(35),
+            unmatchedOutstanding = reader.GetInt64(34) - reader.GetInt64(35),
             expiresAt = reader.IsDBNull(22) ? (DateTimeOffset?)null : reader.GetDateTimeOffset(22),
             paymentReportedReference = S(23), paymentReportedAt = reader.IsDBNull(24) ? (DateTimeOffset?)null : reader.GetDateTimeOffset(24),
             paymentReference = S(25), receivedAt = reader.IsDBNull(26) ? (DateTimeOffset?)null : reader.GetDateTimeOffset(26),
