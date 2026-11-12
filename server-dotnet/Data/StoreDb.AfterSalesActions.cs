@@ -66,7 +66,7 @@ public sealed partial class StoreDb
     public object AdminAfterSalesAction(AdminActor actor, string id, AfterSalesActionRequest request)
     {
         var action = (request.Action ?? "").Trim().ToLowerInvariant();
-        if (actor.Role != "admin" && (actor.Role != "staff" || action is not ("approve" or "reject" or "receive_return" or "ship_exchange" or "complete_exchange")))
+        if (actor.Role is not ("admin" or "staff"))
             throw new InvalidOperationException("FORBIDDEN");
         if ((request.Note ?? "").Length > 1000) throw new InvalidOperationException("INVALID_AFTER_SALES");
         using var connection = Open();
@@ -79,7 +79,6 @@ public sealed partial class StoreDb
         var now = DateTimeOffset.UtcNow;
         if (action == "approve" && item.Status == "pending")
         {
-            if (actor.Role != "admin" && item.Kind == "cancel") throw new InvalidOperationException("FORBIDDEN");
             // Quyền trả hàng tính tại lúc khách gửi, không mất quyền vì cửa hàng xử lý chậm.
             AfterSalesPolicy.Validate(item.Kind, order.Status, order.Delivery, order.DeliveredAt, order.Schedule,
                 item.ScheduledAt, item.Kind is "return" or "exchange" or "merchant_fault" ? item.CreatedAt : now);
@@ -106,7 +105,6 @@ public sealed partial class StoreDb
         else if (action == "receive_return" && item.Status == "awaiting_return")
         {
             if (request.Received != true) throw new InvalidOperationException("RETURN_RECEIVED_REQUIRED");
-            if (request.Restock == true && actor.Role != "admin") throw new InvalidOperationException("FORBIDDEN");
             item.GoodsReceivedAt = now;
             if (request.Restock == true)
             {
@@ -118,12 +116,10 @@ public sealed partial class StoreDb
         }
         else if (action == "fee_paid" && item.Status == "awaiting_payment")
         {
-            if (actor.Role != "admin") throw new InvalidOperationException("FORBIDDEN");
             ConfirmAfterSalesFee(connection, transaction, item, order, request);
         }
         else if (action == "complete_refund" && item.Status == "awaiting_refund")
         {
-            if (actor.Role != "admin") throw new InvalidOperationException("FORBIDDEN");
             ConfirmAfterSalesRefund(connection, transaction, item, order, request);
         }
         else if (action == "ship_exchange" && item.Status == "awaiting_exchange" && order.Fulfillment == "delivery")

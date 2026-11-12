@@ -17,6 +17,7 @@ import { adminModules } from '../data/adminModuleData'
 import { normalizeSearch } from '../services/storefrontState'
 import { DEFAULT_THEME, THEME_MODES, normalizeTheme, themeVariables } from '../../shared/theme.js'
 import DropdownMenu from '../components/ui/DropdownMenu'
+import OperationalExportButton from '../components/ui/OperationalExportButton'
 import './Admin.css'
 import './AdminPolish.css'
 import './AdminTheme.css'
@@ -498,6 +499,7 @@ export default function Admin() {
           </div>
         )}
         {pageError && <p className="admin-error" role="alert">{pageError}</p>}
+        <OperationalExportButton module={activeModule} role={session.role} />
         {activeModule !== 'ai-local' && <AdminModule role={session.role} module={activeModule} csrfToken={session.csrfToken} onNavigate={setActiveModule} language={language} />}
         {activeModule === 'ai-local' && <>
           <section className="admin-meta" aria-label="Cấu hình AI">

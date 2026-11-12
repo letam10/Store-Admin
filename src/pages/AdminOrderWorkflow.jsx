@@ -20,7 +20,7 @@ function useData(path) {
   return { data, error, reload }
 }
 
-export function AdminOrders({ csrfToken }) {
+export function AdminOrders({ csrfToken, role = 'admin' }) {
   const { data, error, reload } = useData('/api/admin/customer-orders')
   const [selected, setSelected] = useState(null), [reference, setReference] = useState(''), [confirmed, setConfirmed] = useState(false)
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [problem, setProblem] = useState('')
@@ -28,6 +28,11 @@ export function AdminOrders({ csrfToken }) {
   const [receivedAmount, setReceivedAmount] = useState('')
   const gate = useRef(false)
   const order = data?.orders.find(item => item.id === selected)
+  const nextDelivery = order?.deliveryStatus === 'processing' ? ['ready']
+    : order?.deliveryStatus === 'ready' ? order.fulfillment === 'delivery'
+      ? (order.status === 'paid' || order.paymentMethod === 'cod' ? ['shipped'] : [])
+      : (order.status === 'paid' ? ['delivered'] : [])
+      : order?.deliveryStatus === 'shipped' && order.status === 'paid' ? ['delivered'] : []
   async function act(suffix, body, method = 'POST') {
     if (gate.current || !order) return
     gate.current = true; setBusy(true); setProblem(''); setMessage('')
@@ -57,9 +62,9 @@ export function AdminOrders({ csrfToken }) {
         <label className="admin-confirm-check"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} required />Tôi xác nhận đã nhận đủ {money(order.total)}.</label><button type="submit" disabled={busy || !confirmed}>{busy ? 'Đang xác nhận…' : 'Xác nhận đã thu tiền'}</button>
       </form>}
       <AdminUnmatchedPayments key={order.id} order={order} csrfToken={csrfToken} onChanged={reload} />
-      {['pending','paid'].includes(order.status) && <div className="admin-order-actions">{Object.entries(delivery).filter(([key]) => ['ready','shipped','delivered'].includes(key) && Object.keys(delivery).indexOf(key) > Object.keys(delivery).indexOf(order.deliveryStatus) && (key !== 'shipped' || (order.fulfillment === 'delivery' && (order.status === 'paid' || order.paymentMethod === 'cod'))) && (key !== 'delivered' || order.status === 'paid')).map(([key, label]) => <button type="button" key={key} disabled={busy} onClick={() => act('/fulfillment', { status: key }, 'PATCH')}>{label}</button>)}</div>}
+      {['pending','paid'].includes(order.status) && <div className="admin-order-actions">{nextDelivery.map(key => <button type="button" key={key} disabled={busy} onClick={() => act('/fulfillment', { status: key }, 'PATCH')}>{delivery[key]}</button>)}</div>}
     </section>}
-    <details className="admin-module-card"><summary>Cấu hình ngân hàng nhận tiền</summary><AdminPaymentSettings csrfToken={csrfToken} /></details>
+    {role === 'admin' && <details className="admin-module-card"><summary>Cấu hình ngân hàng nhận tiền</summary><AdminPaymentSettings csrfToken={csrfToken} /></details>}
   </section>
 }
 

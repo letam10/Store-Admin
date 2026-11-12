@@ -23,6 +23,15 @@ public static class ReportExport
 
     public static byte[] Excel(SalesReport report)
     {
+        var daily = new List<object[]> { new object[] { "Ngày", "Đơn đã thanh toán", "Doanh thu gộp (VND)", "Hoàn tiền (VND)", "Doanh thu ròng (VND)" } };
+        daily.AddRange(report.RevenueByDay.Select(day => new object[] { day.Date, day.Orders, day.GrossRevenue, day.Refunds, day.Revenue }));
+        return Workbook([("Tổng hợp", Summary(report), [70, 100]), ("Theo ngày", daily, [18, 22, 28, 28, 28])]);
+    }
+
+    public static byte[] ExcelTable(string name, List<object[]> rows, int[] widths) => Workbook([(name, rows, widths)]);
+
+    private static byte[] Workbook(IReadOnlyList<(string Name, List<object[]> Rows, int[] Widths)> sheets)
+    {
         using var buffer = new MemoryStream();
         using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, true))
         {
@@ -34,20 +43,18 @@ public static class ReportExport
                 new XElement(content + "Default", new XAttribute("Extension", "xml"), new XAttribute("ContentType", "application/xml")),
                 new XElement(content + "Override", new XAttribute("PartName", "/xl/workbook.xml"), new XAttribute("ContentType", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml")),
                 new XElement(content + "Override", new XAttribute("PartName", "/xl/styles.xml"), new XAttribute("ContentType", "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml")),
-                Enumerable.Range(1, 2).Select(index => new XElement(content + "Override", new XAttribute("PartName", $"/xl/worksheets/sheet{index}.xml"), new XAttribute("ContentType", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml")))));
+                Enumerable.Range(1, sheets.Count).Select(index => new XElement(content + "Override", new XAttribute("PartName", $"/xl/worksheets/sheet{index}.xml"), new XAttribute("ContentType", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml")))));
             Write(archive, "_rels/.rels", new XElement(relationships + "Relationships",
                 new XElement(relationships + "Relationship", new XAttribute("Id", "rId1"), new XAttribute("Type", office + "/officeDocument"), new XAttribute("Target", "xl/workbook.xml"))));
             Write(archive, "xl/workbook.xml", new XElement(SheetNs + "workbook", new XAttribute(XNamespace.Xmlns + "r", office),
-                new XElement(SheetNs + "sheets", new[] { "Tổng hợp", "Theo ngày" }.Select((name, index) => new XElement(SheetNs + "sheet",
-                    new XAttribute("name", name), new XAttribute("sheetId", index + 1), new XAttribute((XNamespace)office + "id", "rId" + (index + 1)))))));
+                new XElement(SheetNs + "sheets", sheets.Select((sheet, index) => new XElement(SheetNs + "sheet",
+                    new XAttribute("name", sheet.Name), new XAttribute("sheetId", index + 1), new XAttribute((XNamespace)office + "id", "rId" + (index + 1)))))));
             Write(archive, "xl/_rels/workbook.xml.rels", new XElement(relationships + "Relationships",
-                Enumerable.Range(1, 2).Select(index => new XElement(relationships + "Relationship", new XAttribute("Id", "rId" + index), new XAttribute("Type", office + "/worksheet"), new XAttribute("Target", $"worksheets/sheet{index}.xml"))),
-                new XElement(relationships + "Relationship", new XAttribute("Id", "rId3"), new XAttribute("Type", office + "/styles"), new XAttribute("Target", "styles.xml"))));
+                Enumerable.Range(1, sheets.Count).Select(index => new XElement(relationships + "Relationship", new XAttribute("Id", "rId" + index), new XAttribute("Type", office + "/worksheet"), new XAttribute("Target", $"worksheets/sheet{index}.xml"))),
+                new XElement(relationships + "Relationship", new XAttribute("Id", "rId" + (sheets.Count + 1)), new XAttribute("Type", office + "/styles"), new XAttribute("Target", "styles.xml"))));
             Write(archive, "xl/styles.xml", Styles());
-            Write(archive, "xl/worksheets/sheet1.xml", Worksheet(Summary(report), [70, 100]));
-            var daily = new List<object[]> { new object[] { "Ngày", "Đơn đã thanh toán", "Doanh thu gộp (VND)", "Hoàn tiền (VND)", "Doanh thu ròng (VND)" } };
-            daily.AddRange(report.RevenueByDay.Select(day => new object[] { day.Date, day.Orders, day.GrossRevenue, day.Refunds, day.Revenue }));
-            Write(archive, "xl/worksheets/sheet2.xml", Worksheet(daily, [18, 22, 28, 28, 28]));
+            for (var index = 0; index < sheets.Count; index++)
+                Write(archive, $"xl/worksheets/sheet{index + 1}.xml", Worksheet(sheets[index].Rows, sheets[index].Widths));
         }
         return buffer.ToArray();
     }
@@ -62,8 +69,9 @@ public static class ReportExport
     private static XElement Cell(string reference, object value, bool header)
     {
         var numeric = value is int or long or decimal;
+        var fractional = value is decimal number && number != decimal.Truncate(number);
         // Chuỗi luôn là inlineStr, không thể trở thành công thức Excel từ nội dung người dùng.
-        return new(SheetNs + "c", new XAttribute("r", reference), new XAttribute("s", header ? 1 : numeric ? 2 : 0),
+        return new(SheetNs + "c", new XAttribute("r", reference), new XAttribute("s", header ? 1 : numeric && !fractional ? 2 : 0),
             new XAttribute("t", numeric ? "n" : "inlineStr"), numeric
                 ? new XElement(SheetNs + "v", Convert.ToString(value, CultureInfo.InvariantCulture))
                 : new XElement(SheetNs + "is", new XElement(SheetNs + "t", value.ToString())));

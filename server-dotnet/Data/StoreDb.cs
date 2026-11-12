@@ -1345,14 +1345,14 @@ public sealed partial class StoreDb
         return result is null || result is DBNull ? 0 : Convert.ToInt64(result);
     }
 
-    public bool UpdateOffer(string id, int discountPercent, int stockCount)
+    public bool UpdateOffer(string id, int? discountPercent, int? stockCount)
     {
-        if (discountPercent is < 0 or > 90 || stockCount < 0) return false;
+        if ((discountPercent is null && stockCount is null) || discountPercent is < 0 or > 90 || stockCount < 0) return false;
         using var db = Open();
         using var command = db.CreateCommand();
-        command.CommandText = "UPDATE catalog_products SET discount_percent=@discount,stock_count=@stock WHERE id=@id";
-        command.Parameters.AddWithValue("@discount", discountPercent);
-        command.Parameters.AddWithValue("@stock", stockCount);
+        command.CommandText = "UPDATE catalog_products SET discount_percent=COALESCE(@discount,discount_percent),stock_count=COALESCE(@stock,stock_count) WHERE id=@id";
+        command.Parameters.AddWithValue("@discount", (object?)discountPercent ?? DBNull.Value);
+        command.Parameters.AddWithValue("@stock", (object?)stockCount ?? DBNull.Value);
         command.Parameters.AddWithValue("@id", id);
         return command.ExecuteNonQuery() > 0;
     }
@@ -2269,7 +2269,9 @@ public sealed partial class StoreDb
         var now = DateTimeOffset.UtcNow.ToString("O");
         var featuresJson = JsonSerializer.Serialize(features ?? []);
         using var db = Open();
+        using var transaction = db.BeginTransaction();
         using var cmd = db.CreateCommand();
+        cmd.Transaction = transaction;
         cmd.CommandText = """
             INSERT INTO catalog_products
             (id, source, source_id, name, category, price, description, image, features_json, tone, symbol, label, source_url, source_price_cents, source_currency, imported_at, discount_percent, stock_count)
@@ -2292,6 +2294,7 @@ public sealed partial class StoreDb
         cmd.Parameters.AddWithValue("@stock", stockCount);
         cmd.Parameters.AddWithValue("@now", now);
         cmd.ExecuteNonQuery();
+        transaction.Commit();
 
         return new CatalogProduct(id, name, category, price, description, image, features ?? [], tone, symbol, label, 0, stockCount, 0);
     }
@@ -2300,43 +2303,29 @@ public sealed partial class StoreDb
         string id, string? name, string? category, long? price, string? description,
         string? image, string? label, int? stockCount, string? symbol)
     {
-        var existing = GetCatalogProduct(id);
-        if (existing is null) return null;
-
-        var newName = name ?? existing.Name;
-        var newCategory = category ?? existing.Category;
-        var newPrice = price ?? existing.Price;
-        var newDesc = description ?? existing.Description;
-        var newImg = image ?? existing.Image;
-        var newLabel = label ?? existing.Label;
-        var newStock = stockCount ?? existing.StockCount;
-        var newSym = symbol ?? existing.Symbol;
-
-        using var db = Open();
-        using var cmd = db.CreateCommand();
-        cmd.CommandText = """
-            UPDATE catalog_products
-            SET name = @name, category = @category, price = @price, description = @desc,
-                image = @img, label = @label, stock_count = @stock, symbol = @sym
-            WHERE id = @id;
-
-            UPDATE Products
-            SET Name = @name, Price = @price, Category = @category, Description = @desc, Image = @img
-            WHERE Name = @oldName;
-            """;
-        cmd.Parameters.AddWithValue("@id", id);
-        cmd.Parameters.AddWithValue("@name", newName);
-        cmd.Parameters.AddWithValue("@category", newCategory);
-        cmd.Parameters.AddWithValue("@price", newPrice);
-        cmd.Parameters.AddWithValue("@desc", newDesc);
-        cmd.Parameters.AddWithValue("@img", newImg);
-        cmd.Parameters.AddWithValue("@label", newLabel);
-        cmd.Parameters.AddWithValue("@stock", newStock);
-        cmd.Parameters.AddWithValue("@sym", newSym);
-        cmd.Parameters.AddWithValue("@oldName", existing.Name);
-        cmd.ExecuteNonQuery();
-
-        return new CatalogProduct(id, newName, newCategory, newPrice, newDesc, newImg, existing.Features, existing.Tone, newSym, newLabel, existing.DiscountPercent, newStock, existing.ViewCount);
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        LockCheckout(connection, transaction);
+        // PATCH chỉ ghi trường có gửi; sửa mô tả không được ghi đè tồn kho vừa được giữ cho đơn khác.
+        using var command = CheckoutCommand(connection, transaction, """
+            DECLARE @oldName NVARCHAR(500);
+            SELECT @oldName=name FROM catalog_products WHERE id=@id;
+            IF @oldName IS NULL SELECT 0;
+            ELSE
+            BEGIN
+              UPDATE catalog_products SET name=COALESCE(@name,name),category=COALESCE(@category,category),
+                price=COALESCE(@price,price),description=COALESCE(@desc,description),image=COALESCE(@img,image),
+                label=COALESCE(@label,label),stock_count=COALESCE(@stock,stock_count),symbol=COALESCE(@sym,symbol)
+              WHERE id=@id;
+              UPDATE p SET Name=c.name,Price=c.price,Category=c.category,Description=c.description,Image=c.image
+              FROM Products p CROSS JOIN catalog_products c WHERE c.id=@id AND p.Name=@oldName;
+              SELECT 1;
+            END
+            """, ("@id", id), ("@name", name), ("@category", category), ("@price", price), ("@desc", description),
+            ("@img", image), ("@label", label), ("@stock", stockCount), ("@sym", symbol));
+        var updated = Convert.ToInt32(command.ExecuteScalar()) == 1;
+        transaction.Commit();
+        return updated ? GetCatalogProduct(id) : null;
     }
 
     public bool DeleteCatalogProduct(string id)

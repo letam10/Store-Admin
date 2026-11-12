@@ -20,7 +20,7 @@ function CaseActions({ request, role, busy, onAction }) {
   const [confirmed, setConfirmed] = useState(false)
   const [restock, setRestock] = useState(false)
   const [acceptLatePayment, setAcceptLatePayment] = useState(false)
-  const isAdmin = role === 'admin'
+  const canProcess = role === 'admin' || role === 'staff'
   const state = request.status
   const refund = state === 'awaiting_refund'
   const financial = refund || state === 'awaiting_payment'
@@ -34,14 +34,14 @@ function CaseActions({ request, role, busy, onAction }) {
     : state === 'awaiting_payment' ? 'Xác nhận đã thu khoản bù' : shipping ? 'Xác nhận gửi hàng đổi' : 'Xác nhận khách nhận hàng đổi'
   if (request.legacyReviewRequired) return <p role="alert">Yêu cầu cũ cần kiểm tra riêng bảng phí và chứng từ trước khi xử lý.</p>
   if (closed.includes(state) || state === 'awaiting_confirmation') return null
-  if (!isAdmin && (financial || (state === 'pending' && request.kind === 'cancel'))) return <p>Đang chờ quản trị viên xử lý khoản thu / hoàn tiền.</p>
+  if (!canProcess) return null
   function submit(event) {
     event.preventDefault()
     const proof = requiresMoney ? (refund
       ? { refundAmount: Number(amount), refundReference: reference, refundedAt: new Date(occurredAt).toISOString(), refundConfirmed: confirmed }
       : { receivedAmount: Number(amount), reference, receivedAt: new Date(occurredAt).toISOString(), counterConfirmed: confirmed, acceptLatePayment }) : {}
     onAction(action, { note, ...proof, ...(receiving || completing ? { received: confirmed } : {}),
-      ...(receiving && isAdmin ? { restock } : {}), ...(shipping ? { reference } : {}) })
+      ...(receiving && canProcess ? { restock } : {}), ...(shipping ? { reference } : {}) })
   }
   return <form className="admin-after-actions" onSubmit={submit}>
     <fieldset disabled={busy}>
@@ -58,7 +58,7 @@ function CaseActions({ request, role, busy, onAction }) {
       {(requiresMoney || receiving || completing) && <label className="admin-confirm-check"><input type="checkbox" required checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />
         {receiving ? 'Đã nhận và kiểm tra đủ hàng khách trả.' : completing ? 'Khách đã nhận đủ hàng thay thế.' : refund ? 'Đã hoàn tiền thực tế và kiểm tra chứng từ.' : 'Đã nhận tiền thực tế và kiểm tra chứng từ.'}
       </label>}
-      {receiving && isAdmin && <label className="admin-confirm-check"><input type="checkbox" checked={restock} onChange={event => setRestock(event.target.checked)} />Hàng trả đủ điều kiện bán lại, nhập lại tồn kho.</label>}
+      {receiving && canProcess && <label className="admin-confirm-check"><input type="checkbox" checked={restock} onChange={event => setRestock(event.target.checked)} />Hàng trả đủ điều kiện bán lại, nhập lại tồn kho.</label>}
       <div className="admin-order-actions"><button type="submit">{busy ? 'Đang xử lý…' : label}</button>
         {['pending', 'awaiting_return'].includes(state) && <button type="button" disabled={note.trim().length < 5} onClick={() => onAction('reject', { note })}>Từ chối kèm lý do</button>}
       </div>

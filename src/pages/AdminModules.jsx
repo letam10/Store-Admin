@@ -47,15 +47,30 @@ function emptyData(schema) { return Object.fromEntries(schema.fields.map((field)
 
 // Chức năng ProductOfferRow: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 function ProductOfferRow({ product, csrfToken, onSaved, onEdit, onDelete, readOnly }) {
-  const [discountPercent, setDiscountPercent] = useState(product.discountPercent || 0)
-  const [stockCount, setStockCount] = useState(product.stockCount === null || product.stockCount === undefined ? '20' : String(product.stockCount))
+  const [discountDraft, setDiscountPercent] = useState(null)
+  const [stockDraft, setStockCount] = useState(null)
+  const discountPercent = discountDraft ?? product.discountPercent ?? 0
+  const stockCount = stockDraft ?? String(product.stockCount ?? 20)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
   // Chức năng submit: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
   async function submit(event) {
     event.preventDefault(); setError(''); setSaved(false); setSaving(true)
-    try { const offer = { discountPercent: Number(discountPercent), stockCount: stockCount === '' ? 20 : Number(stockCount) }; await apiJson('/api/admin/products/' + encodeURIComponent(product.id) + '/offer', { method: 'PATCH', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(offer) }); onSaved(product.id, offer); setSaved(true) }
+    try {
+      const offer = {}
+      const nextDiscount = Number(discountPercent)
+      const nextStock = stockCount === '' ? 20 : Number(stockCount)
+      if (nextDiscount !== Number(product.discountPercent || 0)) offer.discountPercent = nextDiscount
+      if (nextStock !== Number(product.stockCount ?? 20)) offer.stockCount = nextStock
+      if (Object.keys(offer).length) {
+        const payload = await apiJson('/api/admin/products/' + encodeURIComponent(product.id) + '/offer', { method: 'PATCH', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(offer) })
+        onSaved(product.id, payload.offer)
+        setDiscountPercent(null)
+        setStockCount(null)
+      }
+      setSaved(true)
+    }
     // Nhánh lỗi: chuyển ngoại lệ thành phản hồi an toàn và giữ trạng thái nhất quán.
     catch (failure) { setError(failure.message || 'Không lưu được ưu đãi.') }
     finally { setSaving(false) }
@@ -79,10 +94,10 @@ function ProductEditor({ product, csrfToken, onSaved, onCancel }) {
       if (!Number.isInteger(normalizedPrice) || normalizedPrice < 1) throw new Error('Gia phai la so nguyen duong.')
       // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (!Number.isInteger(normalizedStock) || normalizedStock < 0) throw new Error('Ton kho phai la so nguyen tu 0 tro len.')
-      const payload = await apiJson(product ? '/api/admin/products/' + encodeURIComponent(product.id) : '/api/admin/products', { method: product ? 'PATCH' : 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ ...form, price: normalizedPrice }) })
-      const savedProduct = payload.product
-      await apiJson('/api/admin/products/' + encodeURIComponent(savedProduct.id) + '/offer', { method: 'PATCH', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ discountPercent: Number(savedProduct.discountPercent || 0), stockCount: normalizedStock }) })
-      onSaved({ ...savedProduct, stockCount: normalizedStock })
+      const values = { ...form, price: normalizedPrice, stockCount: normalizedStock }
+      const changes = product ? Object.fromEntries(Object.entries(values).filter(([key, value]) => value !== product[key])) : values
+      const payload = await apiJson(product ? '/api/admin/products/' + encodeURIComponent(product.id) : '/api/admin/products', { method: product ? 'PATCH' : 'POST', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(changes) })
+      onSaved(payload.product)
     }
     // Nhánh lỗi: chuyển ngoại lệ thành phản hồi an toàn và giữ trạng thái nhất quán.
     catch (failure) { setError(failure.message || 'Không lưu được sản phẩm.') }
@@ -281,7 +296,7 @@ export default function AdminModule({ module, csrfToken, onNavigate, language = 
   if (module === 'dashboard') return <Dashboard onNavigate={onNavigate} language={language} />
   if (module === 'statistics') return <AdminStatistics Chart={DashboardChart} />
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-  if (module === 'products') return <ProductsCatalog csrfToken={csrfToken} readOnly={role !== 'admin'} />
+  if (module === 'products') return <ProductsCatalog csrfToken={csrfToken} />
   if (module === 'product-views') return <ProductViews />
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (module === 'appearance') return <AppearanceEditor csrfToken={csrfToken} />
@@ -290,11 +305,11 @@ export default function AdminModule({ module, csrfToken, onNavigate, language = 
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (module === 'reviews') return <AdminReviews csrfToken={csrfToken} />
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-  if (module === 'customer-orders') return <AdminOrders csrfToken={csrfToken} />
+  if (module === 'customer-orders') return <AdminOrders csrfToken={csrfToken} role={role} />
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (module === 'rewards-wheel') return <AdminVouchers csrfToken={csrfToken} />
   if (module === 'returns') return <AdminAfterSales csrfToken={csrfToken} role={role} />
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-  if (crudSchemas[module]) return <CrudModule key={module} module={module} csrfToken={csrfToken} readOnlyDelete={role !== 'admin'} />
+  if (crudSchemas[module]) return <CrudModule key={module} module={module} csrfToken={csrfToken} readOnlyDelete={role !== 'admin' && module !== 'inventory'} />
   return <section className="admin-module-card"><h2>Module chưa có dữ liệu</h2><p>Module này đang chờ cấu hình backend.</p></section>
 }

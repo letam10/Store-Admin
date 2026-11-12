@@ -82,7 +82,7 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Cha
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        if (string.IsNullOrWhiteSpace(request.Name) || request.Price is null or < 0) return BadRequest(new { error = "INVALID_PRODUCT" });
+        if (string.IsNullOrWhiteSpace(request.Name) || request.Price is null || !ValidProductInput(request)) return BadRequest(new { error = "INVALID_PRODUCT" });
 
         var id = string.IsNullOrWhiteSpace(request.Id) ? "manual-" + Guid.NewGuid().ToString("N")[..8] : request.Id.Trim();
         var category = string.IsNullOrWhiteSpace(request.Category) ? "Đồ gia dụng" : request.Category.Trim();
@@ -103,10 +103,16 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Cha
     {
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        if (!ValidProductInput(request)) return BadRequest(new { error = "INVALID_PRODUCT" });
 
         var updated = db.UpdateCatalogProduct(id, request.Name, request.Category, request.Price, request.Description, request.Image, request.Label ?? request.Badge, request.StockCount, request.Symbol);
         return updated is null ? NotFound(new { error = "PRODUCT_NOT_FOUND" }) : Ok(new { product = updated });
     }
+
+    private static bool ValidProductInput(AdminProductRequest request) =>
+        (request.Name is null || !string.IsNullOrWhiteSpace(request.Name))
+        && request.Price is not < 0
+        && request.StockCount is not < 0;
 
     [HttpDelete("products/{id}")]
     public IActionResult DeleteProduct(string id)
@@ -128,7 +134,9 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Cha
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
         if (!db.UpdateOffer(id, request.DiscountPercent, request.StockCount)) return BadRequest(new { error = "INVALID_PRODUCT_OFFER" });
-        return Ok(new { offer = new { discountPercent = request.DiscountPercent, stockCount = request.StockCount } });
+        var product = db.GetCatalogProduct(id);
+        return product is null ? NotFound(new { error = "PRODUCT_NOT_FOUND" })
+            : Ok(new { offer = new { product.DiscountPercent, product.StockCount } });
     }
 
     [HttpGet("appearance")]

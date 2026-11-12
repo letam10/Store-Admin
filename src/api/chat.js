@@ -21,6 +21,8 @@ async function readError(response) {
     UNMATCHED_REASON_REQUIRED: 'Nhập lý do cần hoàn từ 5 đến 1.000 ký tự; khách có thể xem nội dung này.',
     UNMATCHED_PAYMENT_NOT_FOUND: 'Không tìm thấy khoản chuyển cần đối soát của đơn này.',
     BANK_TRANSFER_REQUIRED: 'Chức năng này dành cho khoản chuyển vào phiên thanh toán ngân hàng.',
+    FEATURED_PRODUCT_PROTECTED: 'Sản phẩm nổi bật đang dùng trên trang chủ được bảo vệ khỏi xóa; bạn vẫn có thể sửa thông tin.',
+    EXPORT_MODULE_NOT_FOUND: 'Mục dữ liệu này chưa hỗ trợ xuất file.',
     INVALID_PAYMENT_AMOUNT: 'Số tiền thực nhận chưa khớp giá trị đơn. Cần đối soát hoặc hoàn lại, không xác nhận thành công.',
     INVALID_PAYMENT_TIME: 'Giờ tiền vào ngân hàng phải từ lúc tạo phiên đến hiện tại.',
     PAYMENT_SESSION_EXPIRED: 'Tiền vào sau hạn QR. Cần xử lý hoàn tiền hoặc liên hệ khách, không xác nhận đơn này.',

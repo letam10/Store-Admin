@@ -132,7 +132,7 @@ public static class AiStoreContext
                 availableNowPublicVouchers = vouchers.Count, scheduledMonthlyCampaigns = (object?)null, nextMonthCampaigns = (object?)null },
             support = new { onlineCount = online.Count, people = online, presenceSeconds = StoreDb.PresenceWindowSeconds,
                 contactPage = "/contact", instantReplyGuaranteed = false },
-            payment = new { methods = new[] { "Chuyển khoản VietQR, admin đối soát tiền thực nhận", "Tiền mặt tại cửa hàng khi nhận trực tiếp", "COD khi giao hàng" },
+            payment = new { methods = new[] { "Chuyển khoản VietQR, cửa hàng đối soát tiền thực nhận", "Tiền mặt tại cửa hàng khi nhận trực tiếp", "COD khi giao hàng" },
                 transferExpiryMinutes = 2, automaticBankDetection = false, reportTransferIsNotConfirmation = true,
                 savedQrCannotBlockBankTransferAfterExpiry = true, paidOrdersOnlyInPurchaseHistory = true,
                 zeroDueAfterVouchers = "Đơn 0đ được xác nhận ngay bằng voucher, không cần chuyển tiền hoặc QR",

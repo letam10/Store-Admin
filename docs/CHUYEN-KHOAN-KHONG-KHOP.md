@@ -1,12 +1,12 @@
 # Tiền chuyển không khớp hoặc chuyển trùng
 
-Trong **Đơn thanh toán → Xử lý**, admin có phần **Tiền chuyển không khớp / chuyển trùng**. Dùng khi đã đối chiếu sao kê và biết tiền vào sai số tiền, sau hạn QR, không thể giao hàng hoặc chuyển lặp.
+Trong **Đơn thanh toán → Xử lý**, admin và nhân viên có phần **Tiền chuyển không khớp / chuyển trùng**. Dùng khi đã đối chiếu sao kê và biết tiền vào sai số tiền, sau hạn QR, không thể giao hàng hoặc chuyển lặp.
 
 1. Ghi số tiền thực nhận, mã giao dịch, thời điểm và lý do khách có thể đọc; xác nhận đã đối chiếu sao kê.
 2. Thực hiện hoàn tiền qua ngân hàng theo quy trình của cửa hàng.
 3. Trong từng khoản, nhập đúng số tiền đã hoàn, mã giao dịch hoàn và thời điểm; xác nhận để lưu chứng từ.
 
-Website lưu chứng từ do admin xác nhận; các nút này không thực hiện chuyển tiền qua ngân hàng. Nhân viên không được ghi nhận/hoàn tiền bằng API hoặc giao diện.
+Website lưu chứng từ do người phụ trách xác nhận; các nút này không thực hiện chuyển tiền qua ngân hàng. Theo quyền người dùng chốt 12/11/2026, nhân viên được ghi nhận/hoàn khoản chuyển này với cùng điều kiện chứng từ như admin; cấu hình ngân hàng vẫn chỉ dành cho admin.
 
 Mỗi khoản chuyển được theo dõi riêng, hoàn đầy đủ và không cộng vào doanh thu bán hàng. Khoản chuyển lặp của đơn đã mua không thay đổi điểm, kho hoặc trạng thái đơn gốc. Với đơn chưa được thanh toán thành công, ghi nhận khoản cần hoàn sẽ đóng QR và trả lại kho/voucher giữ chỗ đúng một lần; đơn này vẫn không xuất hiện như một lần mua thành công.
 

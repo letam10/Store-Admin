@@ -150,18 +150,20 @@ test('grouped admin navigation and dashboard shortcut open top-view analytics', 
 })
 
 
-test('staff sees only permitted modules and cannot edit customer credentials or products', async () => {
+test('staff manages products, orders and inventory while customer credentials and management settings stay private', async () => {
   const urls = []
   await mounted(async url => {
     urls.push(url)
     if (url === '/api/admin/session') return json({ ...session('support-agent'), role: 'staff' })
     if (url === '/api/admin/records/support') return json({ records: [] })
+    if (url === '/api/admin/customer-orders') return json({ orders: [] })
+    if (url === '/api/admin/records/inventory') return json({ records: [] })
     if (url === '/api/admin/customers') return json({ customers: [{ id: 1, username: 'Test Customer', email: 'test@example.invalid', points: 0, paidGoodsTotal: 0, spinCredits: 0 }] })
     if (url.startsWith('/api/admin/products')) return json({ products: [{ id: 'test', name: 'Test Product', price: 5000, stockCount: 4 }], total: 1 })
     throw new Error('Forbidden/unexpected URL ' + url)
   }, async ({ click }) => {
     const labels = [...document.querySelectorAll('nav button')].map(button => button.textContent)
-    assert.equal(labels.length, 5)
+    assert.equal(labels.length, 7)
     for (const label of ['Tổng quan', 'Thống kê', 'AI local', 'Nhân viên', 'Voucher']) {
       assert.ok(labels.every(text => !text.includes(label)), label)
     }
@@ -171,8 +173,16 @@ test('staff sees only permitted modules and cannot edit customer credentials or 
     await click('Hàng hóa')
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)) })
     assert.match(document.body.textContent, /Test Product/)
-    assert.doesNotMatch(document.body.textContent, /Thêm sản phẩm/)
-    assert.equal(document.querySelectorAll('.admin-offer-form').length, 0)
+    assert.match(document.body.textContent, /Thêm sản phẩm/)
+    assert.equal(document.querySelectorAll('.admin-offer-form').length, 1)
+    assert.ok(document.querySelector('a[href="/api/admin/exports/products.xlsx"]'))
+    await click('Đơn thanh toán')
+    assert.match(document.body.textContent, /Đơn hàng khách hàng/)
+    assert.doesNotMatch(document.body.textContent, /Cấu hình ngân hàng nhận tiền/)
+    assert.ok(document.querySelector('a[href="/api/admin/exports/customer-orders.xlsx"]'))
+    await click('Xuất nhập kho')
+    assert.ok(document.querySelector('.admin-crud-module'))
+    assert.ok(document.querySelector('a[href="/api/admin/exports/inventory.xlsx"]'))
     assert.ok(!urls.some(url => /settings|overview|appearance|events|conversations/.test(url)))
   })
 })

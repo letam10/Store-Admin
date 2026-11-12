@@ -191,4 +191,4 @@ export function AdminReviews({ csrfToken }) {
 }
 
 // Chức năng AdminOrders: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
-export function AdminOrders({ csrfToken }) { return <OrderManager csrfToken={csrfToken} /> }
+export function AdminOrders({ csrfToken, role }) { return <OrderManager csrfToken={csrfToken} role={role} /> }

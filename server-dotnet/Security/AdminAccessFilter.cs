@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Filters;
 using StoreApi.Data;
 using StoreApi.Models;
+using StoreApi.Services;
 
 namespace StoreApi.Security;
 
@@ -41,9 +42,14 @@ public sealed class AdminAccessFilter(StoreDb db) : IAsyncActionFilter
     public static bool StaffAllowed(string action, string? module, string? afterSalesAction) => action switch
     {
         "Session" or "Logout" or "Presence" or "Products" or "Customers" or "AfterSales" or "Reviews" or "ReplyReview" => true,
-        "Records" or "CreateRecord" or "UpdateRecord" => module == "support",
-        // Thu phí, hoàn tiền và quyết định tài chính vẫn do admin xác nhận.
-        "AfterSalesAction" => afterSalesAction?.Trim().ToLowerInvariant() is "approve" or "reject" or "receive_return" or "ship_exchange" or "complete_exchange",
+        "CreateProduct" or "UpdateProduct" or "DeleteProduct" or "Offer" => true,
+        "Orders" or "OrderPaid" or "OrderFulfillment" or "OrderCancel" or "OrderReceipt" => true,
+        "ListUnmatchedPayments" or "RecordUnmatchedPayment" or "RefundUnmatchedPayment" => true,
+        "Records" or "CreateRecord" or "UpdateRecord" => module is "support" or "inventory",
+        "DeleteRecord" => module == "inventory",
+        "ExportOperational" => OperationalExport.IsAllowed(module),
+        // Nhân viên xử lý trọn nghiệp vụ sau mua; các điều kiện tiền/kho/chứng từ vẫn kiểm ở tầng dữ liệu.
+        "AfterSalesAction" => afterSalesAction?.Trim().ToLowerInvariant() is "approve" or "reject" or "receive_return" or "fee_paid" or "complete_refund" or "ship_exchange" or "complete_exchange",
         _ => false
     };
 }

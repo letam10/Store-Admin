@@ -40,7 +40,7 @@ public class ProductsController : ControllerBase
     // POST: /api/products
     [HttpPost]
     [TypeFilter(typeof(AdminAccessFilter))]
-    public async Task<ActionResult<Product>> CreateProduct(Product product)
+    public async Task<ActionResult<Product>> CreateLegacyProduct(Product product)
     {
         var raw = Request.Cookies["store_admin_session"];
         if (string.IsNullOrEmpty(raw) || Request.Headers["x-csrf-token"] != Tokens.Sha256("csrf:" + raw))

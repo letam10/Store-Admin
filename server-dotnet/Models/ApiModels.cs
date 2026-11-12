@@ -23,7 +23,7 @@ public sealed record RegisterRequest(string? Username, string? Email, string? Pa
 // Vai trò kiểu LoginRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
 public sealed record LoginRequest(string? Username, string? Password);
 // Vai trò kiểu OfferRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
-public sealed record OfferRequest(int DiscountPercent, int StockCount);
+public sealed record OfferRequest(int? DiscountPercent, int? StockCount);
 // Vai trò kiểu PasswordForgotRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
 public sealed record PasswordForgotRequest(string? Email);
 // Vai trò kiểu PasswordResetRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.

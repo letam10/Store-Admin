@@ -1,4 +1,6 @@
-const staffModules = new Set(['support', 'returns', 'products', 'customers', 'reviews'])
+const staffModules = new Set(['support', 'returns', 'products', 'customers', 'reviews', 'customer-orders', 'inventory'])
+
+export const operationalExportModules = new Set(['products', 'customers', 'customer-orders', 'inventory', 'support', 'returns', 'reviews'])
 
 export function canOpenModule(role, module) {
   return role === 'admin' || (role === 'staff' && staffModules.has(module))
