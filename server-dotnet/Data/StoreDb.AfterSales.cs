@@ -29,14 +29,14 @@ public sealed partial class StoreDb
 
     private sealed record AfterSalesOrder(string Id, long CustomerId, string Username, string Status, string Delivery,
         string Fulfillment, string Method, string? Schedule, DateTimeOffset? DeliveredAt, long Goods, long Shipping,
-        long RemainingPaid, int Points, List<CheckoutLine> Items);
+        long RemainingPaid, int Points, List<CheckoutLine> Items, string Tier, int RewardPolicyVersion);
 
     private static AfterSalesOrder ReadAfterSalesOrder(SqlConnection connection, SqlTransaction transaction, string id, long? customerId = null)
     {
         using var query = CheckoutCommand(connection, transaction, """
             SELECT o.customer_id,c.username,o.status,o.delivery_status,o.fulfillment,o.payment_method,o.scheduled_at,
               o.delivered_at,COALESCE(o.current_goods_total,o.goods_total),o.shipping_fee,
-              CAST(o.total AS BIGINT)+o.extra_paid-o.refund_amount,o.points_earned,COALESCE(o.current_items_json,o.items_json)
+              CAST(o.total AS BIGINT)+o.extra_paid-o.refund_amount,o.points_earned,COALESCE(o.current_items_json,o.items_json),o.tier,o.reward_policy_version
             FROM customer_orders o JOIN customers c ON c.id=o.customer_id
             WHERE o.id=@id AND (@customer IS NULL OR o.customer_id=@customer)
             """, ("@id", id), ("@customer", customerId));
@@ -46,7 +46,7 @@ public sealed partial class StoreDb
             reader.GetString(4), reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetString(6),
             reader.IsDBNull(7) ? null : reader.GetDateTimeOffset(7), Convert.ToInt64(reader.GetValue(8)),
             reader.GetInt32(9), reader.GetInt64(10), reader.GetInt32(11),
-            JsonSerializer.Deserialize<List<CheckoutLine>>(reader.GetString(12), CheckoutJson)!);
+            JsonSerializer.Deserialize<List<CheckoutLine>>(reader.GetString(12), CheckoutJson)!, reader.GetString(13), Convert.ToInt32(reader.GetValue(14)));
     }
 
     public object CreateAfterSalesCase(long customerId, string orderId, AfterSalesCreateRequest request)

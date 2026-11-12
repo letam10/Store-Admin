@@ -1,6 +1,8 @@
 using System.Text.Json;
+using Microsoft.Data.SqlClient;
 using StoreApi.Models;
 using StoreApi.Security;
+using StoreApi.Services;
 
 namespace StoreApi.Data;
 
@@ -14,7 +16,7 @@ public sealed partial class StoreDb
         ExpireCheckouts(connection, transaction);
         using var query = CheckoutCommand(connection, transaction, """
             SELECT o.customer_id,o.total,o.goods_total,o.points_earned,o.payment_method,o.items_json,o.voucher_codes_json,o.created_at,
-              i.state,i.expires_at,i.stock_reserved,i.payment_reference
+              i.state,i.expires_at,i.stock_reserved,i.payment_reference,o.tier
             FROM customer_orders o JOIN checkout_intents i ON i.order_id=o.id WHERE o.id=@id
             """, ("@id", id));
         using var reader = query.ExecuteReader();
@@ -31,6 +33,7 @@ public sealed partial class StoreDb
         var expires = reader.IsDBNull(9) ? (DateTimeOffset?)null : reader.GetDateTimeOffset(9);
         var reserved = reader.GetBoolean(10);
         var previousReference = reader.IsDBNull(11) ? null : reader.GetString(11);
+        var tier = reader.GetString(12);
         reader.Close();
         if (proof.ReceivedAmount != total) throw new InvalidOperationException("INVALID_PAYMENT_AMOUNT");
         var reference = (proof.Reference ?? "").Trim().ToUpperInvariant();
@@ -57,6 +60,7 @@ public sealed partial class StoreDb
         }
         if (state == "refunded_unmatched" || (method != "bank_transfer" && state != "pending"))
             throw new InvalidOperationException("ACTION_NOT_ALLOWED");
+        points = LoyaltyPolicy.AwardPoints(goods, tier);
         if (method == "bank_transfer")
         {
             using var receipt = CheckoutCommand(connection, transaction, """
@@ -67,6 +71,14 @@ public sealed partial class StoreDb
             if (receipt.ExecuteNonQuery() != 1) throw new InvalidOperationException("PAYMENT_REFERENCE_USED");
         }
         if (!reserved) ReserveCheckout(connection, transaction, id, customerId, items, vouchers, honorLockedQuote: true);
+        CompleteCheckoutPayment(connection, transaction, id, customerId, goods, points, received,
+            method == "bank_transfer" ? reference : method);
+        transaction.Commit();
+    }
+
+    private void CompleteCheckoutPayment(SqlConnection connection, SqlTransaction transaction, string id,
+        long customerId, int goods, int points, DateTimeOffset received, string reference)
+    {
         using (var consume = CheckoutCommand(connection, transaction, """
             SELECT code INTO #used_vouchers FROM checkout_voucher_holds WHERE order_id=@id;
             DELETE FROM checkout_voucher_holds WHERE order_id=@id;
@@ -75,13 +87,12 @@ public sealed partial class StoreDb
             UPDATE customers SET points=points+@points,
               spin_credits=spin_credits+((paid_goods_total+CAST(@goods AS BIGINT))/100000-paid_goods_total/100000),
               paid_goods_total=paid_goods_total+@goods WHERE id=@customer;
-            UPDATE customer_orders SET status='paid',paid_at=@paid WHERE id=@id;
+            UPDATE customer_orders SET status='paid',paid_at=@paid,points_earned=@points,reward_policy_version=2 WHERE id=@id;
             UPDATE checkout_intents SET state='paid',stock_reserved=0,payment_reference=@reference,received_at=@received WHERE order_id=@id;
             """, ("@id", id), ("@customer", customerId), ("@points", points), ("@goods", goods), ("@paid", received.ToString("O")),
-            ("@reference", method == "bank_transfer" ? reference : method), ("@received", received))) consume.ExecuteNonQuery();
+            ("@reference", reference), ("@received", received))) consume.ExecuteNonQuery();
         QueueNotification(connection, transaction, "invoice:customer:" + id, "invoice.customer", new { orderId = id });
         QueueAdminNotifications(connection, transaction, "invoice:admin:" + id, "invoice.admin", new { orderId = id });
-        transaction.Commit();
     }
 
     public void AdvanceFulfillment(string id, string next)

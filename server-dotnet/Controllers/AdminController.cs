@@ -20,7 +20,7 @@ namespace StoreApi.Controllers;
 [Route("api/admin")]
 [TypeFilter(typeof(AdminAccessFilter))]
 // Vai trò kiểu AdminController: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
-public sealed class AdminController(StoreDb db, AiChatService aiChatService) : ControllerBase
+public sealed class AdminController(StoreDb db, AiChatService aiChatService, ChatStreamService chat, IHostApplicationLifetime lifetime) : ControllerBase
 {
     private const string Cookie = "store_admin_session";
 
@@ -42,6 +42,14 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
         var raw = Request.Cookies[Cookie];
         var admin = HttpContext.Items["AdminActor"] as StoreDb.AdminActor;
         return admin is null ? Unauthorized(new { authenticated = false }) : Ok(new { authenticated = true, username = admin.Username, role = admin.Role, csrfToken = Tokens.Sha256("csrf:" + raw) });
+    }
+
+    [HttpPost("presence")]
+    public IActionResult Presence()
+    {
+        if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+        var raw = Request.Cookies[Cookie]!;
+        return db.TouchAdminPresence(Tokens.Sha256(raw)) ? Ok(new { online = true }) : Unauthorized(new { error = "UNAUTHENTICATED" });
     }
 
     [HttpPost("logout")]
@@ -298,7 +306,9 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
         var requested = request.ContextSize ?? aiChatService.ContextSize;
-        var contextSize = aiChatService.AllowedContextSizes.Contains(requested) ? requested : aiChatService.ContextSize;
+        if (!aiChatService.AllowedContextSizes.Contains(requested)) return BadRequest(new { error = "INVALID_CONTEXT_SIZE" });
+        aiChatService.SetContextSize(requested);
+        var contextSize = aiChatService.ContextSize;
         return Ok(new { contextSize, allowedContextSizes = aiChatService.AllowedContextSizes, model = aiChatService.ModelName, thinking = aiChatService.ThinkingEnabled, thinkingMode = aiChatService.ThinkingMode });
     }
 
@@ -355,12 +365,18 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
         await Response.WriteAsync("event: connected\ndata: {\"status\":\"connected\"}\n\n", cancellationToken);
         await Response.Body.FlushAsync(cancellationToken);
 
-        while (!cancellationToken.IsCancellationRequested)
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.ApplicationStopping);
+        try
         {
-            await Task.Delay(25000, cancellationToken);
-            await Response.WriteAsync(": keepalive\n\n", cancellationToken);
-            await Response.Body.FlushAsync(cancellationToken);
+            while (!linked.IsCancellationRequested)
+            {
+                await Task.Delay(25000, linked.Token);
+                await Response.WriteAsync(": keepalive\n\n", linked.Token);
+                await Response.Body.FlushAsync(linked.Token);
+            }
         }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
+
     }
 
     [HttpGet("conversations/{conversationId}")]
@@ -371,103 +387,18 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService) : C
         var id = (conversationId ?? "").Trim();
         if (string.IsNullOrWhiteSpace(id) || id.Length > 255) return BadRequest(new { error = "INVALID_CONVERSATION" });
         var ownerKey = "admin:" + admin.Value.Id;
+        if (!db.OwnsConversation(id, ownerKey, "admin")) return NotFound(new { error = "CONVERSATION_NOT_FOUND" });
         return Ok(new { conversationId = id, messages = db.GetChatHistory(id, ownerKey, "admin"), compactStatus = "not_needed" });
     }
 
     [HttpPost("chat")]
-    public async Task Chat(ChatStreamRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> Chat(ChatStreamRequest request, CancellationToken cancellationToken)
     {
         var admin = RequireAdmin();
-        if (admin is null)
-        {
-            Response.StatusCode = StatusCodes.Status401Unauthorized;
-            Response.ContentType = "application/json";
-            await Response.WriteAsync("{\"error\":\"UNAUTHENTICATED\"}", cancellationToken);
-            return;
-        }
-
-        if (!CsrfValid())
-        {
-            Response.StatusCode = StatusCodes.Status403Forbidden;
-            Response.ContentType = "application/json";
-            await Response.WriteAsync("{\"error\":\"CSRF_INVALID\"}", cancellationToken);
-            return;
-        }
-
-        var message = (request.Message ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            Response.StatusCode = StatusCodes.Status400BadRequest;
-            Response.ContentType = "application/json";
-            await Response.WriteAsync("{\"error\":\"EMPTY_MESSAGE\"}", cancellationToken);
-            return;
-        }
-
-        var convId = string.IsNullOrWhiteSpace(request.ConversationId)
-            ? "admin-conv-" + Guid.NewGuid().ToString("N")[..8]
-            : request.ConversationId.Trim();
-        var requestId = string.IsNullOrWhiteSpace(request.RequestId)
-            ? "admin-req-" + Guid.NewGuid().ToString("N")
-            : request.RequestId.Trim();
-        var ownerKey = "admin:" + admin.Value.Id;
-
-        Response.ContentType = "application/x-ndjson; charset=utf-8";
-        Response.Headers.CacheControl = "no-cache";
-        Response.Headers.Append("X-Accel-Buffering", "no");
-
-        // 1. conversation event
-        await WriteNdjsonAsync(Response, new { type = "conversation", conversationId = convId, compactStatus = "not_needed" }, cancellationToken);
-
-        // 2. status event
-        await WriteNdjsonAsync(Response, new { type = "status", label = "Đang phân tích dữ liệu..." }, cancellationToken);
-
-        var history = db.GetChatTurns(convId, ownerKey, "admin");
-        var chatRes = await aiChatService.ProcessAdminChatAsync(message, db, history, cancellationToken);
-
-        // 3. sources event
-        if (chatRes.Sources.Count > 0)
-        {
-            await WriteNdjsonAsync(Response, new { type = "sources", sources = chatRes.Sources }, cancellationToken);
-        }
-
-        // 4. report event if available
-        if (chatRes.Report != null)
-        {
-            await WriteNdjsonAsync(Response, new { type = "report", report = chatRes.Report }, cancellationToken);
-        }
-
-        // 5. verified event
-        await WriteNdjsonAsync(Response, new { type = "verified", verified = chatRes.Verified }, cancellationToken);
-
-        // 6. delta events
-        foreach (var chunk in chatRes.Chunks)
-        {
-            if (cancellationToken.IsCancellationRequested) break;
-            await WriteNdjsonAsync(Response, new { type = "delta", content = chunk }, cancellationToken);
-            await Task.Delay(25, cancellationToken);
-        }
-
-        if (!cancellationToken.IsCancellationRequested)
-        {
-            try
-            {
-                db.SaveChatTurn(convId, ownerKey, "admin", requestId, message, string.Concat(chatRes.Chunks), "completed", chatRes.Sources, chatRes.Report, chatRes.Verified);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[AI Chat] Không lưu được lịch sử admin: {ex.Message}");
-            }
-        }
-
-        // 7. done event
-        await WriteNdjsonAsync(Response, new { type = "done", conversationId = convId, compactStatus = "not_needed" }, cancellationToken);
-    }
-
-    private static async Task WriteNdjsonAsync(HttpResponse response, object data, CancellationToken ct)
-    {
-        var json = JsonSerializer.Serialize(data);
-        await response.WriteAsync(json + "\n", ct);
-        await response.Body.FlushAsync(ct);
+        if (admin is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
+        if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+        await chat.RunAsync(HttpContext, request, "admin:" + admin.Value.Id, "admin", cancellationToken);
+        return new EmptyResult();
     }
 
     private (long Id, string Username)? RequireAdmin()

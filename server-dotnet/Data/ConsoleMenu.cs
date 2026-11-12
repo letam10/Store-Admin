@@ -100,8 +100,10 @@ public static class ConsoleMenu
             Console.WriteLine("\n[+] DANG KHOI DONG TOAN BO HE THONG (API + Store + Admin)...");
             Console.ResetColor();
 
-            var database = db.EnsureReady();
+            // Program đã chuẩn bị schema; bật lại chỉ cần kiểm tra kết nối.
+            var database = db.TryCheckHealth();
             DbRow(database.Ok ? "OK  -  database đã sẵn sàng" : $"LOI - {database.Message}");
+            if (!database.Ok) { WaitKey(); return; }
 
             var current = GetListeningPorts();
 
@@ -164,7 +166,9 @@ public static class ConsoleMenu
             if (ready.Contains(5174)) OpenUrl("http://127.0.0.1:5174");
 
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("\n[OK] DA BAT TOAN BO HE THONG VA MO 3 TRANG WEB!");
+            Console.WriteLine(new[] { 5000, 5173, 5174 }.All(ready.Contains)
+                ? "\n[OK] API, Store và Admin đã sẵn sàng."
+                : "\n[!] Một dịch vụ chưa mở cổng. Kiểm tra terminal của dịch vụ đó.");
             Console.ResetColor();
             WaitKey();
         }
@@ -259,7 +263,9 @@ public static class ConsoleMenu
             Console.ResetColor();
             Console.Write("Chon [1/2/W/3-7/R/0]: ");
 
-            var choice = (Console.ReadLine()?.Trim() ?? "").ToUpperInvariant();
+            var input = Console.ReadLine();
+            if (input is null) return;
+            var choice = input.Trim().ToUpperInvariant();
             switch (choice)
             {
                 case "1":
@@ -406,7 +412,7 @@ public static class ConsoleMenu
             Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = $"/k title API :5000 && dotnet run --project \"{proj}\" --urls http://127.0.0.1:5000",
+                Arguments = $"/k title API :5000 && dotnet run --project \"{proj}\" -- --no-menu --urls http://127.0.0.1:5000",
                 UseShellExecute = true
             });
             Console.WriteLine("Da mo cua so API moi cho http://127.0.0.1:5000.");

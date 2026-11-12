@@ -40,7 +40,7 @@ public sealed class AdminAccessFilter(StoreDb db) : IAsyncActionFilter
 
     public static bool StaffAllowed(string action, string? module, string? afterSalesAction) => action switch
     {
-        "Session" or "Logout" or "Products" or "Customers" or "AfterSales" or "Reviews" or "ReplyReview" => true,
+        "Session" or "Logout" or "Presence" or "Products" or "Customers" or "AfterSales" or "Reviews" or "ReplyReview" => true,
         "Records" or "CreateRecord" or "UpdateRecord" => module == "support",
         // Thu phí, hoàn tiền và quyết định tài chính vẫn do admin xác nhận.
         "AfterSalesAction" => afterSalesAction?.Trim().ToLowerInvariant() is "approve" or "reject" or "receive_return" or "ship_exchange" or "complete_exchange",

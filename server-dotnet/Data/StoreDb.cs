@@ -187,6 +187,8 @@ public sealed partial class StoreDb
                   expires_at NVARCHAR(100) NOT NULL,
                   created_at NVARCHAR(100) NOT NULL
                 );
+                IF COL_LENGTH('admin_sessions','last_seen_at') IS NULL
+                  ALTER TABLE admin_sessions ADD last_seen_at DATETIMEOFFSET NULL;
 
                 IF COL_LENGTH('admins', 'role') IS NULL
                   ALTER TABLE admins ADD role NVARCHAR(20) NOT NULL DEFAULT 'admin';
@@ -432,6 +434,7 @@ public sealed partial class StoreDb
                 FROM chat_turns t
                 JOIN conversations c ON c.id=t.conversation_id
                 WHERE t.conversation_id=@conversationId AND c.owner_key=@ownerKey AND c.kind=@kind
+                  AND t.owner_key=@ownerKey AND t.kind=@kind
                 ORDER BY t.id DESC
             ) recent
             ORDER BY recent.id
@@ -506,6 +509,19 @@ public sealed partial class StoreDb
         using var db = Open();
         using var transaction = db.BeginTransaction();
 
+        // Khóa ngắn theo hội thoại và khóa retry; không giữ giao dịch trong lúc model sinh câu trả lời.
+        foreach (var resource in new[] { "store-chat-conversation:" + Tokens.Sha256(conversationId), "store-chat-request:" + Tokens.Sha256(ownerKey + ":" + requestId) })
+        {
+            using var gate = CheckoutCommand(db, transaction,
+                "DECLARE @r int; EXEC @r=sp_getapplock @Resource=@resource,@LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=5000; SELECT @r",
+                ("@resource", resource));
+            if (Convert.ToInt32(gate.ExecuteScalar()) < 0) throw new InvalidOperationException("CONVERSATION_BUSY");
+        }
+        using (var owner = CheckoutCommand(db, transaction,
+            "SELECT COUNT(*) FROM conversations WHERE id=@id AND (owner_key<>@owner OR kind<>@kind)",
+            ("@id", conversationId), ("@owner", ownerKey), ("@kind", kind)))
+            if (Convert.ToInt32(owner.ExecuteScalar()) > 0) throw new InvalidOperationException("CONVERSATION_NOT_FOUND");
+
         using (var conversation = db.CreateCommand())
         {
             conversation.Transaction = transaction;
@@ -527,12 +543,14 @@ public sealed partial class StoreDb
         using (var lookup = db.CreateCommand())
         {
             lookup.Transaction = transaction;
-            lookup.CommandText = "SELECT TOP 1 id,assistant_message_id FROM chat_turns WHERE owner_key=@ownerKey AND request_id=@requestId";
+            lookup.CommandText = "SELECT TOP 1 id,assistant_message_id,conversation_id,user_content,kind FROM chat_turns WHERE owner_key=@ownerKey AND request_id=@requestId";
             lookup.Parameters.AddWithValue("@ownerKey", ownerKey.Trim());
             lookup.Parameters.AddWithValue("@requestId", requestId.Trim());
             using var reader = lookup.ExecuteReader();
             if (reader.Read())
             {
+                if (reader.GetString(2) != conversationId || reader.GetString(3) != userContent || reader.GetString(4) != kind)
+                    throw new InvalidOperationException("IDEMPOTENCY_CONFLICT");
                 existingId = Convert.ToInt32(reader.GetValue(0));
                 existingAssistantId = reader.IsDBNull(1) ? null : Convert.ToInt32(reader.GetValue(1));
             }
@@ -560,7 +578,8 @@ public sealed partial class StoreDb
             {
                 using var updateMessage = db.CreateCommand();
                 updateMessage.Transaction = transaction;
-                updateMessage.CommandText = "UPDATE messages SET content=@content,completed=1,sources_json=@sourcesJson WHERE id=@id";
+                updateMessage.CommandText = "UPDATE messages SET content=@content,completed=@completed,sources_json=@sourcesJson WHERE id=@id";
+                updateMessage.Parameters.AddWithValue("@completed", status == "completed" ? 1 : 0);
                 updateMessage.Parameters.AddWithValue("@content", assistantContent);
                 updateMessage.Parameters.AddWithValue("@sourcesJson", sourcesJson);
                 updateMessage.Parameters.AddWithValue("@id", existingAssistantId.Value);
@@ -584,7 +603,8 @@ public sealed partial class StoreDb
             using (var insertAssistant = db.CreateCommand())
             {
                 insertAssistant.Transaction = transaction;
-                insertAssistant.CommandText = "INSERT INTO messages(conversation_id,role,content,completed,sources_json,created_at) VALUES(@conversationId,'assistant',@content,1,@sourcesJson,@now); SELECT CAST(SCOPE_IDENTITY() AS INT);";
+                insertAssistant.CommandText = "INSERT INTO messages(conversation_id,role,content,completed,sources_json,created_at) VALUES(@conversationId,'assistant',@content,@completed,@sourcesJson,@now); SELECT CAST(SCOPE_IDENTITY() AS INT);";
+                insertAssistant.Parameters.AddWithValue("@completed", status == "completed" ? 1 : 0);
                 insertAssistant.Parameters.AddWithValue("@conversationId", conversationId.Trim());
                 insertAssistant.Parameters.AddWithValue("@content", assistantContent);
                 insertAssistant.Parameters.AddWithValue("@sourcesJson", sourcesJson);

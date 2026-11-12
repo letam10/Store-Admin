@@ -35,10 +35,10 @@ public sealed partial class CustomerController
             var method = bankTransfer ? "bank_transfer" : request.PaymentMethod;
             if (!bankTransfer && !(method == "cash" && request.Fulfillment == "pickup") && !(method == "cod" && request.Fulfillment == "delivery"))
                 return BadRequest(new { error = "INVALID_PAYMENT_METHOD" });
-            var bank = bankTransfer ? BankPayment.ReadSettings(db.GetPaymentSettings()) : null;
             var quote = ComputeQuote(customer, new(request.Items, request.Fulfillment, request.Region, request.DistanceKm, request.WeightKg, request.VoucherCodes));
             if (quote.Total != request.ExpectedTotal) return Conflict(new { error = "QUOTE_CHANGED" });
-            if (bankTransfer && quote.Total <= 0) return BadRequest(new { error = "INVALID_PAYMENT_AMOUNT" });
+            var bank = bankTransfer && quote.Total > 0 ? BankPayment.ReadSettings(db.GetPaymentSettings()) : null;
+            if (quote.Total == 0) method = "voucher";
             var draft = new CheckoutDraft(customer.Id, request.RequestId!, hash,
                 quote.Items.Select(item => new CheckoutLine(item.Id, item.Name, item.Quantity, item.Price)).ToArray(),
                 recipient, phone, address, quote.Fulfillment, quote.Region, quote.DistanceKm, quote.WeightKg,

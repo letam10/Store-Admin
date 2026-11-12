@@ -116,6 +116,7 @@ public static class EmailTemplates
         var fulfillmentLabel = invoice.Fulfillment == "pickup" ? "Nhận tại cửa hàng" : "Giao tận nơi";
         var paymentLabel = invoice.PaymentMethod switch
         {
+            "voucher" => "Voucher đã thanh toán đủ — không cần chuyển tiền",
             "bank_transfer" => "Chuyển khoản / VietQR",
             "cash" => "Tiền mặt tại quầy",
             "cod" => "Thanh toán khi nhận hàng (COD)",

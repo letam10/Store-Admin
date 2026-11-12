@@ -11,7 +11,7 @@
     {
       "label": "Run Store API C#",
       "type": "shell",
-      "command": "dotnet watch --project server-dotnet run --urls http://127.0.0.1:5000",
+      "command": "npm run dev:api",
       "isBackground": true,
       "problemMatcher": []
     }

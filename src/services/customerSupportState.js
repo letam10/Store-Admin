@@ -20,10 +20,10 @@ export function mapServerMessages(messages) {
     sources: message.sources || [],
     verified: message.verified || null,
     report: message.report || null,
-    status: message.status || 'complete',
+    status: ({ completed: 'complete', running: 'pending', failed: 'error' })[message.status] || message.status || 'complete',
     requestId: message.requestId,
     retryContent: message.retryContent,
-    error: message.error || '',
+    error: message.error || (message.status === 'failed' ? 'Lượt trước chưa hoàn tất. Bạn có thể thử lại.' : ''),
   }))
 }
 

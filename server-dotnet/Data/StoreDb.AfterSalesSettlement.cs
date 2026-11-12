@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using StoreApi.Models;
 using StoreApi.Security;
+using StoreApi.Services;
 
 namespace StoreApi.Data;
 
@@ -117,7 +118,9 @@ public sealed partial class StoreDb
 
     private static void CompleteExchange(SqlConnection connection, SqlTransaction transaction, AfterSalesCase item, AfterSalesOrder order)
     {
-        var points = order.RemainingPaid > 0 ? (int)Math.Min(int.MaxValue, Math.Max(1, order.RemainingPaid / 10000)) : 0;
+        var points = order.RewardPolicyVersion >= LoyaltyPolicy.Version
+            ? LoyaltyPolicy.AwardPoints(item.Quote.ReplacementGoods, order.Tier)
+            : order.RemainingPaid > 0 ? (int)Math.Min(int.MaxValue, Math.Max(1, order.RemainingPaid / 10000)) : 0;
         AdjustAfterSalesRewards(connection, transaction, order, item.Quote.ReplacementGoods, points);
         using var update = CheckoutCommand(connection, transaction, """
             UPDATE customer_orders SET current_items_json=@items,delivery_status='delivered',delivered_at=@now,status='completed' WHERE id=@id

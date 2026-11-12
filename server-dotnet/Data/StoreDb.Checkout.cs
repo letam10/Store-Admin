@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using StoreApi.Models;
 using StoreApi.Security;
+using StoreApi.Services;
 
 namespace StoreApi.Data;
 
@@ -19,6 +20,8 @@ public sealed partial class StoreDb
         command.CommandText = """
             IF COL_LENGTH('customer_orders','delivery_status') IS NULL
               ALTER TABLE customer_orders ADD delivery_status NVARCHAR(30) NOT NULL DEFAULT 'processing';
+            IF COL_LENGTH('customer_orders','reward_policy_version') IS NULL
+              ALTER TABLE customer_orders ADD reward_policy_version TINYINT NOT NULL DEFAULT 1;
             IF EXISTS(SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID('customers') AND name='paid_goods_total' AND TYPE_NAME(system_type_id)='int')
             BEGIN
               DECLARE @defaultName sysname;
@@ -97,14 +100,14 @@ public sealed partial class StoreDb
         var now = DateTimeOffset.UtcNow;
         using (var insert = CheckoutCommand(connection, transaction, """
             INSERT INTO customer_orders(id,customer_id,items_json,recipient,phone,address,fulfillment,region,distance_km,weight_kg,
-              subtotal,discount,goods_total,shipping_fee,total,voucher_codes_json,tier,status,points_earned,created_at,payment_method,scheduled_at)
+              subtotal,discount,goods_total,shipping_fee,total,voucher_codes_json,tier,status,points_earned,created_at,payment_method,scheduled_at,reward_policy_version)
             VALUES(@id,@customer,@items,@recipient,@phone,@address,@fulfillment,@region,@distance,@weight,
-              @subtotal,@discount,@goods,@shipping,@total,@vouchers,@tier,'pending',@points,@now,@method,@schedule)
+              @subtotal,@discount,@goods,@shipping,@total,@vouchers,@tier,'pending',@points,@now,@method,@schedule,2)
             """, ("@id", id), ("@customer", draft.CustomerId), ("@items", JsonSerializer.Serialize(draft.Items, CheckoutJson)),
             ("@recipient", draft.Recipient), ("@phone", draft.Phone), ("@address", draft.Address), ("@fulfillment", draft.Fulfillment),
             ("@region", draft.Region), ("@distance", draft.DistanceKm), ("@weight", draft.WeightKg), ("@subtotal", draft.Subtotal),
             ("@discount", draft.Discount), ("@goods", draft.GoodsTotal), ("@shipping", draft.ShippingFee), ("@total", draft.Total),
-            ("@vouchers", JsonSerializer.Serialize(draft.VoucherCodes)), ("@tier", draft.Tier), ("@points", draft.Total > 0 ? Math.Max(1, draft.Total / 10000) : 0),
+            ("@vouchers", JsonSerializer.Serialize(draft.VoucherCodes)), ("@tier", draft.Tier), ("@points", LoyaltyPolicy.AwardPoints(draft.GoodsTotal, draft.Tier)),
             ("@now", now.ToString("O")), ("@method", draft.PaymentMethod), ("@schedule", draft.ScheduledAt))) insert.ExecuteNonQuery();
         ReserveCheckout(connection, transaction, id, draft.CustomerId, draft.Items, draft.VoucherCodes);
         using (var intent = CheckoutCommand(connection, transaction, """
@@ -113,6 +116,9 @@ public sealed partial class StoreDb
             """, ("@id", id), ("@customer", draft.CustomerId), ("@request", draft.RequestId), ("@hash", draft.RequestHash),
             ("@expires", draft.PaymentMethod == "bank_transfer" ? now.AddMinutes(2) : null),
             ("@bank", draft.Bank is null ? null : JsonSerializer.Serialize(draft.Bank, CheckoutJson)))) intent.ExecuteNonQuery();
+        // Voucher thanh toán đủ: hoàn tất trong cùng giao dịch giữ kho/tiêu mã, không tạo giao dịch ngân hàng giả.
+        if (draft.Total == 0)
+            CompleteCheckoutPayment(connection, transaction, id, draft.CustomerId, 0, 0, now, "voucher");
         transaction.Commit();
         return id;
     }

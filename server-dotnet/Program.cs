@@ -130,6 +130,8 @@ builder.Services.AddSingleton<StoreDb>();
 builder.Services.AddSingleton<StoreApi.Services.EmailService>();
 builder.Services.AddHostedService<StoreApi.Services.NotificationWorker>();
 builder.Services.AddSingleton<StoreApi.Services.AiChatService>();
+builder.Services.AddSingleton<StoreApi.Services.OllamaChatClient>();
+builder.Services.AddSingleton<StoreApi.Services.ChatStreamService>();
 
 builder.Services.AddHttpContextAccessor();
 

@@ -85,6 +85,24 @@ export default function Admin() {
   const chatInputRef = useRef(null)
 
   useEffect(() => {
+    if (!session?.authenticated || !session.csrfToken) return undefined
+    const controller = new AbortController()
+    const heartbeat = () => {
+      if (document.visibilityState !== 'visible') return
+      apiJson('/api/admin/presence', { method: 'POST', headers: { 'x-csrf-token': session.csrfToken }, signal: controller.signal })
+        .catch(() => { /* Mất kết nối sẽ tự hết trạng thái online sau 90 giây. */ })
+    }
+    heartbeat()
+    const timer = setInterval(heartbeat, 30000)
+    document.addEventListener('visibilitychange', heartbeat)
+    return () => {
+      clearInterval(timer)
+      controller.abort()
+      document.removeEventListener('visibilitychange', heartbeat)
+    }
+  }, [session?.authenticated, session?.csrfToken])
+
+  useEffect(() => {
     document.documentElement.dataset.adminTheme = theme === 'dark' ? 'dark' : 'light'
     Object.entries(themeVariables(adminThemeConfig, theme)).forEach(([name, value]) => document.documentElement.style.setProperty(name, value))
     localStorage.setItem('store_admin_theme', theme === 'dark' ? 'dark' : 'light')
@@ -261,7 +279,7 @@ export default function Admin() {
         setSettings(payload)
         setContextSize(payload.contextSize)
         setThinkingEnabled(payload.thinking !== false)
-        setThinkingMode(payload.thinkingMode || 'high')
+        setThinkingMode(payload.thinkingMode || 'medium')
       })
       .catch((error) => {
         if (epoch !== loadEpochRef.current || settingsEpoch !== settingsEpochRef.current) return

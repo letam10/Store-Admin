@@ -17,8 +17,8 @@ powershell ./scripts/setup-db.ps1
 # powershell ./scripts/setup-db.ps1 -SqlInstance "localhost\SQLEXPRESS"
 
 # 4. Chạy API:
-dotnet run --urls http://127.0.0.1:5000
-# hoặc: dotnet watch run --urls http://127.0.0.1:5000
+dotnet run -- --no-menu --urls http://127.0.0.1:5000
+# hoặc: dotnet watch run -- --no-menu --urls http://127.0.0.1:5000
 
 # 5. Kiểm tra:
 # Swagger: http://127.0.0.1:5000/swagger
@@ -38,7 +38,7 @@ Nếu `/api/health/db` báo `503 db_unavailable`: đọc `message` + `hint`, ki�
 
 ```powershell
 dotnet restore server-dotnet.csproj
-dotnet watch run --urls http://127.0.0.1:5000
+dotnet watch run -- --no-menu --urls http://127.0.0.1:5000
 ```
 
 Swagger: `http://127.0.0.1:5000/swagger`.
@@ -77,6 +77,6 @@ ollama pull qwen3.5:4b
 ollama list
 ```
 
-Mặc định dự án dùng `AI_CONTEXT_SIZE=32768`, `AI_THINKING=off` và timeout 120 giây. Tắt `think` để qwen3.5:4b không dùng hết giới hạn sinh câu trả lời trong phần suy nghĩ; đây không phải một mức `high` riêng của Ollama. Chất lượng dữ liệu được giữ bằng RAG từ StoreDb, prompt có lịch sử hội thoại và giới hạn trả lời đầy đủ. Sau khi sửa `.env`, phải khởi động lại API.
+Mặc định dự án dùng `AI_CONTEXT_SIZE=32768`, `AI_THINKING=medium` và timeout 120 giây. Medium là mức giới hạn sinh 4.096 token của ứng dụng; Qwen bật `think=true`. Dữ kiện được truy xuất từ StoreDb theo câu hỏi, lời đáp do model sinh trực tiếp. Xem [AI Local](../docs/AI-LOCAL.md) về context, lịch sử, trạng thái chưa hoàn tất và bảo vệ tài khoản. Sau khi sửa `.env`, khởi động lại API.
 
 Lịch sử chat được lưu theo tài khoản trong các bảng `conversations`, `messages` và `chat_turns`, nên việc Store làm mới phiên khách mỗi phút không còn xóa hội thoại. Backend chỉ đưa các lượt gần nhất vào prompt; dữ liệu sản phẩm, danh mục, giá và tồn kho vẫn được đọc lại trực tiếp từ `catalog_products` ở mỗi câu hỏi.
