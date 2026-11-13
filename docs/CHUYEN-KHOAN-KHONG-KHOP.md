@@ -12,4 +12,4 @@ Mỗi khoản chuyển được theo dõi riêng, hoàn đầy đủ và không 
 
 Khách xem tình trạng trong **Thanh toán → Phiên đặt hàng gần đây → Xem / theo dõi**. Với đơn đã mua, xem trong chi tiết đơn. Mã nhận, mã hoàn, thời gian và số còn cần hoàn được hiển thị; biên nhận/PDF có bảng đối soát riêng. Một giao dịch nhận/hoàn không được dùng trùng ở đơn hay khoản thu khác. Gửi lại cùng yêu cầu không ghi nhận hoặc hoàn lần hai.
 
-QR vẫn hết hạn cố định sau 2 phút. Ngân hàng có thể nhận tiền nếu khách dùng ảnh QR đã lưu sau hạn; cửa hàng cần đối soát và dùng luồng hoàn trên, không xác nhận đơn thành công sau hạn. Hệ thống hiện dùng đối soát thủ công, chưa có webhook nhận giao dịch ngân hàng tự động.
+QR vẫn hết hạn cố định sau 2 phút. Ngân hàng có thể nhận tiền nếu khách dùng ảnh QR đã lưu sau hạn; cửa hàng cần đối soát và dùng luồng hoàn trên. [SePay MB](SEPAY-MB.md) tự đọc giao dịch và xác nhận khoản nhận đúng hạn, đúng số tiền; các khoản sai/trễ/trùng được lưu trong mục SePay để kiểm tra. Xét thời điểm tiền thực sự vào ngân hàng, không lấy thời điểm đồng bộ làm hạn thanh toán. Các nút hoàn tiền vẫn chỉ lưu chứng từ do cửa hàng xác nhận.

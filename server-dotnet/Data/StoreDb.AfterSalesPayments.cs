@@ -37,6 +37,7 @@ public sealed partial class StoreDb
         object? payment = canPay ? BankPayment.Info(item.FeeBank!, id, checked((int)item.Quote.AdditionalDue)) : null;
         transaction.Commit();
         return new { orderId = id, amount = item.Quote.AdditionalDue, expiresAt = item.FeePaymentExpiresAt,
+            bankConfirmation = SePayPaymentStatus(id, item.FeeBank),
             canPay, canRenew = !reported && !canPay, status = reported ? "reported" : canPay ? "pending" : "expired", serverTime = now, payment };
     }
 }

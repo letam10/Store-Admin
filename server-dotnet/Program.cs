@@ -129,6 +129,9 @@ builder.Services.AddSwaggerGen(options => options.SwaggerDoc("v1", new OpenApiIn
 builder.Services.AddSingleton<StoreDb>();
 builder.Services.AddSingleton<StoreApi.Services.EmailService>();
 builder.Services.AddHostedService<StoreApi.Services.NotificationWorker>();
+builder.Services.AddHttpClient<StoreApi.Services.SePayClient>(client => client.Timeout = TimeSpan.FromSeconds(15))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddHostedService<StoreApi.Services.SePayWorker>();
 builder.Services.AddSingleton<StoreApi.Services.AiChatService>();
 builder.Services.AddSingleton<StoreApi.Services.OllamaChatClient>();
 builder.Services.AddSingleton<StoreApi.Services.ChatStreamService>();

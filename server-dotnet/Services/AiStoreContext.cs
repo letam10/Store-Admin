@@ -39,6 +39,7 @@ public static class AiStoreContext
         var appearance = db.Appearance();
         var vouchers = db.PublicAiVouchers();
         var online = db.OnlineSupportStaff();
+        var bankSync = JsonSerializer.SerializeToElement(db.SePayStatus());
         var now = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7));
         var query = Normalize(message);
         var nextMonthOnly = (query.Contains("thang sau") || query.Contains("thang sao"))
@@ -132,8 +133,10 @@ public static class AiStoreContext
                 availableNowPublicVouchers = vouchers.Count, scheduledMonthlyCampaigns = (object?)null, nextMonthCampaigns = (object?)null },
             support = new { onlineCount = online.Count, people = online, presenceSeconds = StoreDb.PresenceWindowSeconds,
                 contactPage = "/contact", instantReplyGuaranteed = false },
-            payment = new { methods = new[] { "Chuyển khoản VietQR, cửa hàng đối soát tiền thực nhận", "Tiền mặt tại cửa hàng khi nhận trực tiếp", "COD khi giao hàng" },
-                transferExpiryMinutes = 2, automaticBankDetection = false, reportTransferIsNotConfirmation = true,
+            payment = new { methods = new[] { "Chuyển khoản VietQR", "Tiền mặt tại cửa hàng khi nhận trực tiếp", "COD khi giao hàng" },
+                transferExpiryMinutes = 2, automaticBankDetection = bankSync.GetProperty("configured").GetBoolean(),
+                bankSyncHealthy = bankSync.GetProperty("healthy").GetBoolean(), bankSyncIntervalSeconds = SePayClient.IntervalSeconds,
+                reportTransferIsNotConfirmation = true,
                 savedQrCannotBlockBankTransferAfterExpiry = true, paidOrdersOnlyInPurchaseHistory = true,
                 zeroDueAfterVouchers = "Đơn 0đ được xác nhận ngay bằng voucher, không cần chuyển tiền hoặc QR",
                 lateOrIncorrectTransferRequiresStoreReview = true },

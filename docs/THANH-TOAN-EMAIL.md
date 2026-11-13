@@ -2,11 +2,11 @@
 
 ## Nhận chuyển khoản
 
-Trong **Đơn thanh toán → Cấu hình ngân hàng nhận tiền**, lưu ngân hàng/BIN, số tài khoản và tên người nhận đã kiểm tra. Khi chưa cấu hình, API từ chối tạo QR. Hệ thống dùng VietQR để tạo ảnh chứa số tiền và mã phiên; không có webhook ngân hàng tự động.
+Trong **Đơn thanh toán → Cấu hình ngân hàng nhận tiền**, lưu ngân hàng/BIN, số tài khoản và tên người nhận đã kiểm tra. Khi chưa cấu hình, API từ chối tạo QR. Hệ thống dùng VietQR để tạo ảnh chứa số tiền và mã phiên. Kết nối **SePay + MB API** tự đọc tiền vào và xác nhận đơn mỗi khoảng 10 giây, chạy được cả trên localhost; xem [hướng dẫn SePay](SEPAY-MB.md). Khi chưa bật kết nối, cửa hàng đối soát thủ công.
 
 Phiên QR có hạn 2 phút được lưu ở server. Tải lại trang không gia hạn. Mỗi phiên giữ nguyên tài khoản nhận tiền đã cấu hình lúc tạo; thay ngân hàng sau đó chỉ áp dụng cho phiên mới.
 
-Khách bấm **Tôi đã chuyển khoản** chỉ gửi thông tin để đối soát. Admin cần kiểm tra sao kê, nhập mã giao dịch, số tiền và thời điểm thực nhận. Số tiền phải khớp; thời điểm nhận phải trong hạn QR. API không dùng lời khai của khách để đánh dấu đã thanh toán.
+Khách không cần bấm báo tiền khi tự đối soát đang hoạt động. **Tôi đã chuyển khoản** là đường hỗ trợ ngoại lệ, chỉ gửi thông tin để đối soát. Với trường hợp xử lý thủ công, admin kiểm tra sao kê, nhập mã giao dịch, số tiền và thời điểm thực nhận. Số tiền phải khớp; thời điểm nhận phải trong hạn QR. API không dùng lời khai của khách để đánh dấu đã thanh toán.
 
 Khi xác nhận tiền, trạng thái thanh toán, điểm, tổng tiền hàng, lượt quay, voucher và hai nhóm email được ghi cùng giao dịch SQL. Gửi lại cùng yêu cầu hoặc bấm xác nhận nhiều lần không cộng thêm điểm/trừ kho/gửi thêm hóa đơn. Một mã giao dịch ngân hàng không dùng để xác nhận hai đơn.
 

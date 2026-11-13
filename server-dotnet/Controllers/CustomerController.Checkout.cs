@@ -89,6 +89,7 @@ public sealed partial class CustomerController
         {
             sessionId = id, order, status = intent.State, intent.ExpiresAt, canPay, serverTime = DateTimeOffset.UtcNow,
             payment = canPay ? BankPayment.Info(intent.Bank!, id, total) : null,
+            bankConfirmation = db.SePayPaymentStatus(id, intent.Bank),
             unmatchedPayments = db.UnmatchedPayments(id, customerId)
         };
     }

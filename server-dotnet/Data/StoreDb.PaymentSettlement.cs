@@ -14,6 +14,13 @@ public sealed partial class StoreDb
         using var transaction = connection.BeginTransaction();
         LockCheckout(connection, transaction);
         ExpireCheckouts(connection, transaction);
+        SettleCheckout(connection, transaction, id, proof);
+        transaction.Commit();
+    }
+
+    // Dùng cùng transaction khi nhập chứng từ SePay để không có khoảng trống giữa nhận tiền và ghi đơn.
+    private void SettleCheckout(SqlConnection connection, SqlTransaction transaction, string id, OrderPaidRequest proof)
+    {
         using var query = CheckoutCommand(connection, transaction, """
             SELECT o.customer_id,o.total,o.goods_total,o.points_earned,o.payment_method,o.items_json,o.voucher_codes_json,o.created_at,
               i.state,i.expires_at,i.stock_reserved,i.payment_reference,o.tier
@@ -55,7 +62,6 @@ public sealed partial class StoreDb
         if (state == "paid")
         {
             if (method == "bank_transfer" && previousReference != reference) throw new InvalidOperationException("IDEMPOTENCY_CONFLICT");
-            transaction.Commit();
             return;
         }
         if (state is "refunded_unmatched" or "unmatched_received" || (method != "bank_transfer" && state != "pending"))
@@ -74,7 +80,6 @@ public sealed partial class StoreDb
         if (!reserved) ReserveCheckout(connection, transaction, id, customerId, items, vouchers, honorLockedQuote: true);
         CompleteCheckoutPayment(connection, transaction, id, customerId, goods, points, received,
             method == "bank_transfer" ? reference : method);
-        transaction.Commit();
     }
 
     private void CompleteCheckoutPayment(SqlConnection connection, SqlTransaction transaction, string id,

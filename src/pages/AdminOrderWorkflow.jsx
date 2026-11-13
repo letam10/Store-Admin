@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
 import './AdminCommerce.css'
 import AdminUnmatchedPayments from './AdminUnmatchedPayments'
+import AdminSePay from './AdminSePay'
 
 const money = value => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(value || 0)
 const date = value => value ? new Date(value).toLocaleString('vi-VN') : 'Chưa hẹn'
@@ -9,19 +10,30 @@ const mailStates = { sent: 'Đã gửi', queued: 'Đang chờ gửi / thử lạ
 const statuses = { unmatched_received: 'Đã nhận khoản cần hoàn', refunded_unmatched: 'Đã hoàn khoản chuyển không khớp', expired: 'Hết hạn QR', needs_review: 'Cần đối soát riêng', reported: 'Khách báo đã chuyển', pending: 'Chờ thanh toán', paid: 'Đã thanh toán', completed: 'Đã nhận hàng', cancelled: 'Đã hủy', refunded: 'Đã hoàn tiền' }
 const delivery = { processing: 'Đang chuẩn bị', ready: 'Sẵn sàng nhận', shipped: 'Đang giao', delivered: 'Đã giao / nhận', returned: 'Đã nhận hàng trả', cancelled: 'Đã dừng giao' }
 
-function useData(path) {
+function useData(path, refreshMs = 0) {
   const [data, setData] = useState(null), [error, setError] = useState('')
   useEffect(() => {
     const controller = new AbortController()
-    apiJson(path, { signal: controller.signal }).then(setData).catch(failure => { if (!controller.signal.aborted) setError(failure.message) })
-    return () => controller.abort()
-  }, [path])
+    let pending = false
+    async function refresh() {
+      if (pending) return
+      pending = true
+      try {
+        const result = await apiJson(path, { signal: controller.signal })
+        if (!controller.signal.aborted) { setData(result); setError('') }
+      } catch (failure) { if (!controller.signal.aborted) setError(failure.message) }
+      finally { pending = false }
+    }
+    refresh()
+    const timer = refreshMs ? window.setInterval(refresh, refreshMs) : null
+    return () => { controller.abort(); if (timer) window.clearInterval(timer) }
+  }, [path, refreshMs])
   async function reload() { const result = await apiJson(path); setData(result); setError(''); return result }
   return { data, error, reload }
 }
 
 export function AdminOrders({ csrfToken, role = 'admin' }) {
-  const { data, error, reload } = useData('/api/admin/customer-orders')
+  const { data, error, reload } = useData('/api/admin/customer-orders', 10000)
   const [selected, setSelected] = useState(null), [reference, setReference] = useState(''), [confirmed, setConfirmed] = useState(false)
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [problem, setProblem] = useState('')
   const [receivedAt, setReceivedAt] = useState('')
@@ -43,6 +55,15 @@ export function AdminOrders({ csrfToken, role = 'admin' }) {
     finally { gate.current = false; setBusy(false) }
   }
   function select(item) { setReceivedAt(''); setReceivedAmount(String(item.total)); setSelected(item.id); setReference(item.paymentReference || ''); setConfirmed(false); setProblem(''); setMessage('') }
+  function selectTransfer(transfer) {
+    const item = data?.orders.find(candidate => candidate.id === transfer.paymentId)
+    if (!item) { setProblem('Chưa tìm thấy đơn trong danh sách hiện tại; hãy làm mới để kiểm tra.'); return }
+    select(item)
+    setReference(transfer.reference)
+    setReceivedAmount(String(transfer.amount))
+    const received = new Date(transfer.receivedAt)
+    setReceivedAt(new Date(received.getTime() - received.getTimezoneOffset() * 60000).toISOString().slice(0, 19))
+  }
   return <section className="admin-module-card"><div className="admin-commerce-head"><div><p className="admin-eyebrow">Bán hàng & thanh toán</p><h2>Đơn hàng khách hàng</h2><p>Đối soát tiền thực nhận và theo dõi lịch giao / nhận.</p></div><button type="button" disabled={busy} onClick={() => reload().catch(failure => setProblem(failure.message))}>Làm mới</button></div>
     {(error || problem) && <p className="admin-error" role="alert">{problem || error}</p>}{message && <p role="status">{message}</p>}
     {!data && !error && <p role="status">Đang tải đơn…</p>}
@@ -64,7 +85,7 @@ export function AdminOrders({ csrfToken, role = 'admin' }) {
       <AdminUnmatchedPayments key={order.id} order={order} csrfToken={csrfToken} onChanged={reload} />
       {['pending','paid'].includes(order.status) && <div className="admin-order-actions">{nextDelivery.map(key => <button type="button" key={key} disabled={busy} onClick={() => act('/fulfillment', { status: key }, 'PATCH')}>{delivery[key]}</button>)}</div>}
     </section>}
-    {role === 'admin' && <details className="admin-module-card"><summary>Cấu hình ngân hàng nhận tiền</summary><AdminPaymentSettings csrfToken={csrfToken} /></details>}
+    {role === 'admin' && <><AdminSePay onSelectPayment={selectTransfer} /><details className="admin-module-card"><summary>Cấu hình ngân hàng nhận tiền</summary><AdminPaymentSettings csrfToken={csrfToken} /></details></>}
   </section>
 }
 
@@ -94,7 +115,7 @@ export function AdminPaymentSettings({ csrfToken }) {
     } catch (failure) { setProblem(failure.message) }
     finally { gate.current = false; setBusy(false) }
   }
-  return <section><h2>Ngân hàng nhận chuyển khoản</h2><p>QR nhận tiền thật; admin kiểm tra sao kê trước khi xác nhận đơn.</p>
+  return <section><h2>Ngân hàng nhận chuyển khoản</h2><p>QR nhận tiền thật. Khi đã kết nối SePay, hệ thống tự đối soát; cửa hàng xử lý các giao dịch cần kiểm tra riêng.</p>
     {(error || problem) && <p className="admin-error" role="alert">{problem || error}</p>}
     {values && <form className="admin-payment-settings" onSubmit={save}>
       {[['bankName','Tên ngân hàng'],['bankBin','Mã BIN ngân hàng (6 số)'],['accountNumber','Số tài khoản'],['accountName','Tên chủ tài khoản']].map(([key,label]) => <label key={key}>{label}<input required value={values[key]} maxLength="100" onChange={event => { setForm({ ...values, [key]: event.target.value }); setConfirmed(false) }} /></label>)}

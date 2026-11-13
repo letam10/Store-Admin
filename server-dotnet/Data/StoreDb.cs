@@ -94,6 +94,7 @@ public sealed partial class StoreDb
             EnsureCheckoutTables();
             EnsureAfterSalesTables();
             EnsureUnmatchedPaymentTables();
+            EnsureSePayTables();
             return TryCheckHealth();
         }
         catch (Exception ex)
