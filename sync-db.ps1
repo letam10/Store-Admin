@@ -50,7 +50,7 @@ if ([string]::IsNullOrWhiteSpace($DataFile)) {
 
 function Get-ConnectionString([string]$TargetDb = '') {
     $server = 'localhost'
-    $dbName = if (-not [string]::IsNullOrWhiteSpace($TargetDb)) { $TargetDb } else { $Database }
+    $dbName = $(if (-not [string]::IsNullOrWhiteSpace($TargetDb)) { $TargetDb } else { $Database })
 
     if (-not [string]::IsNullOrWhiteSpace($SqlInstance)) {
         $server = $SqlInstance
@@ -67,7 +67,7 @@ function Get-ConnectionString([string]$TargetDb = '') {
         }
     }
 
-    $dbPart = if ([string]::IsNullOrWhiteSpace($TargetDb)) { $dbName } else { $TargetDb }
+    $dbPart = $(if ([string]::IsNullOrWhiteSpace($TargetDb)) { $dbName } else { $TargetDb })
     return "Server=$server;Database=$dbPart;Integrated Security=True;TrustServerCertificate=True;Encrypt=False;MultipleActiveResultSets=True;"
 }
 
@@ -87,7 +87,7 @@ function Format-SqlValue($val, [string]$dataType) {
         return "NULL"
     }
     if ($val -is [bool]) {
-        return if ($val) { "1" } else { "0" }
+        if ($val) { return "1" } else { return "0" }
     }
     if ($val -is [byte] -or $val -is [int16] -or $val -is [int32] -or $val -is [int64] -or $val -is [decimal] -or $val -is [double] -or $val -is [single]) {
         return "$val"
@@ -182,7 +182,7 @@ ORDER BY t.name, ic.key_ordinal;
         Write-Host "  -> Bang [$table]: $rowCount ban ghi" -ForegroundColor Green
 
         $hasIdentity = $identityCols.ContainsKey($table)
-        $primaryKeys = if ($pkCols.ContainsKey($table)) { $pkCols[$table] } else { @($dt.Columns[0].ColumnName) }
+        $primaryKeys = $(if ($pkCols.ContainsKey($table)) { $pkCols[$table] } else { @($dt.Columns[0].ColumnName) })
 
         $colNames = @($dt.Columns | ForEach-Object { $_.ColumnName })
         $colListSql = ($colNames | ForEach-Object { "[$_]" }) -join ', '
@@ -365,7 +365,7 @@ ORDER BY t.name;
         $name = $r['TableName']
         $count = [int64]$r['RowCounts']
         $totalRows += $count
-        $color = if ($count -gt 0) { "Green" } else { "DarkGray" }
+        $color = $(if ($count -gt 0) { "Green" } else { "DarkGray" })
         Write-Host ("{0,-28} | {1,12:N0}" -f $name, $count) -ForegroundColor $color
     }
 

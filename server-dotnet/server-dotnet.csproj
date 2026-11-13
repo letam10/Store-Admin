@@ -23,6 +23,7 @@
   <ItemGroup>
     <Content Include="../shared/catalog-manifest.json" Link="shared/catalog-manifest.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../shared/catalog-vietnamese-update.json" Link="shared/catalog-vietnamese-update.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update=".env" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
