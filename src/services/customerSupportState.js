@@ -6,6 +6,8 @@
  * Liên kết trực tiếp: không có import/using trực tiếp được phát hiện.
  * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
  */
+import { userMessage } from '../api/userMessages.js'
+
 // Ẩn phần metadata nguồn nếu model lặp lại nhãn nguồn trong nội dung trả lời.
 export function hideSourceDisclosure(text) {
   return String(text || '').replace(/\n\s*(?:Nguồn|Sources?)\s*:?\s*[\s\S]*$/i, '').trim()
@@ -23,7 +25,7 @@ export function mapServerMessages(messages) {
     status: ({ completed: 'complete', running: 'pending', failed: 'error' })[message.status] || message.status || 'complete',
     requestId: message.requestId,
     retryContent: message.retryContent,
-    error: message.error || (message.status === 'failed' ? 'Lượt trước chưa hoàn tất. Bạn có thể thử lại.' : ''),
+    error: message.error ? userMessage(message.error) : (message.status === 'failed' ? 'Lượt trước chưa hoàn tất. Bạn có thể thử lại.' : ''),
   }))
 }
 

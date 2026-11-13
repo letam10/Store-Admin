@@ -79,7 +79,7 @@ test('real Admin ignores late stats/settings from A after B logs in', async () =
     if (url === '/api/admin/settings') return json(settings)
     throw new Error('Unexpected URL ' + url)
   }, async ({ click, submit }) => {
-    await click('AI local')
+    await click('AI cục bộ')
     await submit('.admin-range')
     await click('Lưu')
     await click('Đăng xuất')
@@ -114,7 +114,7 @@ test('real Admin does not restore old history over a new live chat', async () =>
     ].map((event) => JSON.stringify(event)).join('\n'))
     throw new Error('Unexpected URL ' + url)
   }, async ({ click, submit, dom }) => {
-    await click('AI local')
+    await click('AI cục bộ')
     const textarea = document.querySelector('.admin-chat textarea')
     await act(async () => {
       Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set.call(textarea, 'Xin chào')

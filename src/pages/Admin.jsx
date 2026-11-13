@@ -14,6 +14,9 @@ import { adminConversationKey } from '../services/adminState'
 import { hideSourceDisclosure, mapServerMessages } from '../services/customerSupportState'
 import AdminModule from './AdminModules'
 import { adminModules } from '../data/adminModuleData'
+import { compactLabel, thinkingLabel } from '../services/vietnameseLabels'
+import { listenAdminNotifications } from '../services/adminNotifications'
+import { installVietnameseValidation } from '../services/formValidation'
 import { normalizeSearch } from '../services/storefrontState'
 import { DEFAULT_THEME, THEME_MODES, normalizeTheme, themeVariables } from '../../shared/theme.js'
 import DropdownMenu from '../components/ui/DropdownMenu'
@@ -55,6 +58,7 @@ export default function Admin() {
   const [theme, setTheme] = useState(() => THEME_MODES.includes(localStorage.getItem('store_admin_theme')) ? localStorage.getItem('store_admin_theme') : 'light')
   const [adminThemeConfig, setAdminThemeConfig] = useState(() => normalizeTheme(DEFAULT_THEME))
   const [language, setLanguage] = useState(() => localStorage.getItem('store_admin_language') || 'vi')
+  useEffect(() => installVietnameseValidation(language), [language])
   const [session, setSession] = useState(null)
   const [credentials, setCredentials] = useState({ username: '', password: '' })
   const [loginError, setLoginError] = useState('')
@@ -121,8 +125,8 @@ export default function Admin() {
     themeLight: 'Light mode', themeDark: 'Dark mode', language: 'Language',
   } : {
     login: 'Đăng nhập', account: 'Tài khoản', password: 'Mật khẩu', signOut: 'Đăng xuất',
-    backStore: '← Quay lại Store', adminOnly: 'Backend phải xác thực trước khi mở dữ liệu admin.',
-    wrongLogin: 'Sai tài khoản hoặc mật khẩu.', searching: 'Tìm module quản trị…', local: '● Hệ thống local',
+    backStore: '← Quay lại Store', adminOnly: 'Máy chủ phải xác thực trước khi mở dữ liệu quản trị.',
+    wrongLogin: 'Sai tài khoản hoặc mật khẩu.', searching: 'Tìm mục quản trị…', local: '● Hệ thống cục bộ',
     themeLight: 'Giao diện sáng', themeDark: 'Giao diện tối', language: 'Ngôn ngữ',
   }
 
@@ -130,7 +134,7 @@ export default function Admin() {
   function ThemeLanguageControls({ compact = false }) {
     return <div className={'admin-preferences' + (compact ? ' admin-preferences--compact' : '')}>
       <label className="admin-language-control"><span className="sr-only">{copy.language}</span><DropdownMenu value={language} options={[['vi', 'VI'], ['en', 'EN']]} onChange={setLanguage} ariaLabel={copy.language} /></label>
-      <button type="button" className="admin-theme-toggle" onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? copy.themeLight : copy.themeDark} title={theme === 'dark' ? copy.themeLight : copy.themeDark}>{theme === 'dark' ? '☀' : '☾'}<span>{theme === 'dark' ? 'Light' : 'Dark'}</span></button>
+      <button type="button" className="admin-theme-toggle" onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? copy.themeLight : copy.themeDark} title={theme === 'dark' ? copy.themeLight : copy.themeDark}>{theme === 'dark' ? '☀' : '☾'}<span>{language === 'en' ? (theme === 'dark' ? 'Light' : 'Dark') : (theme === 'dark' ? 'Sáng' : 'Tối')}</span></button>
     </div>
   }
 
@@ -153,6 +157,7 @@ export default function Admin() {
     setActivity('')
     setCompactStatus('not_needed')
     setReport(null)
+    setRealtimeEvents([])
     setPageError('')
   }
 
@@ -194,7 +199,7 @@ export default function Admin() {
         if (epoch !== loadEpochRef.current || settingsEpoch !== settingsEpochRef.current) return
         // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
         if (error.code === 'UNAUTHENTICATED') expireSession()
-        else setPageError('Không tải được cấu hình admin.')
+        else setPageError('Không tải được cấu hình quản trị.')
       })
 
     const saved = sessionStorage.getItem(key)
@@ -221,53 +226,11 @@ export default function Admin() {
   }, [session?.authenticated, session?.username, session?.role])
 
   useEffect(() => {
-    if (!session?.authenticated || session.role !== 'admin') return undefined
-    let es
+    if (!session?.authenticated) return undefined
     try {
-      es = new EventSource('/api/admin/events/stream')
-      es.addEventListener('order:created', (e) => {
-        try {
-          const d = JSON.parse(e.data)
-          setRealtimeEvents((curr) => [{
-            id: Math.random(),
-            type: 'order',
-            text: `🔔 Đơn mới: ${d.orderId} (${new Intl.NumberFormat('vi-VN').format(d.total)} ₫) từ ${d.customer || d.recipient}`,
-            time: new Date().toLocaleTimeString('vi-VN'),
-          }, ...curr].slice(0, 4))
-        } catch (_err) {
-          void _err
-        }
-      })
-      es.addEventListener('order:paid', (e) => {
-        try {
-          const d = JSON.parse(e.data)
-          setRealtimeEvents((curr) => [{
-            id: Math.random(),
-            type: 'payment',
-            text: `💰 Thanh toán thành công: ${d.orderId} (+${d.pointsEarned} điểm)`,
-            time: new Date().toLocaleTimeString('vi-VN'),
-          }, ...curr].slice(0, 4))
-        } catch (_err) {
-          void _err
-        }
-      })
-      es.addEventListener('review:created', (e) => {
-        try {
-          const d = JSON.parse(e.data)
-          setRealtimeEvents((curr) => [{
-            id: Math.random(),
-            type: 'review',
-            text: `⭐ Đánh giá ${d.rating}★ từ ${d.customer} cho sản phẩm ${d.productId}`,
-            time: new Date().toLocaleTimeString('vi-VN'),
-          }, ...curr].slice(0, 4))
-        } catch (_err) {
-          void _err
-        }
-      })
-    } catch (_err) {
-      void _err
-    }
-    return () => { es?.close() }
+      return listenAdminNotifications(item => setRealtimeEvents(current =>
+        [item, ...current.filter(previous => previous.id !== item.id)].slice(0, 4)))
+    } catch { return undefined }
   }, [session?.authenticated, session?.role])
 
   useEffect(() => {
@@ -285,7 +248,7 @@ export default function Admin() {
       .catch((error) => {
         if (epoch !== loadEpochRef.current || settingsEpoch !== settingsEpochRef.current) return
         if (error.code === 'UNAUTHENTICATED') expireSession()
-        else setPageError('Không tải được cấu hình AI local.')
+        else setPageError('Không tải được cấu hình AI cục bộ.')
       })
     return () => { settingsEpochRef.current += 1 }
   }, [session?.authenticated, activeModule]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -338,7 +301,7 @@ export default function Admin() {
     } catch (error) {
       if (epoch !== loadEpochRef.current) return
       // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-      if (error.code !== 'UNAUTHENTICATED') setLoginError('Phiên local đã được xóa; backend không xác nhận logout.')
+      if (error.code !== 'UNAUTHENTICATED') setLoginError('Phiên cục bộ đã được xóa; máy chủ không xác nhận đăng xuất.')
     }
   }
 
@@ -359,7 +322,7 @@ export default function Admin() {
       if (epoch !== loadEpochRef.current || requestEpoch !== settingsEpochRef.current) return
       // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
       if (error.code === 'UNAUTHENTICATED') expireSession()
-      else setPageError('Không lưu được context.')
+      else setPageError('Không lưu được ngữ cảnh.')
     }
   }
 
@@ -449,10 +412,10 @@ export default function Admin() {
   }
 
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-  if (session === null) return <main className="admin-shell admin-shell--login"><div className="admin-login-card admin-loading-state"><div className="admin-login-card__preferences"><ThemeLanguageControls /></div><p>Đang kiểm tra phiên admin…</p></div></main>
+  if (session === null) return <main className="admin-shell admin-shell--login"><div className="admin-login-card admin-loading-state"><div className="admin-login-card__preferences"><ThemeLanguageControls /></div><p>Đang kiểm tra phiên quản trị…</p></div></main>
   if (!session?.authenticated) return (
     <main className="admin-shell admin-shell--login"><div className="admin-login-card"><div className="admin-login-card__preferences"><ThemeLanguageControls /></div><form className="admin-login" onSubmit={login}>
-      <p className="admin-eyebrow">STORE ADMIN</p><h1>{copy.login}</h1><p>{copy.adminOnly}</p>
+      <p className="admin-eyebrow">QUẢN TRỊ STORE</p><h1>{copy.login}</h1><p>{copy.adminOnly}</p>
       <label>{copy.account}<input autoComplete="username" value={credentials.username} onChange={(event) => setCredentials((current) => ({ ...current, username: event.target.value }))} /></label>
       <label>{copy.password}<input type="password" autoComplete="current-password" value={credentials.password} onChange={(event) => setCredentials((current) => ({ ...current, password: event.target.value }))} /></label>
       {loginError && <p className="admin-error" role="alert">{language === 'en' && loginError === 'Sai tài khoản hoặc mật khẩu.' ? copy.wrongLogin : loginError}</p>}<button type="submit">{copy.login}</button><a href={import.meta.env?.VITE_STOREFRONT_URL || 'http://localhost:5173'}>{copy.backStore}</a>
@@ -468,7 +431,7 @@ export default function Admin() {
     <main className="admin-shell admin-shell--workspace">
       <div className="admin-workspace-card">
       <aside className="admin-sidebar">
-        <a className="admin-brand" href="/admin">store<span>.</span><small>ADMIN</small></a>
+        <a className="admin-brand" href="/admin">store<span>.</span><small>{language === 'en' ? 'ADMIN' : 'QUẢN TRỊ'}</small></a>
         <div className="admin-sidebar__profile"><span>{String(session.username || 'A').slice(0, 1).toUpperCase()}</span><div><b>{session.username}</b><small>{session.role === 'staff' ? 'Nhân viên' : 'Quản trị viên'}</small></div></div>
         <nav aria-label="Điều hướng quản trị">
           {visibleGroups.map((group) => <div className="admin-nav-group" key={group.title}><p>{group.title}</p>{group.ids.map((id) => {
@@ -482,18 +445,19 @@ export default function Admin() {
       <section className="admin-main">
         <div className="admin-main__card">
         <header className="admin-header">
-          <div><p className="admin-eyebrow">STORE ADMIN / {activeModule.toUpperCase()}</p><h1>{currentLabel}</h1></div>
+          <div><p className="admin-eyebrow">{language === 'en' ? 'STORE ADMIN' : 'QUẢN TRỊ STORE'} / {currentLabel.toUpperCase()}</p><h1>{currentLabel}</h1></div>
           <div className="admin-global-search">
             <span aria-hidden="true">⌕</span>
             <input ref={adminSearchRef} type="search" value={adminSearch} onChange={(event) => setAdminSearch(event.target.value)} placeholder={copy.searching} aria-label={copy.searching} />
             <kbd>Ctrl K</kbd>
-            {adminSearch && <div className="admin-search-results">{visibleModules.filter(([,label]) => normalizeSearch(label).includes(normalizeSearch(adminSearch))).slice(0,6).map(([id,label,icon]) => <button key={id} type="button" onClick={() => { setActiveModule(id); setAdminSearch('') }}><span aria-hidden="true">{icon}</span>{label}</button>)}{visibleModules.filter(([,label]) => normalizeSearch(label).includes(normalizeSearch(adminSearch))).length === 0 && <p>Không tìm thấy module.</p>}</div>}
+            {adminSearch && <div className="admin-search-results">{visibleModules.filter(([,label]) => normalizeSearch(label).includes(normalizeSearch(adminSearch))).slice(0,6).map(([id,label,icon]) => <button key={id} type="button" onClick={() => { setActiveModule(id); setAdminSearch('') }}><span aria-hidden="true">{icon}</span>{label}</button>)}{visibleModules.filter(([,label]) => normalizeSearch(label).includes(normalizeSearch(adminSearch))).length === 0 && <p>Không tìm thấy mục.</p>}</div>}
           </div>
           <div className="admin-header__actions"><span className="admin-live-dot">{copy.local}</span><ThemeLanguageControls /><button type="button" onClick={logout}>{copy.signOut}</button></div>
         </header>
+        <div className="admin-workspace-content" key={activeModule}>
         {realtimeEvents.length > 0 && (
-          <div className="admin-realtime-bar" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', background: '#f4fbf5', border: '1px solid #cbe9d3', padding: '0.5rem 1rem', borderRadius: '6px', margin: '0.5rem 0', fontSize: '0.875rem' }}>
-            <span style={{ fontWeight: 'bold', color: '#254535' }}>📡 Live SSE:</span>
+          <div className="admin-realtime-bar" role="status" aria-live="polite" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', background: '#f4fbf5', border: '1px solid #cbe9d3', padding: '0.5rem 1rem', borderRadius: '6px', margin: '0.5rem 0', fontSize: '0.875rem' }}>
+            <span style={{ fontWeight: 'bold', color: '#254535' }}>Thông báo mới:</span>
             <span style={{ flex: 1, color: '#1b3327' }}>{realtimeEvents[0].text}</span>
             <small style={{ color: '#688272' }}>{realtimeEvents[0].time}</small>
           </div>
@@ -503,23 +467,23 @@ export default function Admin() {
         {activeModule !== 'ai-local' && <AdminModule role={session.role} module={activeModule} csrfToken={session.csrfToken} onNavigate={setActiveModule} language={language} />}
         {activeModule === 'ai-local' && <>
           <section className="admin-meta" aria-label="Cấu hình AI">
-            <div><small>Model</small><strong>{settings?.model || 'qwen3.5:4b'}</strong></div>
-            <div><small>Thinking</small><strong>{thinkingEnabled ? 'Bật · ' + thinkingMode : 'Tắt · phản hồi trực tiếp'}</strong></div>
-            <div><small>Rút gọn</small><strong>{compactStatus}</strong></div>
-            <div className="admin-context"><label>Context<DropdownMenu value={contextSize} options={(settings?.allowedContextSizes || [8192, 16384, 32768, 65536]).map((size) => [size, size === 65536 ? '64K · thử nghiệm' : (size / 1024) + 'K'])} onChange={(value) => setContextSize(Number(value))} ariaLabel="Kích thước context" /></label><button type="button" onClick={saveContext}>Lưu</button></div>
+            <div><small>Mô hình</small><strong>{settings?.model || 'qwen3.5:4b'}</strong></div>
+            <div><small>Suy luận</small><strong>{thinkingEnabled ? 'Bật · ' + thinkingLabel(thinkingMode) : 'Tắt · phản hồi trực tiếp'}</strong></div>
+            <div><small>Rút gọn</small><strong>{compactLabel(compactStatus)}</strong></div>
+            <div className="admin-context"><label>Ngữ cảnh<DropdownMenu value={contextSize} options={(settings?.allowedContextSizes || [8192, 16384, 32768, 65536]).map((size) => [size, size === 65536 ? '64K · thử nghiệm' : (size / 1024) + 'K'])} onChange={(value) => setContextSize(Number(value))} ariaLabel="Kích thước ngữ cảnh" /></label><button type="button" onClick={saveContext}>Lưu</button></div>
           </section>
-          <p className="admin-warning">64K chỉ là cấu hình thử nghiệm; chưa xác minh tải thực tế; tác vụ vừa/nặng phải chọn RTX 4060 trước khi chạy.</p>
+          <p className="admin-warning">Ngữ cảnh lớn cần nhiều bộ nhớ hơn. Máy thành viên có thể cần mức 8.192 hoặc 16.384 tùy phần cứng; mức 65.536 chỉ dành cho thử nghiệm.</p>
           <div className="admin-grid">
-            <section className="admin-panel"><div className="admin-panel__heading"><div><p className="admin-eyebrow">SỐ LIỆU GỐC</p><h2>Doanh thu backend</h2></div><span>Asia/Ho_Chi_Minh</span></div>
+            <section className="admin-panel"><div className="admin-panel__heading"><div><p className="admin-eyebrow">SỐ LIỆU GỐC</p><h2>Doanh thu máy chủ</h2></div><span>Giờ Việt Nam</span></div>
               <form className="admin-range" onSubmit={loadStats}><label>Từ<input type="date" value={range.from} onChange={(event) => setRange((current) => ({ ...current, from: event.target.value }))} /></label><label>Đến<input type="date" value={range.to} onChange={(event) => setRange((current) => ({ ...current, to: event.target.value }))} /></label><button type="submit">Tải số liệu</button></form>
-              {report ? <dl className="admin-stats"><div><dt>Doanh thu gộp</dt><dd>{formatMoney(report.grossRevenue)}</dd></div><div><dt>Hoàn tiền đã trừ</dt><dd>{formatMoney(report.refunds)}</dd></div><div><dt>Doanh thu ròng</dt><dd>{formatMoney(report.netRevenue)}</dd></div><div><dt>Đơn được tính</dt><dd>{report.includedOrders}</dd></div></dl> : <p className="admin-muted">Chọn khoảng thời gian để lấy số liệu backend.</p>}
-              {report && <p className="admin-source">Dữ liệu cửa hàng · {report.from} → {report.to} · dữ liệu: {report.dataMode}</p>}
+              {report ? <dl className="admin-stats"><div><dt>Doanh thu gộp</dt><dd>{formatMoney(report.grossRevenue)}</dd></div><div><dt>Hoàn tiền đã trừ</dt><dd>{formatMoney(report.refunds)}</dd></div><div><dt>Doanh thu ròng</dt><dd>{formatMoney(report.netRevenue)}</dd></div><div><dt>Đơn được tính</dt><dd>{report.includedOrders}</dd></div></dl> : <p className="admin-muted">Chọn khoảng thời gian để lấy số liệu máy chủ.</p>}
+              {report && <p className="admin-source">Dữ liệu cửa hàng · {report.from} → {report.to} · dữ liệu: {{ real: 'thực tế', none: 'chưa có giao dịch' }[report.dataMode] || 'chưa xác định'}</p>}
             </section>
-            <section className="admin-panel admin-chat"><div className="admin-panel__heading"><div><p className="admin-eyebrow">AI NHẬN XÉT</p><h2>Chat admin</h2></div><span>Thinking: {thinkingEnabled ? thinkingMode : 'Tắt'}</span></div>
+            <section className="admin-panel admin-chat"><div className="admin-panel__heading"><div><p className="admin-eyebrow">AI NHẬN XÉT</p><h2>Trò chuyện quản trị</h2></div><span>Suy luận: {thinkingEnabled ? thinkingLabel(thinkingMode) : 'Tắt'}</span></div>
               <div ref={logRef} className="admin-chat__log" role="log" aria-live="polite">
-                {messages.length === 0 && <p className="admin-muted">Số liệu và nội dung nghiệp vụ được backend kiểm soát; chưa có phân tích tự do đã xác minh.</p>}
+                {messages.length === 0 && <p className="admin-muted">Số liệu và nội dung nghiệp vụ được máy chủ kiểm soát; chưa có phân tích tự do đã xác minh.</p>}
                 {messages.map((message) => <div key={message.id} className={'admin-chat__message admin-chat__message--' + message.role}>
-                  <small>{message.role === 'user' ? 'Admin' : 'AI local'}</small>
+                  <small>{message.role === 'user' ? 'Quản trị' : 'AI cục bộ'}</small>
                   <p>{hideSourceDisclosure(message.content) || (busy && message.role === 'assistant' ? '…' : '')}</p>
                   {message.verified?.text && <p>{message.verified.text}</p>}
                   {message.report && <p>Báo cáo: {message.report.from} → {message.report.to} · Doanh thu ròng: {formatMoney(message.report.netRevenue)}</p>}
@@ -532,6 +496,7 @@ export default function Admin() {
             </section>
           </div>
         </>}
+        </div>
         </div>
       </section>
       </div>

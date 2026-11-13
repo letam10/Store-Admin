@@ -95,6 +95,7 @@ public sealed partial class StoreDb
             EnsureAfterSalesTables();
             EnsureUnmatchedPaymentTables();
             EnsureSePayTables();
+            EnsureAdminEventTable();
             return TryCheckHealth();
         }
         catch (Exception ex)
@@ -667,7 +668,7 @@ public sealed partial class StoreDb
         limit = Math.Clamp(limit, 1, 100);
         var filter = string.IsNullOrWhiteSpace(query)
             ? string.Empty
-            : " WHERE p.name LIKE @query OR p.category LIKE @query OR p.id LIKE @query";
+            : " WHERE p.name LIKE @query OR p.category LIKE @query OR p.id LIKE @query OR p.description LIKE @query";
         var pattern = string.IsNullOrWhiteSpace(query) ? null : "%" + query.Trim() + "%";
 
         using var db = Open();
@@ -2218,7 +2219,22 @@ public sealed partial class StoreDb
     {
         var now = DateTimeOffset.UtcNow.ToString("O");
         using var db = Open();
+        using var transaction = db.BeginTransaction();
+        LockCheckout(db, transaction);
+        using (var previous = CheckoutCommand(db, transaction,
+            "SELECT rating,comment FROM product_reviews WHERE product_id=@pid AND customer_id=@cid",
+            ("@pid", productId), ("@cid", customerId)))
+        using (var reader = previous.ExecuteReader())
+        {
+            if (reader.Read() && reader.GetInt32(0) == rating && reader.GetString(1) == comment)
+            {
+                reader.Close();
+                transaction.Commit();
+                return;
+            }
+        }
         using var cmd = db.CreateCommand();
+        cmd.Transaction = transaction;
         cmd.CommandText = """
             IF EXISTS (SELECT 1 FROM product_reviews WHERE product_id = @pid AND customer_id = @cid)
                 UPDATE product_reviews SET rating = @rating, comment = @comment, customer_name = @cname WHERE product_id = @pid AND customer_id = @cid;
@@ -2233,6 +2249,11 @@ public sealed partial class StoreDb
         cmd.Parameters.AddWithValue("@comment", comment);
         cmd.Parameters.AddWithValue("@now", now);
         cmd.ExecuteNonQuery();
+        using var product = CheckoutCommand(db, transaction, "SELECT name FROM catalog_products WHERE id=@id", ("@id", productId));
+        var productName = product.ExecuteScalar() as string ?? "Sản phẩm";
+        QueueAdminEvent(db, transaction, "review:" + Guid.NewGuid().ToString("N"), "review:created",
+            new { productId, productName, customer = customerName, rating });
+        transaction.Commit();
     }
 
     public IReadOnlyList<object> ListAllAdminOrders()

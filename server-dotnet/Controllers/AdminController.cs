@@ -374,13 +374,28 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Cha
         await Response.Body.FlushAsync(cancellationToken);
 
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.ApplicationStopping);
+        long? cursor = long.TryParse(Request.Headers["Last-Event-ID"], out var previousId) && previousId >= 0 ? previousId : null;
+        var heartbeat = 0;
         try
         {
             while (!linked.IsCancellationRequested)
             {
-                await Task.Delay(25000, linked.Token);
-                await Response.WriteAsync(": keepalive\n\n", linked.Token);
-                await Response.Body.FlushAsync(linked.Token);
+                var actor = db.FindAdminActor(Tokens.Sha256(Request.Cookies[Cookie] ?? ""));
+                if (actor is null || actor.Role is not ("admin" or "staff")) return;
+                var events = db.ReadAdminEvents(cursor);
+                foreach (var item in events)
+                {
+                    await Response.WriteAsync($"id: {item.Id}\nevent: {item.Kind}\ndata: {item.Payload}\n\n", linked.Token);
+                    cursor = item.Id;
+                }
+                cursor ??= 0;
+                if (events.Count > 0 || ++heartbeat >= 8)
+                {
+                    if (events.Count == 0) await Response.WriteAsync(": keepalive\n\n", linked.Token);
+                    await Response.Body.FlushAsync(linked.Token);
+                    heartbeat = 0;
+                }
+                await Task.Delay(3000, linked.Token);
             }
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested) { }

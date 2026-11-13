@@ -27,10 +27,38 @@ public static class AiStoreContext
 
     private static object Product(CatalogProduct item) => new
     {
-        item.Id, item.Name, item.Category, originalPriceVnd = item.Price, priceVnd = SalePrice(item),
-        item.DiscountPercent, item.StockCount, url = "/products/" + Uri.EscapeDataString(item.Id),
+        item.Id, item.Name, category = VietnameseLabels.Category(item.Category), originalPriceVnd = item.Price, priceVnd = SalePrice(item),
+        item.DiscountPercent, item.StockCount, stockUnit = "sản phẩm", url = "/products/" + Uri.EscapeDataString(item.Id),
         description = item.Description.Length <= 350 ? item.Description : item.Description[..350]
     };
+
+    private static CatalogProduct[] MentionedProducts(IReadOnlyList<CatalogProduct> catalog, string query)
+    {
+        var wantsCase = Regex.IsMatch(query, @"\bop\b");
+        var scored = catalog.Where(product => !wantsCase || Normalize(product.Name).StartsWith("op ", StringComparison.Ordinal))
+            .Select(product => new { Product = product, Score = MentionScore(product, query, wantsCase) }).Where(item => item.Score > 0).ToArray();
+        if (scored.Length == 0) return [];
+        var highest = scored.Max(item => item.Score);
+        return scored.Where(item => item.Score == highest).Select(item => item.Product).ToArray();
+    }
+
+    private static int MentionScore(CatalogProduct product, string query, bool includeCompatibility)
+    {
+        var aliases = new List<string> { product.Name };
+        var lines = product.Description.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var brandLine = lines.FirstOrDefault(line => line.StartsWith("Thương hiệu:", StringComparison.Ordinal));
+        var brand = brandLine is null ? "" : brandLine[(brandLine.IndexOf(':') + 1)..].Trim().TrimEnd('.');
+        foreach (var line in lines)
+        {
+            if (!line.StartsWith("Mã hoặc tên mẫu:", StringComparison.Ordinal)
+                && !(includeCompatibility && line.StartsWith("Thiết bị tương thích:", StringComparison.Ordinal))) continue;
+            var alias = line[(line.IndexOf(':') + 1)..].Trim().TrimEnd('.');
+            aliases.Add(alias);
+            if (brand.Length > 0 && alias.StartsWith(brand + " ", StringComparison.OrdinalIgnoreCase)) aliases.Add(alias[(brand.Length + 1)..]);
+        }
+        return aliases.Select(Normalize).Where(alias => alias.Length >= 3 && query.Contains(alias, StringComparison.Ordinal))
+            .Select(alias => alias.Length).DefaultIfEmpty(0).Max();
+    }
 
     public static AiContext Build(string message, IReadOnlyList<ChatTurnData> history, StoreDb db, bool admin)
     {
@@ -45,18 +73,19 @@ public static class AiStoreContext
         var nextMonthOnly = (query.Contains("thang sau") || query.Contains("thang sao"))
             && !query.Contains("thang nay") && !query.Contains("hien tai");
         var stockQuestion = query.Contains("het hang") || query.Contains("het kho");
-        var namedProduct = catalog.Where(p => query.Contains(Normalize(p.Name), StringComparison.Ordinal))
-            .OrderByDescending(p => p.Name.Length).FirstOrDefault();
+        var mentioned = MentionedProducts(catalog, query);
+        var namedProduct = mentioned.Length == 1 ? mentioned[0] : null;
         var categories = catalog.Select(p => p.Category).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var selectedCategory = categories.OrderByDescending(c => c.Length)
             .FirstOrDefault(c => query.Contains(Normalize(c), StringComparison.Ordinal));
+        if (query.Contains("may tinh xach tay", StringComparison.Ordinal) && categories.Contains("Laptop")) selectedCategory = "Laptop";
         var onSale = query.Contains("giam gia") || query.Contains("sale");
         var cheapest = query.Contains("thap nhat") || query.Contains("re nhat");
         var expensive = query.Contains("cao nhat") || query.Contains("dat nhat") || query.Contains("mac nhat");
         var similar = query.Contains("tuong tu") || query.Contains("thay the");
         var countMatch = Regex.Match(query, @"\b(\d{1,2})\s+(san pham|mat hang|mon)\b");
         var count = countMatch.Success ? Math.Clamp(int.Parse(countMatch.Groups[1].Value), 1, 12) : cheapest || expensive ? 1 : 6;
-        IEnumerable<CatalogProduct> matches = catalog;
+        IEnumerable<CatalogProduct> matches = mentioned.Length > 1 ? mentioned : catalog;
         if (selectedCategory is not null) matches = matches.Where(p => p.Category.Equals(selectedCategory, StringComparison.OrdinalIgnoreCase));
         if (onSale) matches = matches.Where(p => p.DiscountPercent > 0 && p.StockCount > 0);
 
@@ -68,8 +97,8 @@ public static class AiStoreContext
             foreach (var text in referenceText)
             {
                 var normalized = Normalize(text);
-                anchor = catalog.Where(p => normalized.Contains(Normalize(p.Name), StringComparison.Ordinal))
-                    .OrderBy(p => normalized.IndexOf(Normalize(p.Name), StringComparison.Ordinal)).FirstOrDefault();
+                var candidates = MentionedProducts(catalog, normalized);
+                anchor = candidates.Length == 1 ? candidates[0] : null;
                 if (anchor is not null) break;
             }
             if (anchor is null) matches = [];
@@ -88,11 +117,12 @@ public static class AiStoreContext
         }
         else if (cheapest || expensive)
             matches = cheapest ? matches.OrderBy(SalePrice).ThenBy(p => p.Id) : matches.OrderByDescending(SalePrice).ThenBy(p => p.Id);
+        else if (namedProduct is not null) matches = [namedProduct];
         else
         {
             var ignored = new HashSet<string>("toi minh ban cho voi cua la co va hay nhung cac mot ve nay nao giup xin hoi store san pham hien tai hang hoa dang bao nhieu tim vai giam gia nhat".Split(' '));
             var terms = Regex.Matches(query, @"[a-z0-9]+").Select(m => m.Value).Where(t => t.Length > 1 && !ignored.Contains(t)).Distinct().ToArray();
-            var scored = matches.Select(p => new { Item = p, Score = terms.Count(t => Regex.IsMatch(Normalize(p.Name + " " + p.Category), @"\b" + Regex.Escape(t) + @"\b")) }).ToArray();
+            var scored = matches.Select(p => new { Item = p, Score = terms.Count(t => Regex.IsMatch(Normalize(p.Name + " " + p.Category + " " + p.Description), @"\b" + Regex.Escape(t) + @"\b")) }).ToArray();
             if (scored.Any(p => p.Score > 0) && selectedCategory is null && !onSale)
                 matches = scored.Where(p => p.Score > 0).OrderByDescending(p => p.Item.Id == namedProduct?.Id)
                     .ThenByDescending(p => p.Score).ThenByDescending(p => p.Item.StockCount > 0).Select(p => p.Item);
@@ -115,10 +145,10 @@ public static class AiStoreContext
             catalog = new
             {
                 total = catalog.Count, available = catalog.Count(p => p.StockCount > 0), outOfStock = catalog.Count(p => p.StockCount == 0),
-                categories = catalog.GroupBy(p => p.Category).Select(g => new { name = g.Key, count = g.Count(), available = g.Count(p => p.StockCount > 0) }),
+                categories = catalog.GroupBy(p => p.Category).Select(g => new { name = VietnameseLabels.Category(g.Key), count = g.Count(), available = g.Count(p => p.StockCount > 0) }),
                 saleCount = catalog.Count(p => p.DiscountPercent > 0 && p.StockCount > 0),
                 minimum = catalog.OrderBy(SalePrice).Take(1).Select(Product), maximum = catalog.OrderByDescending(SalePrice).Take(1).Select(Product),
-                query = new { selectedCategory, onSale, cheapest, expensive, similar, requestedCount = count,
+                query = new { selectedCategory, onSale, cheapest, expensive, similar, requestedCount = count, ambiguousProductName = mentioned.Length > 1,
                     matchingCount = matching.Length, needsProductName = similar && anchor is null },
                 referenceProduct = anchor is null ? null : Product(anchor),
                 products = stockQuestion && namedProduct is null ? [] : selected.Select(Product),
@@ -136,6 +166,15 @@ public static class AiStoreContext
             payment = new { methods = new[] { "Chuyển khoản VietQR", "Tiền mặt tại cửa hàng khi nhận trực tiếp", "COD khi giao hàng" },
                 transferExpiryMinutes = 2, automaticBankDetection = bankSync.GetProperty("configured").GetBoolean(),
                 bankSyncHealthy = bankSync.GetProperty("healthy").GetBoolean(), bankSyncIntervalSeconds = SePayClient.IntervalSeconds,
+                confirmationPolicy = new
+                {
+                    mode = bankSync.GetProperty("configured").GetBoolean() ? "Hệ thống tự động xác nhận giao dịch ngân hàng khớp đơn" : "Cửa hàng đối soát thủ công",
+                    matchedTransferConditions = "Đúng tài khoản nhận, mã đơn, số tiền và thời hạn thanh toán; đơn còn hợp lệ và đủ tồn kho",
+                    confirmationEvidence = "Giao dịch tiền vào do SePay cung cấp, không lấy lời khách báo làm bằng chứng đã nhận tiền",
+                    automaticResult = "Đơn chuyển sang đã thanh toán; điểm, biên nhận và thông báo được cập nhật một lần",
+                    reviewRequiredFor = "Tiền thiếu hoặc dư, nội dung không khớp, chuyển ngoài hạn, đơn đã hủy hoặc không còn đủ hàng",
+                    timing = "Có độ trễ đồng bộ, không phải ngay tại thời điểm ứng dụng ngân hàng báo thành công"
+                },
                 reportTransferIsNotConfirmation = true,
                 savedQrCannotBlockBankTransferAfterExpiry = true, paidOrdersOnlyInPurchaseHistory = true,
                 zeroDueAfterVouchers = "Đơn 0đ được xác nhận ngay bằng voucher, không cần chuyển tiền hoặc QR",
@@ -153,7 +192,7 @@ public static class AiStoreContext
         // Chỉ đưa nhóm dữ kiện liên quan vào lượt hỏi; không bắt model phân tích cả cửa hàng khi chỉ hỏi voucher/ngày giờ.
         bool Has(params string[] words) => words.Any(query.Contains);
         var fields = new HashSet<string> { "observedAt", "today", "timeZone", "currency", "assistant" };
-        if (Has("san pham", "hang hoa", "mat hang", "gia", "tuong tu", "het hang", "dien tu", "laptop") || selectedCategory is not null || namedProduct is not null)
+        if (Has("san pham", "hang hoa", "mat hang", "gia", "tuong tu", "het hang", "dien tu", "laptop") || selectedCategory is not null || mentioned.Length > 0)
             fields.Add("catalog");
         if (Has("voucher", "ma giam", "uu dai", "khuyen mai")) fields.Add("publicVouchers");
         if (Has("uu dai", "khuyen mai", "thang")) fields.Add("promotions");

@@ -20,22 +20,22 @@ public static class OperationalExport
                 name = "Hàng hóa";
                 widths = [42, 60, 24, 24, 16, 18, 18, 65, 90];
                 rows = [["Mã", "Tên sản phẩm", "Danh mục", "Giá gốc (VND)", "Giảm (%)", "Tồn khả dụng", "Lượt xem", "Ảnh", "Mô tả"]];
-                rows.AddRange(db.Catalog().Select(p => new object[] { p.Id, p.Name, p.Category, p.Price, p.DiscountPercent, p.StockCount, p.ViewCount, p.Image, p.Description }));
+                rows.AddRange(db.Catalog().Select(p => new object[] { p.Id, p.Name, VietnameseLabels.Category(p.Category), p.Price, p.DiscountPercent, p.StockCount, p.ViewCount, p.Image, p.Description }));
                 break;
             case "customers":
                 name = "Khách hàng";
                 widths = [15, 32, 42, 18, 24, 22, 20, 26];
-                rows = [["Mã khách", "Tên tài khoản", "Email", "Điểm", "Tiền hàng đã mua (VND)", "Lượt quay còn lại", "Hạng", "Ngày tạo (VN)"]];
+                rows = [["Mã khách", "Tên tài khoản", "Thư điện tử", "Điểm", "Tiền hàng đã mua (VND)", "Lượt quay còn lại", "Hạng", "Ngày tạo (VN)"]];
                 rows.AddRange(Elements(db.ListAdminCustomers()).Select(p => new object[] { Text(p, "id"), Text(p, "username"), Text(p, "email"),
-                    Number(p, "points"), Number(p, "paidGoodsTotal"), Number(p, "spinCredits"), Text(p, "tier"), Time(p, "createdAt") }));
+                    Number(p, "points"), Number(p, "paidGoodsTotal"), Number(p, "spinCredits"), VietnameseLabels.Tier(Text(p, "tier")), Time(p, "createdAt") }));
                 break;
             case "customer-orders":
                 name = "Đơn hàng";
                 widths = [30, 28, 26, 24, 24, 28, 22, 65, 24, 24, 24, 26, 26, 26, 26, 26];
                 rows = [["Mã đơn", "Tài khoản", "Trạng thái đơn", "Thanh toán", "Giao hàng", "Người nhận", "Điện thoại", "Địa chỉ", "Giá trị đơn (VND)",
                     "Khoản bù đã thu (VND)", "Hoàn của đơn (VND)", "Chuyển ngoài đơn (VND)", "Đã hoàn riêng (VND)", "Còn hoàn riêng (VND)", "Đã thanh toán lúc (VN)", "Hẹn giao/nhận (VN)"]];
-                rows.AddRange(Elements(db.ListAllAdminOrders()).Select(p => new object[] { Text(p, "id"), Text(p, "username"), Text(p, "status"), Text(p, "paymentMethod"),
-                    Text(p, "deliveryStatus"), Text(p, "recipient"), Text(p, "phone"), Text(p, "address"), Number(p, "total"), Number(p, "extraPaid"), Number(p, "refundAmount"),
+                rows.AddRange(Elements(db.ListAllAdminOrders()).Select(p => new object[] { Text(p, "id"), Text(p, "username"), VietnameseLabels.Status(Text(p, "status")), VietnameseLabels.Payment(Text(p, "paymentMethod")),
+                    VietnameseLabels.Status(Text(p, "deliveryStatus")), Text(p, "recipient"), Text(p, "phone"), Text(p, "address"), Number(p, "total"), Number(p, "extraPaid"), Number(p, "refundAmount"),
                     Number(p, "unmatchedReceived"), Number(p, "unmatchedRefunded"), Number(p, "unmatchedOutstanding"), Time(p, "paidAt"), Time(p, "scheduledAt") }));
                 break;
             case "inventory":
@@ -43,21 +43,21 @@ public static class OperationalExport
                 widths = [15, 36, 24, 45, 30, 20, 65, 24, 26];
                 rows = [["Mã phiếu", "Tên phiếu", "Loại", "Sản phẩm / mã", "Kho", "Số lượng", "Ghi chú", "Trạng thái", "Cập nhật (VN)"]];
                 rows.AddRange(Elements(db.ListAdminRecords("inventory")).Select(p => new object[] { Text(p, "id"), Text(p, "title"), Text(Data(p), "kind"),
-                    Text(Data(p), "product"), Text(Data(p), "warehouse"), Number(Data(p), "quantity"), Text(Data(p), "note"), Text(p, "status"), Time(p, "updatedAt") }));
+                    Text(Data(p), "product"), Text(Data(p), "warehouse"), Number(Data(p), "quantity"), Text(Data(p), "note"), VietnameseLabels.Status(Text(p, "status"), workflow: true), Time(p, "updatedAt") }));
                 break;
             case "support":
                 name = "Chăm sóc khách hàng";
                 widths = [15, 40, 32, 40, 32, 42, 90, 26, 26];
-                rows = [["Mã yêu cầu", "Tiêu đề", "Khách hàng", "Chủ đề", "Phụ trách", "Email phản hồi", "Nội dung", "Trạng thái", "Cập nhật (VN)"]];
+                rows = [["Mã yêu cầu", "Tiêu đề", "Khách hàng", "Chủ đề", "Phụ trách", "Thư phản hồi", "Nội dung", "Trạng thái", "Cập nhật (VN)"]];
                 rows.AddRange(Elements(db.ListAdminRecords("support")).Select(p => new object[] { Text(p, "id"), Text(p, "title"), Text(Data(p), "customer"),
-                    Text(Data(p), "topic"), Text(Data(p), "assignee"), Text(Data(p), "email"), Text(Data(p), "message"), Text(p, "status"), Time(p, "updatedAt") }));
+                    Text(Data(p), "topic"), Text(Data(p), "assignee"), Text(Data(p), "email"), Text(Data(p), "message"), VietnameseLabels.Status(Text(p, "status"), workflow: true), Time(p, "updatedAt") }));
                 break;
             case "returns":
                 name = "Đổi trả hàng";
                 widths = [30, 30, 28, 24, 28, 70, 24, 24, 24, 26, 26, 26, 65];
                 rows = [["Mã yêu cầu", "Mã đơn", "Khách hàng", "Loại", "Trạng thái", "Lý do", "Phí (VND)", "Cần bù (VND)", "Cần hoàn (VND)",
                     "Ngày yêu cầu (VN)", "Đã thu bù (VN)", "Đã hoàn (VN)", "Ghi chú"]];
-                rows.AddRange(Elements(db.AfterSalesCases()).Select(p => new object[] { Text(p, "id"), Text(p, "orderId"), Text(p, "username"), Text(p, "kind"), Text(p, "status"),
+                rows.AddRange(Elements(db.AfterSalesCases()).Select(p => new object[] { Text(p, "id"), Text(p, "orderId"), Text(p, "username"), VietnameseLabels.AfterSalesKind(Text(p, "kind")), VietnameseLabels.Status(Text(p, "status"), workflow: true),
                     Text(p, "reason"), Number(Property(p, "quote"), "feeAmount"), Number(Property(p, "quote"), "additionalDue"), Number(Property(p, "quote"), "refundAmount"),
                     Time(p, "createdAt"), Time(p, "feePaidAt"), Time(p, "refundedAt"), Text(p, "note") }));
                 break;

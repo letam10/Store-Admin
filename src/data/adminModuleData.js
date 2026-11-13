@@ -19,10 +19,10 @@ export const adminModules = [
   ['appearance', 'Trang trí & chỉnh sửa', '✦'],
   ['returns', 'Đổi / trả hàng', '↩'],
   ['statistics', 'Thống kê', '▥'],
-  ['ai-local', 'AI local', '✺'],
+  ['ai-local', 'AI cục bộ', '✺'],
   ['order-types', 'Loại đơn hàng', '≡'],
   ['support', 'CSKH', '☏'],
-  ['rewards-wheel', 'Voucher', '◌'],
+  ['rewards-wheel', 'Mã giảm giá', '◌'],
   ['staff', 'Nhân viên', '♙'],
   ['overtime', 'Tăng ca & khen thưởng', '★'],
 ]

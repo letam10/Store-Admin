@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiJson } from '../api/chat'
 import DropdownMenu from '../components/ui/DropdownMenu'
+import { dateOnlyLabel } from '../services/vietnameseLabels'
 
 const money = new Intl.NumberFormat('vi-VN')
 const chartOptions = [['area', 'Đồi núi'], ['line', 'Đường thẳng'], ['bars-v', 'Cột đứng'], ['bars-h', 'Cột ngang'], ['2.5d', '2.5D'], ['3d', '3D']]
@@ -58,7 +59,7 @@ export default function AdminStatistics({ Chart }) {
       <h3>Chi tiết theo ngày</h3>
       <div className="admin-table-wrap"><table>
         <thead><tr><th>Ngày</th><th>Số đơn</th><th>Doanh thu gộp</th><th>Hoàn tiền</th><th>Doanh thu ròng</th></tr></thead>
-        <tbody>{revenue.map(day => <tr key={day.date}><td>{day.date}</td><td>{day.orders}</td><td>{money.format(day.grossRevenue)} ₫</td><td>{money.format(day.refunds)} ₫</td><td>{money.format(day.revenue)} ₫</td></tr>)}</tbody>
+        <tbody>{revenue.map(day => <tr key={day.date}><td>{dateOnlyLabel(day.date)}</td><td>{day.orders}</td><td>{money.format(day.grossRevenue)} ₫</td><td>{money.format(day.refunds)} ₫</td><td>{money.format(day.revenue)} ₫</td></tr>)}</tbody>
         <tfoot><tr><th>Tổng</th><td>{report.includedOrders}</td><td>{money.format(report.grossRevenue)} ₫</td><td>{money.format(report.refunds)} ₫</td><td>{money.format(report.netRevenue)} ₫</td></tr></tfoot>
       </table></div>
     </>}

@@ -117,6 +117,8 @@ public sealed partial class StoreDb
             ("@expires", draft.PaymentMethod == "bank_transfer" ? now.AddMinutes(2) : null),
             ("@bank", draft.Bank is null ? null : JsonSerializer.Serialize(draft.Bank, CheckoutJson)))) intent.ExecuteNonQuery();
         // Voucher thanh toán đủ: hoàn tất trong cùng giao dịch giữ kho/tiêu mã, không tạo giao dịch ngân hàng giả.
+        QueueAdminEvent(connection, transaction, "order:create:" + id, "order:created",
+            new { orderId = id, total = draft.Total, customer = draft.Recipient });
         if (draft.Total == 0)
             CompleteCheckoutPayment(connection, transaction, id, draft.CustomerId, 0, 0, now, "voucher");
         transaction.Commit();

@@ -10,7 +10,9 @@ Khách không cần bấm báo tiền khi tự đối soát đang hoạt động
 
 Khi xác nhận tiền, trạng thái thanh toán, điểm, tổng tiền hàng, lượt quay, voucher và hai nhóm email được ghi cùng giao dịch SQL. Gửi lại cùng yêu cầu hoặc bấm xác nhận nhiều lần không cộng thêm điểm/trừ kho/gửi thêm hóa đơn. Một mã giao dịch ngân hàng không dùng để xác nhận hai đơn.
 
-Đơn chưa xác nhận tiền không xuất hiện trong lịch sử mua ở tài khoản. Khách theo dõi riêng trong **Phiên đặt hàng gần đây** tại checkout. QR đã hết hạn sẽ ẩn; nếu đã chuyển theo QR cũ, thông tin báo chuyển vẫn được giữ để cửa hàng kiểm tra. Website không thể ngăn ứng dụng ngân hàng chuyển tiền từ một QR khách đã lưu.
+Đơn chưa xác nhận tiền không xuất hiện trong lịch sử mua ở tài khoản. Khách mở **Tài khoản → Theo dõi các phiên chưa hoàn tất** để xem phiên chờ hoặc cần kiểm tra. Trang checkout chỉ tập trung thanh toán hiện tại. QR đã hết hạn sẽ ẩn; nếu đã chuyển theo QR cũ, thông tin báo chuyển vẫn được giữ để cửa hàng kiểm tra. Website không thể ngăn ứng dụng ngân hàng chuyển tiền từ một QR khách đã lưu.
+
+Khi API báo đã thanh toán, trang QR tự mở màn hình **Thanh toán thành công** kèm mã đơn và số tiền, giữ tại `/checkout?order=...`. Không tự đưa khách về trang chủ. “Đang chuẩn bị” là tiến độ giao hàng riêng; không phủ nhận trạng thái đã trả tiền.
 
 Kho trong catalog thể hiện số lượng còn có thể đặt. Phiên mới giữ hàng và voucher cá nhân; hủy hoặc hết hạn khi chưa báo tiền sẽ giải phóng phần giữ. Khách đã báo tiền không được tự xóa phiên. Khi thanh toán thành công mới sử dụng voucher cá nhân và cộng thưởng.
 
@@ -30,6 +32,10 @@ Cấu hình trong `server-dotnet/.env` (không commit): `SMTP_HOST`, `SMTP_PORT`
 - Liên hệ hỗ trợ: khách nhận xác nhận tiếp nhận; mỗi admin nhận nội dung yêu cầu.
 
 Mỗi người nhận có một công việc gửi riêng trong `notification_outbox`. SMTP lỗi không làm mất đơn hoặc thư, công việc được thử lại; khởi động lại API tiếp tục hàng đợi. Trạng thái “đang chờ gửi” không có nghĩa đã gửi thành công. Sau khi thay `.env`, khởi động lại backend để nạp cấu hình mới.
+
+Biên nhận mới dùng định dạng tiền Việt Nam, ngày giờ UTC+7 và liên kết tới đúng đơn. Thư sau thanh toán không chứa QR, số tài khoản mẫu hay yêu cầu chuyển lần nữa. Thư đã gửi trước khi cập nhật giữ nguyên trong hộp thư người nhận; không tự gửi lại hàng loạt.
+
+Admin và nhân viên nhận thông báo đơn mới, đã thanh toán, đánh giá và yêu cầu hỗ trợ qua luồng sự kiện. Sự kiện lưu cùng giao dịch SQL và có mã duy nhất; kết nối lại dùng `Last-Event-ID`, không tạo lại sự kiện thanh toán khi nhận trùng giao dịch ngân hàng.
 
 Không bỏ qua xác minh chứng chỉ TLS. SMTP chấp nhận thư không bảo đảm thư sẽ vào Inbox thay vì Spam. Hàng đợi dùng Message-ID ổn định để giảm thư lặp khi thử lại; nếu tiến trình dừng đúng sau khi SMTP nhận thư nhưng trước khi ghi trạng thái thành công, giao thức SMTP không cung cấp bảo đảm gửi đúng một lần tuyệt đối.
 

@@ -45,6 +45,7 @@ public sealed partial class StoreDb
     {
         using var connection = Open();
         using var transaction = connection.BeginTransaction();
+        LockCheckout(connection, transaction);
         var data = new { customer = request.CustomerName, customerId, topic = request.Topic, email = request.CustomerEmail, message = request.Message, assignee = "Chưa phân công" };
         using var insert = CheckoutCommand(connection, transaction, """
             INSERT INTO admin_records(module,title,data_json,status,created_at,updated_at)
@@ -54,6 +55,8 @@ public sealed partial class StoreDb
         insert.ExecuteNonQuery();
         QueueAdminNotifications(connection, transaction, "support:admin:" + request.RequestId, "support.admin", request);
         QueueNotification(connection, transaction, "support:customer:" + request.RequestId, "support.customer", request);
+        QueueAdminEvent(connection, transaction, "support:" + request.RequestId, "support:created",
+            new { requestId = request.RequestId, customer = request.CustomerName, topic = request.Topic });
         transaction.Commit();
     }
 

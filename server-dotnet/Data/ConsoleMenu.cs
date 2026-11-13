@@ -7,6 +7,7 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using Microsoft.AspNetCore.Builder;
 using StoreApi.Security;
+using StoreApi.Services;
 
 namespace StoreApi.Data;
 
@@ -15,10 +16,11 @@ public static class ConsoleMenu
     private static int? _storeFrontendCmdPid;
     private static int? _adminFrontendCmdPid;
 
-    public static async Task RunAsync(StoreDb db, WebApplication app)
+    public static async Task RunAsync(StoreDb db, WebApplication app, bool openBrowser = true)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         Console.InputEncoding = System.Text.Encoding.UTF8;
+        var aiRuntime = app.Services.GetRequiredService<OllamaRuntime>();
 
         bool apiHostWasStopped = false;
         bool IsApiRunning() => IsPortInUse(5000);
@@ -31,7 +33,7 @@ public static class ConsoleMenu
         {
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine(" ┌" + Line('─') + "┐");
-            Console.WriteLine(" │" + Center("STORE ECOSYSTEM  •  1 CUA SO DIEU KHIEN TAT CA", W) + "│");
+            Console.WriteLine(" │" + Center("STORE  •  ĐIỀU KHIỂN HỆ THỐNG", W) + "│");
             Console.WriteLine(" │" + Center("API :5000  •  Store :5173  •  Admin :5174", W) + "│");
             Console.WriteLine(" └" + Line('─') + "┘");
             Console.ResetColor();
@@ -81,6 +83,7 @@ public static class ConsoleMenu
         }
         void OpenUrl(string url)
         {
+            if (!openBrowser) return;
             try { Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }); } catch { }
         }
         async Task WaitForPortsAsync(IEnumerable<int> ports, TimeSpan timeout)
@@ -97,7 +100,7 @@ public static class ConsoleMenu
         async Task StartAllAsync()
         {
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("\n[+] DANG KHOI DONG TOAN BO HE THONG (API + Store + Admin)...");
+            Console.WriteLine("\n[+] ĐANG KHỞI ĐỘNG API, CỬA HÀNG, QUẢN TRỊ VÀ AI...");
             Console.ResetColor();
 
             // Program đã chuẩn bị schema; bật lại chỉ cần kiểm tra kết nối.
@@ -120,11 +123,11 @@ public static class ConsoleMenu
                     {
                         await app.StartAsync();
                     }
-                    Console.WriteLine("  [1/3] API :5000          -> Dang khoi dong...");
+                    Console.WriteLine("  [1/3] API :5000          -> Đang khởi động...");
                 }
                 else
                 {
-                    Console.WriteLine("  [1/3] API :5000          -> Da chay san.");
+                    Console.WriteLine("  [1/3] API :5000          -> Đã chạy sẵn.");
                 }
             }
             catch (Exception ex)
@@ -139,26 +142,40 @@ public static class ConsoleMenu
             if (!current.Contains(5173))
             {
                 LaunchStoreProcess();
-                Console.WriteLine("  [2/3] Store Frontend :5173 -> Dang khoi dong...");
+                Console.WriteLine("  [2/3] Cửa hàng :5173 -> Đang khởi động...");
             }
             else
             {
-                Console.WriteLine("  [2/3] Store Frontend :5173 -> Da chay san.");
+                Console.WriteLine("  [2/3] Cửa hàng :5173 -> Đã chạy sẵn.");
             }
 
             // 3. Admin 5174
             if (!current.Contains(5174))
             {
                 LaunchAdminProcess();
-                Console.WriteLine("  [3/3] Admin Dashboard :5174-> Dang khoi dong...");
+                Console.WriteLine("  [3/3] Quản trị :5174-> Đang khởi động...");
             }
             else
             {
-                Console.WriteLine("  [3/3] Admin Dashboard :5174-> Da chay san.");
+                Console.WriteLine("  [3/3] Quản trị :5174-> Đã chạy sẵn.");
             }
 
             // Cho ca 3 cong san sang dong thoi (toi da 12s)
             await WaitForPortsAsync(new[] { 5000, 5173, 5174 }, TimeSpan.FromSeconds(12));
+
+            var aiStatus = await aiRuntime.StartAsync(message => Console.WriteLine("  [AI] " + message));
+            if (aiStatus.ServerReady && !aiStatus.ModelAvailable)
+            {
+                Console.WriteLine($"  [AI] Máy này chưa có {aiStatus.Model}. Tải lần đầu cần Internet và vài GB dung lượng.");
+                Console.Write("  Tải mô hình ngay? Gõ CO để tải, Enter để bỏ qua: ");
+                if (string.Equals(Console.ReadLine()?.Trim(), "CO", StringComparison.OrdinalIgnoreCase))
+                {
+                    var downloaded = await aiRuntime.DownloadAsync(message => Console.WriteLine("  [AI] " + message));
+                    if (downloaded) aiStatus = await aiRuntime.StartAsync(message => Console.WriteLine("  [AI] " + message));
+                    else Console.WriteLine("  [AI] Chưa tải xong. Kiểm tra kết nối, dung lượng đĩa rồi bấm 1 để thử lại.");
+                }
+            }
+            Console.WriteLine("  [AI] " + aiStatus.Message);
 
             var ready = GetListeningPorts();
             if (ready.Contains(5000)) OpenUrl("http://127.0.0.1:5000/swagger");
@@ -167,7 +184,8 @@ public static class ConsoleMenu
 
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine(new[] { 5000, 5173, 5174 }.All(ready.Contains)
-                ? "\n[OK] API, Store và Admin đã sẵn sàng."
+                ? aiStatus.ModelLoaded ? "\n[OK] API, Store, quản trị và AI đã sẵn sàng."
+                    : "\n[!] Website đã sẵn sàng; AI chưa sẵn sàng. Xem hướng dẫn phía trên."
                 : "\n[!] Một dịch vụ chưa mở cổng. Kiểm tra terminal của dịch vụ đó.");
             Console.ResetColor();
             WaitKey();
@@ -175,6 +193,7 @@ public static class ConsoleMenu
 
         async Task StopAllCoreAsync()
         {
+            aiRuntime.StopOwnedServer();
             // 1. Dung API in-process neu dang chay
             if (IsApiRunning())
             {
@@ -201,14 +220,18 @@ public static class ConsoleMenu
 
             var finalCheck = GetListeningPorts();
             Console.WriteLine(finalCheck.Contains(5000)
-                ? "  [1/3] API :5000          -> Chua tat hoan toan."
-                : "  [1/3] API :5000          -> Da tat.");
+                ? "  [1/3] API :5000          -> Chưa tắt hoàn toàn."
+                : "  [1/3] API :5000          -> Đã tắt.");
             Console.WriteLine(finalCheck.Contains(5173)
-                ? "  [2/3] Store Frontend :5173 -> Chua tat hoan toan."
-                : "  [2/3] Store Frontend :5173 -> Da tat.");
+                ? "  [2/3] Cửa hàng :5173 -> Chưa tắt hoàn toàn."
+                : "  [2/3] Cửa hàng :5173 -> Đã tắt.");
             Console.WriteLine(finalCheck.Contains(5174)
-                ? "  [3/3] Admin Dashboard :5174-> Chua tat hoan toan."
-                : "  [3/3] Admin Dashboard :5174-> Da tat.");
+                ? "  [3/3] Quản trị :5174-> Chưa tắt hoàn toàn."
+                : "  [3/3] Quản trị :5174-> Đã tắt.");
+            var remainingAi = await aiRuntime.StatusAsync();
+            Console.WriteLine(remainingAi.ServerReady
+                ? "  [AI] Ollama được mở bên ngoài menu nên vẫn chạy độc lập."
+                : "  [AI] Dịch vụ Ollama hiện không chạy.");
         }
         while (true)
         {
@@ -234,34 +257,37 @@ public static class ConsoleMenu
             catch (Exception ex) { dbLine = $"LOI - {ex.Message}"; }
 
             Console.ForegroundColor = ConsoleColor.White;
-            Console.WriteLine(" TRANG THAI HE THONG (live)");
+            Console.WriteLine(" TRẠNG THÁI HỆ THỐNG");
             Console.ResetColor();
             StatusRow("API 5000 ", apiLive, apiLive ? "http://127.0.0.1:5000/swagger" : "dang tat");
             StatusRow("Store 5173", s5173, s5173 ? "http://127.0.0.1:5173" : "dang tat");
             StatusRow("Admin 5174", s5174, s5174 ? "http://127.0.0.1:5174" : "dang tat");
+            var aiState = await aiRuntime.StatusAsync();
+            StatusRow("Ollama", aiState.ServerReady, aiRuntime.Host);
+            StatusRow("Mô hình AI", aiState.ModelLoaded, aiState.Model + " · " + aiState.Message);
             DbRow(dbLine);
             Hr();
 
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine(" ▶ DIEU KHIEN HE THONG");
+            Console.WriteLine(" ▶ ĐIỀU KHIỂN HỆ THỐNG");
             Console.ResetColor();
-            PrintMenuItem("1 ", "★ BAT TOAN BO  (API :5000 + Store :5173 + Admin :5174 + Mo Web)", ConsoleColor.Green);
-            PrintMenuItem("2 ", "■ TAT TOAN BO  (Dung API :5000 + Dong ca hai Frontend)", ConsoleColor.Red);
-            PrintMenuItem("W ", "Mo lai Web     (Swagger / Store / Admin / Health)");
+            PrintMenuItem("1 ", "★ BẬT TẤT CẢ (API + Cửa hàng + Quản trị + AI)", ConsoleColor.Green);
+            PrintMenuItem("2 ", "■ TẮT WEBSITE VÀ AI DO MENU MỞ", ConsoleColor.Red);
+            PrintMenuItem("W ", "Mở lại trang web và trang kiểm tra hệ thống");
             Hr();
 
             Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine(" ⚙ QUAN TRI DU LIEU");
+            Console.WriteLine(" ⚙ QUẢN TRỊ DỮ LIỆU");
             Console.ResetColor();
-            PrintTwoCol(("3", "Tao Admin"), ("4", "Doi pass Admin"));
-            PrintTwoCol(("5", "Tao KH mau"), ("6", "Seed san pham"));
-            PrintTwoCol(("7", "Thong ke DB"), ("R", "Reset Database"));
-            PrintMenuItem("0 ", "Thoat (Tat toan bo he thong va dong)", ConsoleColor.DarkGray);
+            PrintTwoCol(("3", "Tạo quản trị viên"), ("4", "Đổi mật khẩu quản trị"));
+            PrintTwoCol(("5", "Tạo khách mẫu"), ("6", "Nạp sản phẩm mẫu"));
+            PrintTwoCol(("7", "Thống kê dữ liệu"), ("R", "Đặt lại cơ sở dữ liệu"));
+            PrintMenuItem("0 ", "Thoát và tắt dịch vụ của hệ thống", ConsoleColor.DarkGray);
 
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine(" └" + Line('─') + "┘");
             Console.ResetColor();
-            Console.Write("Chon [1/2/W/3-7/R/0]: ");
+            Console.Write("Chọn [1/2/W/3-7/R/0]: ");
 
             var input = Console.ReadLine();
             if (input is null) return;
@@ -280,7 +306,7 @@ public static class ConsoleMenu
                     Console.ResetColor();
                     await StopAllCoreAsync();
                     Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine("\n[OK] Da tat toan bo he thong thanh cong!");
+                    Console.WriteLine("\n[OK] Đã xử lý dừng hệ thống. Kiểm tra trạng thái từng dịch vụ phía trên.");
                     Console.ResetColor();
                     WaitKey();
                     break;
@@ -394,7 +420,7 @@ public static class ConsoleMenu
                 cur = cur.Parent;
             }
         }
-        return @"D:\Web";
+        throw new DirectoryNotFoundException("Hãy đặt hai thư mục Store và Store-Admin cạnh nhau, rồi chạy menu từ Store-Admin/server-dotnet.");
     }
 
     private static void StartApiConsole()
@@ -434,7 +460,7 @@ public static class ConsoleMenu
             var cmd = Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = $"/k title Store Frontend :5173 && cd /d \"{dir}\" && npm.cmd run dev",
+                Arguments = $"/k title Cửa hàng :5173 && cd /d \"{dir}\" && npm.cmd run dev",
                 UseShellExecute = true
             });
             if (cmd != null) _storeFrontendCmdPid = cmd.Id;
@@ -442,7 +468,7 @@ public static class ConsoleMenu
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"  [Store] Loi mo tien trinh: {ex.Message}");
+            Console.WriteLine($"  [Store] Lỗi mở tiến trình: {ex.Message}");
             Console.ResetColor();
         }
     }
@@ -456,7 +482,7 @@ public static class ConsoleMenu
             var cmd = Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = $"/k title Admin Dashboard :5174 && cd /d \"{dir}\" && npm.cmd run dev",
+                Arguments = $"/k title Quản trị :5174 && cd /d \"{dir}\" && npm.cmd run dev",
                 UseShellExecute = true
             });
             if (cmd != null) _adminFrontendCmdPid = cmd.Id;
@@ -464,7 +490,7 @@ public static class ConsoleMenu
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"  [Admin] Loi mo tien trinh: {ex.Message}");
+            Console.WriteLine($"  [Admin] Lỗi mở tiến trình: {ex.Message}");
             Console.ResetColor();
         }
     }
@@ -790,6 +816,7 @@ public static class ConsoleMenu
     private static void WaitKey()
     {
         Console.WriteLine("\n👉 Nhấn phím bất kỳ để quay lại Menu...");
-        Console.ReadKey();
+        if (Console.IsInputRedirected) Console.ReadLine();
+        else Console.ReadKey();
     }
 }

@@ -99,6 +99,7 @@ public sealed partial class StoreDb
             ("@reference", reference), ("@received", received))) consume.ExecuteNonQuery();
         QueueNotification(connection, transaction, "invoice:customer:" + id, "invoice.customer", new { orderId = id });
         QueueAdminNotifications(connection, transaction, "invoice:admin:" + id, "invoice.admin", new { orderId = id });
+        QueueAdminEvent(connection, transaction, "order:paid:" + id, "order:paid", new { orderId = id, pointsEarned = points });
     }
 
     public void AdvanceFulfillment(string id, string next)

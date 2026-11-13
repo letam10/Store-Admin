@@ -134,6 +134,7 @@ builder.Services.AddHttpClient<StoreApi.Services.SePayClient>(client => client.T
 builder.Services.AddHostedService<StoreApi.Services.SePayWorker>();
 builder.Services.AddSingleton<StoreApi.Services.AiChatService>();
 builder.Services.AddSingleton<StoreApi.Services.OllamaChatClient>();
+builder.Services.AddSingleton<StoreApi.Services.OllamaRuntime>();
 builder.Services.AddSingleton<StoreApi.Services.ChatStreamService>();
 
 builder.Services.AddHttpContextAccessor();
@@ -175,6 +176,9 @@ try
     try
     {
         storeDb.SeedDefaultProducts(force: false);
+        var catalogUpdate = storeDb.ApplyVietnameseCatalogText();
+        if (catalogUpdate.Renamed > 0)
+            Console.WriteLine($"[StoreDb] Đã cập nhật tên tiếng Việt cho {catalogUpdate.Renamed} sản phẩm.");
     }
     catch (Exception seedEx)
     {
@@ -197,7 +201,7 @@ var db = app.Services.GetRequiredService<StoreDb>();
 
 if (isInteractive)
 {
-    await ConsoleMenu.RunAsync(db, app);
+    await ConsoleMenu.RunAsync(db, app, openBrowser: !args.Contains("--no-browser"));
 }
 else
 {

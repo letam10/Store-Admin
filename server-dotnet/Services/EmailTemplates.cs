@@ -1,6 +1,5 @@
 using System;
 using System.Net;
-using System.Text;
 
 namespace StoreApi.Services;
 
@@ -29,7 +28,7 @@ public static class EmailTemplates
           <tr>
             <td style="padding:32px 32px 24px;text-align:center;background:#fafbfc;border-bottom:1px solid #f1f5f9;">
               <div style="font-size:28px;font-weight:900;letter-spacing:-0.5px;color:#0f172a;line-height:1;">store<span style="color:#10b981;">.</span></div>
-              <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:1.5px;margin-top:6px;">Smart Living & Convenience</div>
+              <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:1.5px;margin-top:6px;">Những điều nhỏ, cho một ngày tốt hơn</div>
             </td>
           </tr>
           <tr>
@@ -60,14 +59,14 @@ public static class EmailTemplates
                 <tr>
                   <td style="padding:13px 18px;font-size:13px;color:#64748b;font-weight:600;">🏅 Hạng thành viên</td>
                   <td align="right" style="padding:13px 18px;">
-                    <span style="background:#fef3c7;border:1px solid #fde68a;color:#92400e;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:800;">ĐỒNG (BRONZE)</span>
+                    <span style="background:#fef3c7;border:1px solid #fde68a;color:#92400e;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:800;">ĐỒNG</span>
                   </td>
                 </tr>
               </table>
 
               <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;margin-bottom:24px;font-size:13px;color:#334155;line-height:1.7;">
                 <div>🎁 <strong>Tích điểm mua sắm:</strong> Nhận điểm trên mỗi đơn hàng để nâng hạng và nhận quà.</div>
-                <div>🎡 <strong>Vòng quay may mắn:</strong> Săn voucher giảm giá và mã miễn phí vận chuyển.</div>
+                <div>🎡 <strong>Vòng quay may mắn:</strong> Nhận mã giảm giá và mã miễn phí vận chuyển.</div>
                 <div>🔒 <strong>Bảo mật:</strong> Bật xác thực 2 lớp (2FA) bất cứ lúc nào trong trang cá nhân.</div>
               </div>
 
@@ -93,164 +92,7 @@ public static class EmailTemplates
 """;
     }
     public static string BuildInvoiceEmailHtml(OrderInvoiceData invoice, string frontendUrl)
-    {
-        var itemsRows = new StringBuilder();
-        int idx = 1;
-        foreach (var item in invoice.Items)
-        {
-            itemsRows.Append($"""
-            <tr style="border-bottom:1px solid #f1f5f9;">
-              <td style="padding:10px 8px;text-align:center;color:#94a3b8;font-size:12px;">{idx++}</td>
-              <td style="padding:10px 8px;">
-                <div style="font-weight:700;color:#0f172a;font-size:13px;line-height:1.4;">{WebUtility.HtmlEncode(item.Name)}</div>
-                <div style="font-size:11px;color:#64748b;margin-top:2px;">{item.Quantity} × {item.Price:N0} ₫</div>
-              </td>
-              <td style="padding:10px 8px;text-align:center;">
-                <span style="background:#f1f5f9;color:#334155;padding:2px 7px;border-radius:6px;font-size:11px;font-weight:700;">x{item.Quantity}</span>
-              </td>
-              <td style="padding:10px 8px;text-align:right;font-weight:700;color:#0f172a;font-size:13px;">{item.TotalPrice:N0} ₫</td>
-            </tr>
-            """);
-        }
-
-        var fulfillmentLabel = invoice.Fulfillment == "pickup" ? "Nhận tại cửa hàng" : "Giao tận nơi";
-        var paymentLabel = invoice.PaymentMethod switch
-        {
-            "voucher" => "Voucher đã thanh toán đủ — không cần chuyển tiền",
-            "bank_transfer" => "Chuyển khoản / VietQR",
-            "cash" => "Tiền mặt tại quầy",
-            "cod" => "Thanh toán khi nhận hàng (COD)",
-            _ => invoice.PaymentMethod
-        };
-
-        var bankBox = invoice.PaymentMethod == "bank_transfer" ? $"""
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;margin-top:16px;">
-          <tr>
-            <td style="padding:14px 16px;">
-              <div style="font-size:11px;font-weight:800;color:#166534;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">
-                🏦 THÔNG TIN CHUYỂN KHOẢN (VIETQR):
-              </div>
-              <div style="font-size:13px;color:#14532d;line-height:1.7;">
-                Ngân hàng: <strong>MB Bank (Quân Đội)</strong> · STK: <strong style="color:#15803d;background:#dcfce7;padding:1px 6px;border-radius:4px;">0912345678</strong><br>
-                Chủ TK: <strong>STORE MINI MART</strong> · Cú pháp: <strong style="color:#166534;background:#ffffff;border:1px dashed #22c55e;padding:2px 6px;border-radius:4px;">{invoice.OrderId}</strong>
-              </div>
-            </td>
-          </tr>
-        </table>
-        """ : "";
-
-        return $"""
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hóa đơn #{invoice.OrderId}</title>
-</head>
-<body style="margin:0;padding:32px 16px;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:580px;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 10px 30px -5px rgba(15,23,42,0.06);">
-          <tr>
-            <td style="height:5px;background:linear-gradient(90deg, #10b981 0%, #059669 100%);line-height:5px;font-size:0;">&nbsp;</td>
-          </tr>
-          <tr>
-            <td style="padding:24px 28px;background:#0f172a;color:#ffffff;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td>
-                    <div style="font-size:26px;font-weight:900;letter-spacing:-0.5px;color:#ffffff;line-height:1;">store<span style="color:#10b981;">.</span></div>
-                    <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:4px;">Hóa đơn điện tử</div>
-                  </td>
-                  <td align="right">
-                    <div style="background:#1e293b;border:1px solid #334155;display:inline-block;padding:4px 10px;border-radius:6px;font-weight:800;font-size:13px;color:#38bdf8;">
-                      #{invoice.OrderId}
-                    </div>
-                    <div style="color:#94a3b8;font-size:11px;margin-top:4px;">{invoice.CreatedAt}</div>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:24px 28px;">
-              <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-left:4px solid #10b981;border-radius:10px;padding:12px 16px;font-size:13px;color:#065f46;margin-bottom:18px;">
-                <strong>✓ Đặt hàng thành công!</strong> Đơn hàng đã được lưu trữ trên hệ thống và đang được chuẩn bị.
-              </div>
-
-              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;margin-bottom:20px;font-size:13px;line-height:1.7;">
-                <div style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px;">Thông tin nhận hàng & thanh toán:</div>
-                <div>👤 Người nhận: <strong>{WebUtility.HtmlEncode(invoice.Recipient)}</strong> ({WebUtility.HtmlEncode(invoice.Phone)})</div>
-                <div>📍 Địa chỉ: {WebUtility.HtmlEncode(invoice.Address)}</div>
-                <div style="margin-top:4px;">
-                  🚚 <span style="background:#e2e8f0;color:#1e293b;padding:2px 7px;border-radius:5px;font-size:11px;font-weight:700;">{fulfillmentLabel}</span>
-                  &nbsp;·&nbsp; 💳 <span style="background:#e0f2fe;color:#0369a1;padding:2px 7px;border-radius:5px;font-size:11px;font-weight:700;">{paymentLabel}</span>
-                </div>
-              </div>
-
-              <div style="font-size:12px;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;">Chi tiết sản phẩm ({invoice.Items.Count}):</div>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:16px;">
-                <thead>
-                  <tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:11px;color:#64748b;text-transform:uppercase;">
-                    <th style="padding:8px;text-align:center;width:26px;">#</th>
-                    <th style="padding:8px;text-align:left;">Sản phẩm</th>
-                    <th style="padding:8px;text-align:center;width:40px;">SL</th>
-                    <th style="padding:8px;text-align:right;width:95px;">Thành tiền</th>
-                  </tr>
-                </thead>
-                <tbody>{itemsRows}</tbody>
-              </table>
-
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;margin-bottom:12px;">
-                <tr>
-                  <td width="45%">&nbsp;</td>
-                  <td width="55%">
-                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                      <tr>
-                        <td style="padding:3px 0;color:#64748b;">Tạm tính:</td>
-                        <td align="right" style="padding:3px 0;font-weight:700;color:#0f172a;">{invoice.Subtotal:N0} ₫</td>
-                      </tr>
-                      <tr>
-                        <td style="padding:3px 0;color:#64748b;">Giảm tiền hàng:</td>
-                        <td align="right" style="padding:3px 0;font-weight:700;color:#e11d48;">- {invoice.Discount:N0} ₫</td>
-                      </tr>
-                      <tr>
-                        <td style="padding:3px 0;color:#64748b;">Phí vận chuyển sau giảm:</td>
-                        <td align="right" style="padding:3px 0;font-weight:700;color:#0f172a;">{invoice.ShippingFee:N0} ₫</td>
-                      </tr>
-                      <tr>
-                        <td style="padding:8px 0 0;border-top:2px solid #0f172a;font-size:13px;font-weight:800;color:#0f172a;">TỔNG TIỀN:</td>
-                        <td align="right" style="padding:8px 0 0;border-top:2px solid #0f172a;font-size:17px;font-weight:900;color:#059669;">{invoice.Total:N0} ₫</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-
-              {bankBox}
-
-              <div style="text-align:center;margin:24px 0 6px;">
-                <a href="{frontendUrl}/account" style="display:inline-block;background:linear-gradient(135deg, #0f172a 0%, #1e293b 100%);color:#ffffff;text-decoration:none;font-weight:700;font-size:13px;padding:12px 28px;border-radius:10px;box-shadow:0 4px 14px rgba(15,23,42,0.25);">
-                  Tra Cứu Chi Tiết Đơn Hàng →
-                </a>
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:18px 28px;background:#f8fafc;border-top:1px solid #f1f5f9;text-align:center;font-size:12px;color:#94a3b8;line-height:1.6;">
-              © 2026 Store. Cảm ơn quý khách đã tin tưởng và mua sắm!<br>
-              Hỗ trợ khách hàng: cskh@store.local · Hotline: 1900 1234
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-""";
-    }
+        => InvoiceEmailTemplate.Render(invoice, frontendUrl);
 
     public static string BuildSupportRequestEmailHtml(SupportRequestData request, string frontendUrl)
     {

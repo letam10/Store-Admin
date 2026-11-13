@@ -41,7 +41,7 @@ public sealed class AdminAccessFilter(StoreDb db) : IAsyncActionFilter
 
     public static bool StaffAllowed(string action, string? module, string? afterSalesAction) => action switch
     {
-        "Session" or "Logout" or "Presence" or "Products" or "Customers" or "AfterSales" or "Reviews" or "ReplyReview" => true,
+        "Session" or "Logout" or "Presence" or "EventsStream" or "Products" or "Customers" or "AfterSales" or "Reviews" or "ReplyReview" => true,
         "CreateProduct" or "UpdateProduct" or "DeleteProduct" or "Offer" => true,
         "Orders" or "OrderPaid" or "OrderFulfillment" or "OrderCancel" or "OrderReceipt" => true,
         "ListUnmatchedPayments" or "RecordUnmatchedPayment" or "RefundUnmatchedPayment" => true,

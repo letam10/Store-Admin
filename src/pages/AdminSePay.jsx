@@ -20,8 +20,8 @@ const reasons = {
   IDEMPOTENCY_CONFLICT: 'Đơn đã nhận một giao dịch khác.',
   PAYMENT_REFERENCE_USED: 'Mã giao dịch đã được ghi nhận.',
   PRODUCT_UNAVAILABLE: 'Tiền vào đúng hạn nhưng hiện không đủ hàng để khôi phục đơn.',
-  INVALID_VOUCHER: 'Cần kiểm tra voucher của phiên đã giải phóng.',
-  VOUCHER_RESERVED: 'Voucher đang được giữ cho một phiên khác.',
+  INVALID_VOUCHER: 'Cần kiểm tra mã giảm giá của phiên đã giải phóng.',
+  VOUCHER_RESERVED: 'Mã giảm giá đang được giữ cho một phiên khác.',
 }
 
 export default function AdminSePay({ onSelectPayment }) {
