@@ -803,7 +803,7 @@ public sealed partial class StoreDb
 
     private static readonly Dictionary<string, string> DefaultAppearance = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["brandName"] = "store",
+        ["brandName"] = "OmniCart",
         ["brandTagline"] = "EVERYDAY",
         ["headerSearchPlaceholder"] = "Tìm sản phẩm, danh mục…",
         ["navHome"] = "Trang chủ",
@@ -816,7 +816,7 @@ public sealed partial class StoreDb
         ["heroDescription"] = "Khám phá sản phẩm nổi bật, ưu đãi và các nhóm hàng dễ tìm.",
         ["heroButton"] = "Khám phá cửa hàng",
         ["footerText"] = "Những điều nhỏ, cho một ngày tốt hơn.",
-        ["footerSupport"] = "Đội ngũ Store luôn sẵn sàng hỗ trợ bạn.",
+        ["footerSupport"] = "Đội ngũ OmniCart luôn sẵn sàng hỗ trợ bạn.",
         ["footerInfo"] = "Giá và ưu đãi được cập nhật tại cửa hàng. Điểm thành viên được cộng sau khi xác nhận thanh toán.",
         ["footerShopTitle"] = "Mua sắm",
         ["footerProducts"] = "Hàng hóa",
@@ -827,12 +827,12 @@ public sealed partial class StoreDb
         ["footerContact"] = "Địa chỉ & liên hệ",
         ["footerAccount"] = "Tài khoản của bạn",
         ["footerInfoTitle"] = "Thông tin",
-        ["footerCopyright"] = "© 2026 Store",
+        ["footerCopyright"] = "© 2026 OmniCart",
         ["accentColor"] = "#4f8b67",
-        ["bannerLabel"] = "STORE EVERYDAY",
+        ["bannerLabel"] = "OMNICART EVERYDAY",
         ["contactAddress"] = "123 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh",
         ["contactPhone"] = "0901234567",
-        ["contactEmail"] = "support@store.vn",
+        ["contactEmail"] = "support@omnicart.vn",
         ["contactHours"] = "08:00 - 21:00 mỗi ngày"
     };
 

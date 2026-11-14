@@ -155,13 +155,13 @@ public sealed class EmailService
             }
             else
             {
-                var addr = !string.IsNullOrWhiteSpace(smtpFrom) ? smtpFrom : (!string.IsNullOrWhiteSpace(smtpUser) ? smtpUser : "no-reply@store.local");
-                message.From.Add(new MailboxAddress("Store Official", addr));
+                var addr = !string.IsNullOrWhiteSpace(smtpFrom) ? smtpFrom : (!string.IsNullOrWhiteSpace(smtpUser) ? smtpUser : "no-reply@omnicart.local");
+                message.From.Add(new MailboxAddress("OmniCart Official", addr));
             }
 
             message.To.Add(new MailboxAddress(recipientName ?? toEmail, toEmail));
             message.Subject = subject;
-            if (messageKey is not null) message.MessageId = Tokens.Sha256(messageKey) + "@store.local";
+            if (messageKey is not null) message.MessageId = Tokens.Sha256(messageKey) + "@omnicart.local";
 
             var bodyBuilder = new BodyBuilder { HtmlBody = htmlBody };
             message.Body = bodyBuilder.ToMessageBody();

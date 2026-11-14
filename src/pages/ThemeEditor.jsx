@@ -4,16 +4,16 @@ import { DEFAULT_THEME, THEME_MODES, THEME_PRESET_IDS, normalizeTheme, presetThe
 import './ThemeEditor.css'
 
 const appearanceDefaults = {
-  brandName: 'store', brandTagline: 'EVERYDAY', headerSearchPlaceholder: 'Tìm sản phẩm, danh mục…',
+  brandName: 'OmniCart', brandTagline: 'EVERYDAY', headerSearchPlaceholder: 'Tìm sản phẩm, danh mục…',
   navHome: 'Trang chủ', navProducts: 'Hàng hóa', navFavorites: 'Yêu thích', navRewards: 'May mắn',
   navMembership: 'Thành viên', navContact: 'Địa chỉ & liên hệ', heroTitle: 'Chọn món bạn yêu. Sống theo cách riêng.',
   heroDescription: 'Khám phá sản phẩm nổi bật, ưu đãi và các nhóm hàng dễ tìm.', heroButton: 'Khám phá cửa hàng',
-  footerText: 'Những điều nhỏ, cho một ngày tốt hơn.', footerSupport: 'Đội ngũ Store luôn sẵn sàng hỗ trợ bạn.',
+  footerText: 'Những điều nhỏ, cho một ngày tốt hơn.', footerSupport: 'Đội ngũ OmniCart luôn sẵn sàng hỗ trợ bạn.',
   footerInfo: 'Giá và ưu đãi được cập nhật tại cửa hàng. Điểm thành viên được cộng sau khi xác nhận thanh toán.',
   footerShopTitle: 'Mua sắm', footerProducts: 'Hàng hóa', footerCart: 'Giỏ hàng', footerMembership: 'Thành viên',
   footerRewards: 'Vòng quay may mắn', footerSupportTitle: 'Hỗ trợ', footerContact: 'Địa chỉ & liên hệ',
-  footerAccount: 'Tài khoản của bạn', footerInfoTitle: 'Thông tin', footerCopyright: '© 2026 Store',
-  accentColor: '#4F8B67', bannerLabel: 'STORE EVERYDAY', contactAddress: '', contactPhone: '', contactEmail: '', contactHours: '',
+  footerAccount: 'Tài khoản của bạn', footerInfoTitle: 'Thông tin', footerCopyright: '© 2026 OmniCart',
+  accentColor: '#4F8B67', bannerLabel: 'OMNICART EVERYDAY', contactAddress: '', contactPhone: '', contactEmail: '', contactHours: '',
 }
 const legacyFields = Object.entries(appearanceDefaults)
 const colorKeys = ['page', 'surface', 'surfaceAlt', 'text', 'muted', 'border', 'accent', 'accentStrong', 'accentSoft', 'control', 'controlActive', 'danger', 'success']
@@ -76,7 +76,7 @@ function AdminThemePreview({ theme, mode }) {
   return <div className="theme-preview theme-preview--admin" style={variables}>
     <div className="theme-admin-preview__corner theme-admin-preview__corner--top" />
     <div className="theme-admin-preview__corner theme-admin-preview__corner--bottom" />
-    <aside className="theme-admin-preview__sidebar"><strong>store. <small>QUẢN TRỊ</small></strong><button type="button" className="is-active">✦ Giao diện</button><button type="button">◫ Hàng hóa</button><button type="button">★ Đánh giá</button></aside>
+    <aside className="theme-admin-preview__sidebar"><strong>OmniCart. <small>QUẢN TRỊ</small></strong><button type="button" className="is-active">✦ Giao diện</button><button type="button">◫ Hàng hóa</button><button type="button">★ Đánh giá</button></aside>
     <main className="theme-admin-preview__main"><small>GIAO DIỆN QUẢN TRỊ</small><h3>Không gian quản trị</h3><p>Màu thanh bên, bảng điều khiển và nút đang chọn được xem trước tại đây.</p><div className="theme-admin-preview__card"><b>Chỉnh giao diện</b><span>Sáng / Tối · Xem trước</span><button type="button">Đang chọn</button></div></main>
   </div>
 }

@@ -79,7 +79,7 @@ public static class EmailTemplates
           </tr>
           <tr>
             <td style="padding:20px 32px;background:#f8fafc;border-top:1px solid #f1f5f9;text-align:center;font-size:12px;color:#94a3b8;line-height:1.6;">
-              © 2026 Store Inc. Tất cả quyền được bảo lưu.<br>
+              © 2026 OmniCart Inc. Tất cả quyền được bảo lưu.<br>
               Email tự động từ hệ thống xác thực. Vui lòng không trả lời thư này.
             </td>
           </tr>
@@ -243,14 +243,14 @@ public static class EmailTemplates
 
               <div style="text-align:center;margin-bottom:8px;">
                 <a href="{frontendUrl}" style="display:inline-block;background:linear-gradient(135deg, #059669 0%, #047857 100%);color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:14px 34px;border-radius:12px;box-shadow:0 6px 18px -2px rgba(5,150,105,0.35);">
-                  Quay Lại Store →
+                  Quay Lại OmniCart →
                 </a>
               </div>
             </td>
           </tr>
           <tr>
             <td style="padding:20px 32px;background:#f8fafc;border-top:1px solid #f1f5f9;text-align:center;font-size:12px;color:#94a3b8;line-height:1.6;">
-              © 2026 Store Inc. Tất cả quyền được bảo lưu.<br>
+              © 2026 OmniCart Inc. Tất cả quyền được bảo lưu.<br>
               Thông báo bảo mật tự động gửi đến {e}. Vui lòng không trả lời thư này.
             </td>
           </tr>
