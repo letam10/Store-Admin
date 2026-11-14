@@ -56,13 +56,30 @@ function Get-ConnectionString([string]$TargetDb = '') {
         $server = $SqlInstance
     } else {
         $envFile = Join-Path $DotnetDir '.env'
+        $foundInEnv = $false
         if (Test-Path $envFile) {
             $line = Get-Content $envFile | Where-Object { $_ -match '^ConnectionStrings__StoreDb=(.+)$' } | Select-Object -First 1
             if ($line -and ($line -match 'Server=([^;]+)')) {
                 $server = $matches[1].Trim()
+                $foundInEnv = $true
             }
             if ([string]::IsNullOrWhiteSpace($TargetDb) -and $line -and ($line -match 'Database=([^;]+)')) {
                 $dbName = $matches[1].Trim()
+            }
+        }
+        if (-not $foundInEnv) {
+            $appFile = Join-Path $DotnetDir 'appsettings.json'
+            if (Test-Path $appFile) {
+                try {
+                    $appJson = Get-Content $appFile -Raw | ConvertFrom-Json
+                    $rawCs = $appJson.ConnectionStrings.StoreDb
+                    if ($rawCs -and ($rawCs -match 'Server=([^;]+)')) {
+                        $server = $matches[1].Trim()
+                    }
+                    if ([string]::IsNullOrWhiteSpace($TargetDb) -and $rawCs -and ($rawCs -match 'Database=([^;]+)')) {
+                        $dbName = $matches[1].Trim()
+                    }
+                } catch {}
             }
         }
     }
