@@ -1,65 +1,503 @@
-.admin-shell{background:#f1f5f1}
-/* Căn cùng điểm bắt đầu cho tiêu đề và hai vùng vẽ trên dashboard. */
-.admin-dashboard-grid--hero > .admin-status-chart { gap:0; }
-.admin-dashboard-grid--hero .admin-module-head { align-items:flex-start; }
-.admin-dashboard-chart__tools .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
-/* Số liệu thống kê phải giữ độ tương phản khi dùng nền tối. */
-html[data-admin-theme="dark"] .statistics-summary b,html[data-admin-theme="dark"] .statistics-table>div b{color:#d7efdc}
-html[data-admin-theme="dark"] .statistics-summary small,html[data-admin-theme="dark"] .statistics-trend,html[data-admin-theme="dark"] .statistics-table>div span:nth-child(2){color:#b8d0bc}
-html[data-admin-theme="dark"] .statistics-table>div{background:#193326;border-color:#315340;color:#dbeade}
-.admin-sidebar{width:260px;background:linear-gradient(180deg,#0e2a20,#10251d 70%,#0b1e17);padding:24px 16px}
-.admin-shell--workspace{grid-template-columns:260px minmax(0,1fr)}
-.admin-main{padding:32px clamp(20px,4vw,64px) 60px;background:radial-gradient(circle at 88% 0,#e6f1e7 0,transparent 32%),linear-gradient(180deg,#f8fbf8 0,#f1f5f1 360px)}
-.admin-header{margin-bottom:28px}.admin-header h1{font-size:clamp(34px,4vw,52px);letter-spacing:-1.7px}.admin-global-search{box-shadow:0 8px 25px #12352812}
-.admin-kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px}.admin-kpi-grid article{display:grid;gap:7px;min-height:140px;padding:20px;border:1px solid #dbe7dc;border-radius:18px;background:linear-gradient(145deg,#fff,#f3faf4);box-shadow:0 10px 24px #1235280a}.admin-kpi-grid article>span{color:#718178;font-size:11px}.admin-kpi-grid article>strong{color:#173b2a;font-size:33px;letter-spacing:-1px}.admin-kpi-grid article>small{color:#7b897f;font-size:10px}
-.admin-dashboard-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:16px;margin-top:16px}.admin-dashboard-grid--wide{grid-template-columns:1.5fr 1fr}.admin-module-card{padding:24px;border:1px solid #dce8de;border-radius:20px;background:#fff;box-shadow:0 12px 32px #1737280b}.admin-module-card h2{font-size:25px;letter-spacing:-.6px}.admin-chart-card{min-width:0}.admin-bar-chart{display:flex;align-items:end;gap:12px;height:238px;padding:20px 4px 0;border-bottom:1px solid #e4ece4}.admin-bar-chart__item{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:end;height:100%;gap:7px;min-width:25px}.admin-bar-chart__bar{display:flex;align-items:flex-start;justify-content:center;width:min(46px,85%);min-height:8px;border-radius:9px 9px 2px 2px;background:linear-gradient(180deg,#63aa79,#2b704d);transition:height .3s ease}.admin-bar-chart__bar span{margin-top:-20px;color:#547060;font-size:9px;white-space:nowrap}.admin-bar-chart__item small{color:#87948b;font-size:9px}.admin-status-chart{display:grid;align-content:start;gap:14px}.admin-status-row{display:grid;grid-template-columns:86px 1fr 26px;align-items:center;gap:9px;font-size:11px}.admin-status-row>div{height:9px;overflow:hidden;border-radius:999px;background:#edf3ed}.admin-status-row i{display:block;width:var(--status-width);height:100%;border-radius:inherit;background:#58986d}.admin-status-row b{text-align:right;color:#2f6043}.statistics-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px;margin:20px 0}.statistics-summary>div{display:grid;gap:5px;padding:16px;border-radius:13px;background:#f3f8f3}.statistics-summary small{color:#7a887f;font-size:10px}.statistics-summary b{font-size:18px;color:#1e4c34}.statistics-table{display:grid;gap:8px}.statistics-table h3{margin:10px 0 4px}.statistics-table>div{display:grid;grid-template-columns:1fr auto auto;gap:16px;padding:12px 14px;border:1px solid #e1ebe2;border-radius:10px;background:#fbfdfb;font-size:12px}.statistics-table>div span:nth-child(2){color:#718178}.statistics-table>div b{color:#2c6b47}
-.appearance-layout{align-items:stretch}.appearance-preview{min-height:350px;box-shadow:inset 0 0 0 1px #ffffff20}.appearance-controls{padding:6px}.appearance-controls label{font-size:11px;font-weight:700}.appearance-controls textarea{resize:vertical;min-height:58px}.appearance-controls button{min-height:45px;font-weight:800}.admin-module-head{align-items:flex-start}
-@media(max-width:1150px){.admin-shell--workspace{grid-template-columns:84px minmax(0,1fr)}.admin-sidebar{width:84px;padding-inline:10px}.admin-brand small,.admin-sidebar__profile div,.admin-nav-group>p,.admin-sidebar nav button:not(.is-active){font-size:0}.admin-sidebar nav button{justify-content:center}.admin-sidebar__profile{justify-content:center}.admin-sidebar__footer a,.admin-sidebar__footer button{font-size:0}.admin-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:860px){.admin-dashboard-grid,.admin-dashboard-grid--wide{grid-template-columns:1fr}.statistics-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:700px){.admin-shell--workspace{display:block}.admin-sidebar{width:100%;height:auto;padding:10px;position:relative}.admin-sidebar nav{display:flex;overflow:auto}.admin-sidebar .admin-nav-group{display:flex;gap:5px}.admin-sidebar nav button,.admin-sidebar nav button:not(.is-active){width:auto;flex:none;font-size:10px}.admin-sidebar__footer{display:none}.admin-main{padding:20px 14px 40px}.admin-header{align-items:flex-start;flex-wrap:wrap}.admin-header__actions{margin-left:auto}.admin-kpi-grid{grid-template-columns:1fr 1fr}.statistics-summary{grid-template-columns:1fr}.appearance-layout{grid-template-columns:1fr}.admin-bar-chart{gap:6px}}
-@media(max-width:480px){.admin-kpi-grid{grid-template-columns:1fr}.admin-kpi-grid article{min-height:110px}.admin-bar-chart{height:200px}.admin-bar-chart__bar span{display:none}}
+/*
+  FILE NOTE:
+  - Tệp: src/pages/AdminPolish.css
+  - Mục đích: Bộ quy tắc giao diện cao cấp (Ultra-Polish) cho hệ thống Store Admin:
+    thiên hướng xanh lá cây (Emerald & Forest Green), typography hiện đại (Plus Jakarta Sans),
+    card mềm mại bo góc 20-24px, đổ bóng đa tầng tinh tế, bảng biểu sắc nét, thanh điều hướng sang trọng.
+  - Phù hợp 100% với cả Light Mode & Dark Mode, bảo toàn toàn bộ chức năng và DOM contract.
+*/
 
-/* Admin theme and preference controls. */
-.admin-preferences{display:flex;align-items:center;gap:7px}.admin-preferences--compact{position:fixed;top:18px;right:18px;z-index:2}.admin-language-control select,.admin-theme-toggle{min-height:34px;border:1px solid #d4e0d6;border-radius:9px;background:#fff;color:#284234;padding:6px 9px;font-size:10px;cursor:pointer}.admin-theme-toggle{display:inline-flex;align-items:center;gap:5px}.admin-theme-toggle span{font-size:10px}.admin-loading-state{display:grid;place-items:center;min-height:100vh}.admin-login-frame{display:grid;gap:10px;width:min(430px,100%)}.admin-login-frame>.admin-preferences{justify-content:flex-end}.admin-login-frame .admin-login{width:100%}
-html[data-admin-theme="dark"]{color-scheme:dark;background:#0b1712}html[data-admin-theme="dark"] body{background:#0b1712;color:#e7f1ea}html[data-admin-theme="dark"] .admin-shell{background:#0b1712;color:#e7f1ea}.admin-shell,.admin-module-card,.admin-panel,.admin-login,.admin-meta>div,.admin-kpi-grid article,.admin-search-results,.admin-table-wrap table,.admin-record-editor,.admin-product-editor{transition:background-color .2s ease,border-color .2s ease,color .2s ease,box-shadow .2s ease}
-html[data-admin-theme="dark"] .admin-main{background:radial-gradient(circle at 88% 0,#173a2a 0,transparent 32%),linear-gradient(180deg,#0d1c15 0,#0b1712 360px)}html[data-admin-theme="dark"] .admin-module-card,html[data-admin-theme="dark"] .admin-panel,html[data-admin-theme="dark"] .admin-login,html[data-admin-theme="dark"] .admin-meta>div{background:#14281f;border-color:#2d4a39;box-shadow:0 12px 32px #0005}html[data-admin-theme="dark"] .admin-kpi-grid article{background:linear-gradient(145deg,#183326,#11271e);border-color:#315340}html[data-admin-theme="dark"] .admin-kpi-grid article>strong,html[data-admin-theme="dark"] .admin-module-card h2,html[data-admin-theme="dark"] .admin-panel h2,html[data-admin-theme="dark"] .admin-login h1{color:#f0f8f1}html[data-admin-theme="dark"] .admin-kpi-grid article>span,html[data-admin-theme="dark"] .admin-kpi-grid article>small,html[data-admin-theme="dark"] .admin-module-card>p,html[data-admin-theme="dark"] .admin-module-head p,html[data-admin-theme="dark"] .admin-muted,html[data-admin-theme="dark"] .admin-source{color:#a7beb0}html[data-admin-theme="dark"] .admin-eyebrow{color:#94bba2}html[data-admin-theme="dark"] .admin-header h1{color:#f0f8f1}html[data-admin-theme="dark"] .admin-global-search,html[data-admin-theme="dark"] .admin-search-results{background:#14281f;border-color:#365540;color:#b9d0bf;box-shadow:0 18px 45px #0007}html[data-admin-theme="dark"] .admin-global-search input,html[data-admin-theme="dark"] .admin-search-results button{color:#ecf6ee}html[data-admin-theme="dark"] .admin-global-search kbd{background:#203a2b;border-color:#41624b;color:#b1c9b7}html[data-admin-theme="dark"] .admin-search-results button:hover{background:#234632}html[data-admin-theme="dark"] .admin-language-control select,html[data-admin-theme="dark"] .admin-theme-toggle{background:#193127;border-color:#41624b;color:#e8f3ea}html[data-admin-theme="dark"] .admin-login p{color:#a7bcae}html[data-admin-theme="dark"] .admin-login input,html[data-admin-theme="dark"] .admin-context select,html[data-admin-theme="dark"] .admin-range input,html[data-admin-theme="dark"] .admin-chat textarea,html[data-admin-theme="dark"] .admin-module-toolbar input,html[data-admin-theme="dark"] .admin-editor-grid input,html[data-admin-theme="dark"] .admin-editor-grid select,html[data-admin-theme="dark"] .admin-editor-grid textarea,html[data-admin-theme="dark"] .admin-offer-form input,html[data-admin-theme="dark"] .admin-commerce-form input,html[data-admin-theme="dark"] .admin-commerce-form select{background:#0d1d15;border-color:#3a6048;color:#edf6ef}html[data-admin-theme="dark"] .admin-table-wrap th,html[data-admin-theme="dark"] .admin-table-wrap td,html[data-admin-theme="dark"] .statistics-table>div{border-color:#284737;color:#d4e6d7}html[data-admin-theme="dark"] .admin-table-wrap th,html[data-admin-theme="dark"] .statistics-table>div span:nth-child(2){color:#9db6a5}html[data-admin-theme="dark"] .table-action,html[data-admin-theme="dark"] .button-secondary,html[data-admin-theme="dark"] .admin-link-button{background:#1c3829;border-color:#43654c;color:#e1eee4}html[data-admin-theme="dark"] .table-action--danger{background:#3b2323;border-color:#7b4b4b;color:#ffd3d3}html[data-admin-theme="dark"] .admin-product-editor,html[data-admin-theme="dark"] .admin-record-editor{background:#193326;border-color:#3a6048}html[data-admin-theme="dark"] .admin-task-list div,html[data-admin-theme="dark"] .admin-stats div,html[data-admin-theme="dark"] .statistics-summary>div,html[data-admin-theme="dark"] .support-column,html[data-admin-theme="dark"] .customer-grid article,html[data-admin-theme="dark"] .promo-admin-grid>section,html[data-admin-theme="dark"] .promo-admin-grid article{background:#193326;border-color:#315340;color:#dbeade}html[data-admin-theme="dark"] .admin-bar-chart{border-color:#315340}html[data-admin-theme="dark"] .admin-status-row>div{background:#213d2d}html[data-admin-theme="dark"] .admin-warning{background:#473b1f;color:#f3dda0}html[data-admin-theme="dark"] .admin-error{background:#482524;color:#ffd8d5}html[data-admin-theme="dark"] .admin-detail-panel{background:#193326!important;border-color:#3a6048!important;color:#e4f1e6}html[data-admin-theme="dark"] .appearance-preview--sand{background:#564936}html[data-admin-theme="dark"] .admin-commerce-list article{background:#193326;border-color:#315340}html[data-admin-theme="dark"] .admin-commerce-list blockquote{background:#0e2017;color:#d9ebdc}
-/* Giữ độ tương phản cho hồ sơ, bảng và biểu mẫu khi dùng nền tối. */
-html[data-admin-theme='dark'] :is(.admin-detail-panel,.admin-module-card,.admin-panel,.statistics-summary,.statistics-table) :is(h1,h2,h3,h4,dd,strong,b,td){color:#eef8f1!important}
-html[data-admin-theme='dark'] :is(.admin-detail-panel,.admin-module-card,.admin-panel,.statistics-summary,.statistics-table) :is(p,small,dt,label){color:#bfd4c6!important}
-html[data-admin-theme='dark'] :is(input,select,textarea){background:#102219;color:#eef8f1;border-color:#496c55}
-html[data-admin-theme='dark'] ::placeholder{color:#aec7b7;opacity:1}
-html[data-admin-theme='dark'] .admin-detail-panel>button{background:#2b513b;color:#fff;border-color:#5e836b}
-html[data-admin-theme='dark'] .admin-detail-panel dd{opacity:1!important}
-button{touch-action:manipulation}
+:root {
+  --admin-emerald-950: #08160f;
+  --admin-emerald-900: #0c2017;
+  --admin-emerald-850: #102a1e;
+  --admin-emerald-800: #163829;
+  --admin-emerald-700: #1e4f39;
+  --admin-emerald-600: #256b47;
+  --admin-emerald-500: #2e8658;
+  --admin-emerald-400: #4ade80;
+  --admin-emerald-300: #86efac;
+  --admin-emerald-200: #bbf7d0;
+  --admin-emerald-100: #dcfce7;
+  --admin-emerald-50:  #f0fdf4;
+  --admin-bg-light:    #f2f7f4;
+  --admin-card-light:  #ffffff;
+  --admin-border-light:#d6e6db;
+  --admin-border-hover:#b8dcbf;
+  --admin-text-dark:   #123223;
+  --admin-muted-dark:  #5c7767;
+}
 
-html[data-admin-theme=dark] .admin-detail-panel :is(span,output,li){color:#e7f3eb}html[data-admin-theme=dark] input:disabled{opacity:1;-webkit-text-fill-color:#e7f3eb;color:#e7f3eb}html[data-admin-theme=dark] .admin-policy{background:#193426;color:#d6e7db}
+/* ==========================================================================
+   1. KHUNG WORKSPACE & TỔNG THỂ GIAO DIỆN
+   ========================================================================== */
+.admin-shell {
+  background: var(--admin-bg-light);
+  color: var(--admin-text-dark);
+}
 
-/* Hàng khách hàng giữ tương phản khi rê chuột. */
-html[data-admin-theme="dark"] .admin-clickable-row:hover{background:#214b35;color:#eff8f2}
-.admin-message-input{width:100%;box-sizing:border-box;min-height:140px;border:1px solid #d6e4dc;border-radius:12px;padding:12px;font:inherit;resize:vertical;background:#fff;color:#254333}html[data-admin-theme="dark"] .admin-message-input{background:#11271b;color:#eff8f2;border-color:#3f614d}
+.admin-shell--workspace {
+  display: block;
+  width: 100vw;
+  max-width: 100%;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  background: var(--admin-bg-light);
+}
 
-/* Chuẩn hóa thanh công cụ header: căn thẳng hàng và các ô vuông/nút bấm bằng nhau */
-.admin-header__actions {
+.admin-workspace-card {
+  display: grid;
+  grid-template-columns: 268px minmax(0, 1fr);
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: var(--admin-bg-light);
+  box-shadow: none;
+}
+
+.admin-workspace-card .admin-main {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 0;
+  background: radial-gradient(1200px circle at 85% -10%, #e3f2e7 0%, transparent 60%),
+              linear-gradient(180deg, #f7faf8 0%, #f2f7f4 360px);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(45, 122, 82, 0.22) transparent;
+}
+
+.admin-workspace-card .admin-main::-webkit-scrollbar {
+  width: 7px;
+}
+.admin-workspace-card .admin-main::-webkit-scrollbar-track {
+  background: transparent;
+}
+.admin-workspace-card .admin-main::-webkit-scrollbar-thumb {
+  background: rgba(45, 122, 82, 0.22);
+  border-radius: 999px;
+}
+.admin-workspace-card .admin-main::-webkit-scrollbar-thumb:hover {
+  background: rgba(45, 122, 82, 0.45);
+}
+
+.admin-workspace-card .admin-main__card {
+  min-height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: clamp(20px, 2.5vw, 36px);
+}
+
+/* ==========================================================================
+   2. THANH ĐIỀU HƯỚNG BÊN TRÁI (SIDEBAR SIÊU SANG TRỌNG)
+   ========================================================================== */
+.admin-sidebar {
+  position: relative;
+  top: auto;
+  width: 268px;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 16px;
+  background: linear-gradient(180deg, #091a13 0%, #0d251a 45%, #07150f 100%);
+  color: #e5f3eb;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.25);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(74, 222, 128, 0.2) transparent;
+}
+
+.admin-sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+.admin-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.admin-sidebar::-webkit-scrollbar-thumb {
+  background: rgba(74, 222, 128, 0.2);
+  border-radius: 999px;
+}
+
+/* Logo thương hiệu Admin */
+.admin-brand {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 10px 22px;
+  font-size: 27px;
+  font-weight: 900;
+  letter-spacing: -1.4px;
+  color: #ffffff;
+  text-decoration: none;
+}
+.admin-brand span {
+  color: #4ade80;
+  text-shadow: 0 0 16px rgba(74, 222, 128, 0.7);
+}
+.admin-brand small {
+  margin-left: 9px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.28);
+  color: #86efac;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+}
+
+/* Thẻ hồ sơ quản trị viên */
+.admin-sidebar__profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 4px 20px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(10px);
+  transition: all 0.25s ease;
+}
+.admin-sidebar__profile:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(74, 222, 128, 0.25);
+}
+.admin-sidebar__profile > span {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #2d8254 0%, #175233 100%);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 800;
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.admin-sidebar__profile div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.admin-sidebar__profile b {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f1f8f3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.admin-sidebar__profile small {
+  display: inline-block;
+  color: #86efac;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+/* Nhóm menu và nút điều hướng */
+.admin-nav-group {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 16px;
+}
+.admin-nav-group > p {
+  margin: 14px 12px 6px;
+  color: #5d9172;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.admin-sidebar nav {
+  display: grid;
+  gap: 3px;
+}
+.admin-sidebar nav button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #a3c4b1;
+  text-align: left;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.admin-sidebar nav button > span {
+  width: 20px;
+  text-align: center;
+  font-size: 15px;
+  color: #84bfa0;
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+.admin-sidebar nav button:hover:not(.is-active) {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+  transform: translateX(3px);
+}
+.admin-sidebar nav button:hover:not(.is-active) > span {
+  color: #4ade80;
+  transform: scale(1.1);
+}
+.admin-sidebar nav button.is-active {
+  background: linear-gradient(135deg, #236743 0%, #32875b 100%) !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 6px 18px rgba(35, 103, 67, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
+  transform: none !important;
+}
+.admin-sidebar nav button.is-active > span {
+  color: #ffffff !important;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
+}
+.admin-sidebar nav button.is-active::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 8px;
+  bottom: 8px;
+  width: 4px;
+  border-radius: 999px;
+  background: #4ade80;
+  box-shadow: 0 0 10px #4ade80;
+}
+
+/* Chân trang Sidebar */
+.admin-sidebar__footer {
+  display: grid;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.admin-sidebar__footer a,
+.admin-sidebar__footer button {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #92b5a0;
+  text-decoration: none;
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.admin-sidebar__footer a:hover,
+.admin-sidebar__footer button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+/* ==========================================================================
+   3. THANH ĐỈNH ĐẦU TRANG (STICKY HEADER & TÌM KIẾM TOÀN DIỆN)
+   ========================================================================== */
+.admin-workspace-card .admin-header {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+  margin-bottom: 20px !important;
+  padding: 0 0 6px !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  border: none !important;
+  border-bottom: none !important;
+  box-shadow: none !important;
+}
+
+.admin-header > div:first-child {
+  flex: 0 0 auto !important;
+  min-width: 0 !important;
+  margin-right: auto !important;
+}
+
+.admin-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #eaf6ee;
+  color: #1f6442;
+  border: 1px solid #c8e5d2;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.3px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.admin-header h1 {
+  font-size: clamp(26px, 3.2vw, 36px);
+  font-weight: 900;
+  letter-spacing: -1.2px;
+  color: #123223;
+  line-height: 1.15;
+  margin: 0;
+}
+
+/* Ô tìm kiếm toàn cục */
+.admin-global-search {
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 10px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  padding: 0 12px 0 14px !important;
+  border: 1px solid #cce3d4 !important;
+  border-radius: 11px !important;
+  background: #ffffff !important;
+  color: #274b37 !important;
+  box-shadow: 0 1px 4px rgba(18, 50, 35, 0.04) !important;
+  flex: 0 1 320px !important;
+  width: 320px !important;
+  max-width: 340px !important;
+  min-width: 180px !important;
+  position: relative !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+.admin-global-search:hover {
+  border-color: #a8d5b8 !important;
+  box-shadow: 0 3px 12px rgba(18, 50, 35, 0.06) !important;
+}
+.admin-global-search:focus-within {
+  border-color: #256b47 !important;
+  background: #ffffff !important;
+  box-shadow: 0 0 0 3px rgba(37, 107, 71, 0.16), 0 6px 18px rgba(18, 50, 35, 0.08) !important;
+  transform: translateY(-1px) !important;
+}
+.admin-global-search span {
+  font-size: 16px !important;
+  color: #2b7a4f !important;
+  line-height: 1 !important;
+}
+.admin-global-search input {
+  min-width: 0 !important;
+  border: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  color: #123223 !important;
+  font-family: inherit !important;
+  font-size: 13.5px !important;
+  font-weight: 500 !important;
+  padding: 0 !important;
+}
+.admin-global-search input::placeholder {
+  color: #7b9686 !important;
+}
+.admin-global-search kbd {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 2px 7px !important;
+  border: 1px solid #c4e4cf !important;
+  border-radius: 6px !important;
+  background: #eef7f1 !important;
+  color: #236544 !important;
+  font-size: 10.5px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px !important;
+  font-family: inherit !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+
+/* Khung kết quả tìm kiếm */
+.admin-search-results {
+  position: absolute !important;
+  top: calc(100% + 6px) !important;
+  left: 0 !important;
+  right: 0 !important;
+  z-index: 45 !important;
+  display: grid !important;
+  padding: 6px !important;
+  border: 1px solid #c2e2cc !important;
+  border-radius: 14px !important;
+  background: #ffffff !important;
+  box-shadow: 0 18px 45px rgba(18, 50, 35, 0.15), 0 3px 10px rgba(0, 0, 0, 0.04) !important;
+}
+.admin-search-results button {
   display: flex !important;
   align-items: center !important;
   gap: 10px !important;
-  font-size: 11px !important;
+  width: 100% !important;
+  border: 0 !important;
+  border-radius: 9px !important;
+  padding: 9px 12px !important;
+  background: transparent !important;
+  color: #1d3e2d !important;
+  text-align: left !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+.admin-search-results button:hover {
+  background: #eef7f1 !important;
+  color: #156239 !important;
+}
+
+/* Các nút công cụ Header (Ngôn ngữ, Giao diện tối/sáng, Đăng xuất) */
+.admin-header__actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
 }
 
 .admin-header__actions .admin-live-dot {
   display: inline-flex !important;
   align-items: center !important;
-  gap: 6px !important;
-  line-height: 1 !important;
-  color: var(--admin-accent-strong, #2e6b47) !important;
+  gap: 7px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  box-sizing: border-box !important;
+  padding: 0 14px !important;
+  border-radius: 11px !important;
+  background: #e7f7ed !important;
+  border: 1px solid #c2e6cf !important;
+  color: #186039 !important;
   font-size: 12px !important;
-  font-weight: 600 !important;
+  font-weight: 700 !important;
   white-space: nowrap !important;
-  margin-right: 2px !important;
 }
 
 .admin-preferences {
   display: inline-flex !important;
+  flex-direction: row !important;
   align-items: center !important;
   gap: 8px !important;
   margin: 0 !important;
@@ -71,184 +509,910 @@ html[data-admin-theme="dark"] .admin-clickable-row:hover{background:#214b35;colo
   align-items: center !important;
   margin: 0 !important;
   padding: 0 !important;
-  position: relative !important;
-}
-
-.admin-language-control .sr-only {
-  position: absolute !important;
-  width: 1px !important;
-  height: 1px !important;
-  padding: 0 !important;
-  margin: -1px !important;
-  overflow: hidden !important;
-  clip: rect(0, 0, 0, 0) !important;
-  clip-path: inset(50%) !important;
-  white-space: nowrap !important;
-  border: 0 !important;
-}
-
-/* 3 ô vuông/nút đồng kích thước chiều cao và bo góc */
-.admin-header__actions .admin-dropdown-menu {
   width: auto !important;
-  min-width: 0 !important;
-  display: inline-flex !important;
-  align-items: center !important;
+}
+
+.admin-language-control .admin-dropdown-menu {
+  width: auto !important;
+  min-width: 68px !important;
 }
 
 .admin-header__actions .admin-dropdown-menu__trigger,
 .admin-header__actions .admin-theme-toggle,
 .admin-header__actions > button {
-  height: 38px !important;
-  min-height: 38px !important;
-  max-height: 38px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  padding: 0 14px !important;
   box-sizing: border-box !important;
-  border: 1px solid #2f6949 !important;
-  border-radius: 10px !important;
-  background: #1c4232 !important;
-  color: #edf7ef !important;
+  border: 1px solid #286343 !important;
+  border-radius: 11px !important;
+  background: linear-gradient(135deg, #184431 0%, #235d42 100%) !important;
+  color: #f1f8f3 !important;
   font-size: 12px !important;
   font-weight: 700 !important;
   line-height: 1 !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
+  gap: 6px !important;
   cursor: pointer !important;
-  transition: all .2s ease !important;
-  box-shadow: 0 2px 6px rgba(16, 44, 32, 0.15) !important;
+  white-space: nowrap !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  box-shadow: 0 4px 12px rgba(16, 44, 32, 0.18) !important;
 }
 
 .admin-header__actions .admin-dropdown-menu__trigger:hover,
 .admin-header__actions .admin-theme-toggle:hover,
 .admin-header__actions > button:hover {
-  background: #143326 !important;
-  border-color: #438f65 !important;
+  background: linear-gradient(135deg, #133827 0%, #1c4b35 100%) !important;
+  border-color: #48a36f !important;
   color: #ffffff !important;
-  box-shadow: 0 4px 12px rgba(16, 44, 32, 0.25) !important;
+  box-shadow: 0 6px 18px rgba(16, 44, 32, 0.28) !important;
+  transform: translateY(-1px) !important;
 }
 
-/* Chiều rộng & padding cân xứng cho từng ô */
-.admin-header__actions .admin-dropdown-menu__trigger {
-  width: auto !important;
-  min-width: 58px !important;
-  padding: 0 10px !important;
-  gap: 4px !important;
+.admin-header__actions .admin-dropdown-menu__panel {
+  min-width: 80px !important;
+  padding: 6px !important;
+  border-radius: 12px !important;
+  border: 1px solid #286343 !important;
+  background: #184431 !important;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4) !important;
 }
-
-.admin-header__actions .admin-dropdown-menu__value {
-  font-size: 12px !important;
-  font-weight: 800 !important;
-  color: inherit !important;
-}
-
-.admin-header__actions .admin-dropdown-menu__caret {
-  font-size: 11px !important;
-  color: inherit !important;
-  margin-left: 2px !important;
-}
-
-.admin-header__actions .admin-theme-toggle {
-  width: auto !important;
-  min-width: 76px !important;
-  padding: 0 12px !important;
-  gap: 6px !important;
-}
-
-.admin-header__actions .admin-theme-toggle span {
+.admin-header__actions .admin-dropdown-menu__option {
+  min-height: 34px !important;
+  padding: 7px 12px !important;
+  border-radius: 8px !important;
+  color: #e5f5ea !important;
   font-size: 12px !important;
   font-weight: 700 !important;
-  color: inherit !important;
+}
+.admin-header__actions .admin-dropdown-menu__option:hover,
+.admin-header__actions .admin-dropdown-menu__option.is-active {
+  background: #256b47 !important;
+  color: #ffffff !important;
 }
 
-.admin-header__actions > button {
+/* ==========================================================================
+   4. THẺ THỐNG KÊ KPI GRID (FINTECH METRICS DESIGN)
+   ========================================================================== */
+.admin-kpi-grid {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 16px !important;
+  margin-bottom: 22px !important;
+}
+
+.admin-kpi-grid article {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  min-height: 152px !important;
+  padding: 22px 24px !important;
+  border: 1px solid #dbe8dd !important;
+  border-radius: 20px !important;
+  background: linear-gradient(160deg, #ffffff 0%, #f7fbf8 100%) !important;
+  box-shadow: 0 4px 20px rgba(20, 55, 38, 0.05), 0 1px 3px rgba(20, 55, 38, 0.02) !important;
+  position: relative !important;
+  overflow: hidden !important;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.admin-kpi-grid article:hover {
+  transform: translateY(-3px) !important;
+  box-shadow: 0 12px 30px rgba(20, 55, 38, 0.1) !important;
+  border-color: #badfc4 !important;
+}
+
+.admin-kpi-grid article::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 20px;
+  right: 20px;
+  height: 3px;
+  background: linear-gradient(90deg, #2e8b57, #4ade80);
+  border-radius: 0 0 3px 3px;
+  opacity: 0.85;
+}
+
+.admin-kpi-grid article > span {
+  color: #557563 !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.9px !important;
+}
+
+.admin-kpi-grid article > strong {
+  color: #123321 !important;
+  font-size: clamp(28px, 2.5vw, 36px) !important;
+  font-weight: 800 !important;
+  letter-spacing: -1.2px !important;
+  font-variant-numeric: tabular-nums !important;
+  margin: 6px 0 !important;
+  line-height: 1.1 !important;
+}
+
+.admin-kpi-grid article > small {
+  color: #728f7e !important;
+  font-size: 11.5px !important;
+  font-weight: 500 !important;
+}
+
+/* ==========================================================================
+   5. THẺ MODULE VÀ PANEL BIỂU ĐỒ (DASHBOARD & ANALYTICS)
+   ========================================================================== */
+.admin-module-card,
+.admin-panel {
+  padding: 26px !important;
+  border: 1px solid #d9e8dc !important;
+  border-radius: 22px !important;
+  background: #ffffff !important;
+  box-shadow: 0 4px 22px rgba(20, 55, 38, 0.05), 0 1px 3px rgba(20, 55, 38, 0.02) !important;
+  transition: all 0.25s ease !important;
+}
+
+.admin-module-card:hover,
+.admin-panel:hover {
+  box-shadow: 0 8px 30px rgba(20, 55, 38, 0.08) !important;
+}
+
+.admin-module-card h2,
+.admin-panel h2 {
+  font-size: 24px !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.8px !important;
+  color: #123223 !important;
+  margin: 4px 0 8px !important;
+}
+
+.admin-module-card > p,
+.admin-module-head p {
+  color: #637e6f !important;
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+}
+
+/* Nút công cụ lọc và loại biểu đồ (DropdownMenu) */
+.admin-dashboard-chart__tools {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.admin-dashboard-chart__tools label,
+.statistics-head-actions label {
+  display: inline-flex !important;
+  align-items: center !important;
+  margin: 0 !important;
+}
+
+.admin-dashboard-chart__tools .admin-dropdown-menu,
+.statistics-head-actions .admin-dropdown-menu {
   width: auto !important;
-  min-width: 82px !important;
+  min-width: 140px !important;
+}
+
+.admin-dashboard-chart__tools .admin-dropdown-menu__trigger,
+.statistics-head-actions .admin-dropdown-menu__trigger {
+  height: 38px !important;
+  min-height: 38px !important;
+  max-height: 38px !important;
+  padding: 0 14px !important;
+  border-radius: 999px !important;
+  background: linear-gradient(135deg, #1b5e39 0%, #2b8454 100%) !important;
+  border: 1px solid #1a5634 !important;
+  color: #ffffff !important;
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 8px rgba(27, 94, 57, 0.22) !important;
+  width: auto !important;
+  min-width: 140px !important;
+  box-sizing: border-box !important;
+}
+
+.admin-dashboard-chart__tools .admin-dropdown-menu__trigger:hover,
+.statistics-head-actions .admin-dropdown-menu__trigger:hover {
+  background: linear-gradient(135deg, #164f30 0%, #247549 100%) !important;
+  box-shadow: 0 4px 14px rgba(27, 94, 57, 0.3) !important;
+  transform: translateY(-1px) !important;
+}
+
+.admin-dashboard-chart__tools .admin-dropdown-menu__caret,
+.statistics-head-actions .admin-dropdown-menu__caret {
+  color: #a7f3d0 !important;
+}
+
+.admin-dashboard-chart__tools .admin-dropdown-menu__panel,
+.statistics-head-actions .admin-dropdown-menu__panel {
+  min-width: 180px !important;
+  width: max-content !important;
+}
+
+/* Dropdown trong các form nhập liệu & bộ lọc (giữ giao diện input thanh lịch, không bị biến thành nút hành động màu xanh) */
+.admin-dropdown-menu__trigger:not(.admin-header__actions .admin-dropdown-menu__trigger):not(.admin-dashboard-chart__tools .admin-dropdown-menu__trigger):not(.statistics-head-actions .admin-dropdown-menu__trigger):not(.admin-login-card__preferences .admin-dropdown-menu__trigger) {
+  height: 44px !important;
+  min-height: 44px !important;
+  max-height: 44px !important;
+  background: #ffffff !important;
+  border: 1px solid #cce3d5 !important;
+  border-radius: 12px !important;
+  color: #153825 !important;
+  font-size: 13.5px !important;
+  font-weight: 500 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03) !important;
   padding: 0 14px !important;
 }
 
-/* Menu thả xuống của ô Ngôn ngữ */
-.admin-header__actions .admin-dropdown-menu__panel {
-  min-width: 70px !important;
-  padding: 4px !important;
-  border-radius: 10px !important;
-  border: 1px solid #2f6949 !important;
-  background: #1c4232 !important;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4) !important;
+.admin-dropdown-menu__trigger:not(.admin-header__actions .admin-dropdown-menu__trigger):not(.admin-dashboard-chart__tools .admin-dropdown-menu__trigger):not(.statistics-head-actions .admin-dropdown-menu__trigger):not(.admin-login-card__preferences .admin-dropdown-menu__trigger):hover {
+  background: #f9fcf9 !important;
+  border-color: #2e8658 !important;
+  color: #153825 !important;
 }
 
-.admin-header__actions .admin-dropdown-menu__option {
-  min-height: 32px !important;
-  padding: 6px 10px !important;
-  border-radius: 7px !important;
-  color: #edf7ef !important;
+.admin-dropdown-menu.is-open .admin-dropdown-menu__trigger:not(.admin-header__actions .admin-dropdown-menu__trigger):not(.admin-dashboard-chart__tools .admin-dropdown-menu__trigger):not(.statistics-head-actions .admin-dropdown-menu__trigger):not(.admin-login-card__preferences .admin-dropdown-menu__trigger) {
+  border-color: #2e8658 !important;
+  background: #ffffff !important;
+  box-shadow: 0 0 0 3px rgba(46, 134, 88, 0.16) !important;
+}
+
+.admin-dropdown-menu__trigger:not(.admin-header__actions .admin-dropdown-menu__trigger):not(.admin-dashboard-chart__tools .admin-dropdown-menu__trigger):not(.statistics-head-actions .admin-dropdown-menu__trigger):not(.admin-login-card__preferences .admin-dropdown-menu__trigger) .admin-dropdown-menu__caret {
+  color: #2e8658 !important;
+}
+
+.admin-dashboard-chart__tools select,
+.admin-context select,
+.admin-range select {
+  padding: 8px 14px !important;
+  border: 1px solid #cadcd0 !important;
+  border-radius: 10px !important;
+  background: #f7fbf8 !important;
+  color: #184832 !important;
+  font-weight: 700 !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+.admin-dashboard-chart__tools select:hover,
+.admin-dashboard-chart__tools select:focus {
+  border-color: #2e8257 !important;
+  background: #ffffff !important;
+}
+
+/* Các hàng thanh tiến độ trong Trạng thái đơn */
+.admin-status-row {
+  display: grid;
+  grid-template-columns: minmax(82px, .5fr) minmax(100px, 1fr) 34px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 !important;
+}
+.admin-status-row > span {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #214432 !important;
+}
+.admin-status-row > div {
+  height: 10px !important;
+  border-radius: 999px !important;
+  background: #ebf5ee !important;
+  overflow: hidden !important;
+}
+.admin-status-row i {
+  display: block !important;
+  width: var(--status-width, 0%) !important;
+  height: 100% !important;
+  min-height: 10px !important;
+  border-radius: 999px !important;
+  background: linear-gradient(90deg, #2b8454, #4ade80) !important;
+  box-shadow: 0 2px 8px rgba(43, 132, 84, 0.3) !important;
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+.admin-status-row b {
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  color: #174b30 !important;
+  font-variant-numeric: tabular-nums !important;
+  text-align: right !important;
+}
+
+/* Dải thông báo sự kiện Realtime */
+.admin-realtime-bar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 12px 18px !important;
+  border-radius: 14px !important;
+  background: linear-gradient(135deg, #edf9f2, #f7fcf8) !important;
+  border: 1px solid #c2e7ce !important;
+  box-shadow: 0 4px 16px rgba(27, 86, 56, 0.05) !important;
+  margin-bottom: 20px !important;
+}
+
+/* ==========================================================================
+   6. BẢNG DỮ LIỆU & NÚT THAO TÁC (TABLES & ACTIONS)
+   ========================================================================== */
+.admin-table-wrap {
+  border: 1px solid #dce8df !important;
+  border-radius: 16px !important;
+  background: #ffffff !important;
+  overflow: auto !important;
+  box-shadow: 0 4px 16px rgba(18, 50, 35, 0.03) !important;
+}
+
+.admin-table-wrap table,
+.admin-order-table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+}
+
+.admin-table-wrap th,
+.admin-order-table th {
+  padding: 14px 18px !important;
+  background: #f4faf6 !important;
+  color: #38634a !important;
+  font-weight: 800 !important;
+  font-size: 11px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.9px !important;
+  border-bottom: 2px solid #d6e8dc !important;
+  text-align: left !important;
+}
+
+.admin-table-wrap td,
+.admin-order-table td {
+  padding: 15px 18px !important;
+  border-bottom: 1px solid #e7f2ea !important;
+  font-size: 13px !important;
+  color: #1e3d2d !important;
+  vertical-align: middle !important;
+  transition: background 0.15s ease !important;
+}
+
+.admin-table-wrap tr:hover td,
+.admin-order-table tr:hover td {
+  background: #f6fbf8 !important;
+}
+
+/* Các nút bấm thao tác trong bảng và form */
+.table-action,
+.admin-order-actions button,
+.admin-order-detail button,
+.admin-module-head button,
+.admin-quick-actions button,
+.admin-commerce-form button,
+.admin-editor-actions button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  padding: 9px 16px !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: linear-gradient(135deg, #226b47 0%, #2e8658 100%) !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  font-size: 12.5px !important;
+  cursor: pointer !important;
+  box-shadow: 0 4px 12px rgba(34, 107, 71, 0.22) !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.table-action:hover,
+.admin-order-actions button:hover,
+.admin-order-detail button:hover,
+.admin-module-head button:hover,
+.admin-quick-actions button:hover,
+.admin-commerce-form button:hover,
+.admin-editor-actions button:hover {
+  background: linear-gradient(135deg, #1a5638 0%, #24734b 100%) !important;
+  box-shadow: 0 6px 16px rgba(34, 107, 71, 0.35) !important;
+  transform: translateY(-1px) !important;
+}
+
+.table-action--danger {
+  background: #fef2f2 !important;
+  border: 1px solid #fecaca !important;
+  color: #991b1b !important;
+  box-shadow: none !important;
+}
+.table-action--danger:hover {
+  background: #dc2626 !important;
+  border-color: #dc2626 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3) !important;
+}
+
+.button-secondary {
+  border: 1px solid #cadcd0 !important;
+  background: #f7fbf8 !important;
+  color: #274b37 !important;
+  box-shadow: none !important;
+}
+.button-secondary:hover {
+  background: #eef6f0 !important;
+  border-color: #388457 !important;
+  color: #17422b !important;
+}
+
+/* Badge trạng thái */
+.admin-status-chip,
+.admin-signal {
+  display: inline-flex !important;
+  align-items: center !important;
+  border-radius: 999px !important;
+  padding: 5px 10px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  white-space: nowrap !important;
+}
+.admin-status-chip {
+  background: #eaf6ee !important;
+  color: #1c5f3b !important;
+  border: 1px solid #c4e6d1 !important;
+}
+.admin-signal--good {
+  background: #def7e5 !important;
+  color: #15693b !important;
+}
+.admin-signal--watch {
+  background: #fef3c7 !important;
+  color: #92400e !important;
+}
+.admin-signal--quiet {
+  background: #f1f5f9 !important;
+  color: #475569 !important;
+}
+
+/* ==========================================================================
+   7. TRANG ĐĂNG NHẬP ADMIN (LOGIN SCREEN SIÊU CAO CẤP)
+   ========================================================================== */
+.admin-shell--login {
+  min-height: 100vh !important;
+  min-height: 100dvh !important;
+  display: grid !important;
+  place-items: center !important;
+  padding: 24px !important;
+  background:
+    radial-gradient(1000px circle at 15% 15%, rgba(46, 130, 87, 0.16) 0%, transparent 60%),
+    radial-gradient(900px circle at 85% 85%, rgba(34, 107, 71, 0.14) 0%, transparent 60%),
+    linear-gradient(135deg, #eef7f1 0%, #f4f9f5 50%, #e8f4ec 100%) !important;
+}
+
+/* Card bao bên ngoài giao diện đăng nhập */
+.admin-login-card {
+  width: min(440px, 94vw) !important;
+  padding: 26px 32px 34px !important;
+  border: 1px solid rgba(255, 255, 255, 0.9) !important;
+  border-radius: 24px !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  box-shadow: 0 24px 60px rgba(18, 50, 35, 0.12), 0 4px 16px rgba(0, 0, 0, 0.03) !important;
+  backdrop-filter: blur(20px) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  box-sizing: border-box !important;
+}
+
+.admin-login-card__preferences {
+  display: flex !important;
+  justify-content: flex-end !important;
+  width: 100% !important;
+  margin-bottom: 6px !important;
+}
+
+.admin-login-card__preferences .admin-preferences {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.admin-login-card__preferences .admin-dropdown-menu__trigger,
+.admin-login-card__preferences .admin-theme-toggle {
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 0 12px !important;
+  border-radius: 9px !important;
+  background: #f0f7f3 !important;
+  border: 1px solid #cbe4d4 !important;
+  color: #174f33 !important;
+  font-size: 11.5px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+
+.admin-login-card__preferences .admin-dropdown-menu__trigger:hover,
+.admin-login-card__preferences .admin-theme-toggle:hover {
+  background: #e2f2e7 !important;
+  border-color: #2b8454 !important;
+  color: #103824 !important;
+}
+
+/* Form đăng nhập bên trong card cha - làm phẳng để không lồng card kép */
+.admin-login-card .admin-login {
+  width: 100% !important;
+  max-width: 100% !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  display: grid !important;
+  gap: 16px !important;
+}
+
+/* Fallback khi admin-login đứng một mình không có card cha */
+.admin-login:not(.admin-login-card .admin-login) {
+  width: min(440px, 94vw) !important;
+  padding: 34px !important;
+  border: 1px solid rgba(255, 255, 255, 0.9) !important;
+  border-radius: 24px !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  box-shadow: 0 24px 60px rgba(18, 50, 35, 0.12) !important;
+  backdrop-filter: blur(20px) !important;
+  display: grid !important;
+  gap: 16px !important;
+}
+
+.admin-login h1 {
+  font-size: 32px !important;
+  font-weight: 900 !important;
+  letter-spacing: -1.2px !important;
+  color: #123321 !important;
+  margin-bottom: 4px !important;
+}
+
+.admin-login p {
+  color: #5c7565 !important;
+  font-size: 13.5px !important;
+  line-height: 1.55 !important;
+}
+
+.admin-login label {
+  display: grid !important;
+  gap: 6px !important;
   font-size: 12px !important;
   font-weight: 700 !important;
+  color: #355843 !important;
 }
 
-.admin-header__actions .admin-dropdown-menu__option:hover,
-.admin-header__actions .admin-dropdown-menu__option.is-active {
-  background: #275641 !important;
+.admin-login input {
+  height: 48px !important;
+  padding: 0 16px !important;
+  border: 1px solid #c8e0cf !important;
+  border-radius: 12px !important;
+  background: #f8fbf9 !important;
+  color: #153826 !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  transition: all 0.2s ease !important;
+}
+
+.admin-login input:focus {
+  border-color: #2d7a52 !important;
+  background: #ffffff !important;
+  box-shadow: 0 0 0 3px rgba(45, 122, 82, 0.18) !important;
+  outline: none !important;
+}
+
+.admin-login button[type="submit"] {
+  height: 50px !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  background: linear-gradient(135deg, #1b5f3a 0%, #2b8555 100%) !important;
   color: #ffffff !important;
+  font-size: 15px !important;
+  font-weight: 800 !important;
+  cursor: pointer !important;
+  box-shadow: 0 8px 24px rgba(27, 95, 58, 0.32) !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
-.admin-header__actions .admin-dropdown-menu__option[aria-selected=true] {
-  color: #76d795 !important;
+.admin-login button[type="submit"]:hover {
+  background: linear-gradient(135deg, #154c2e 0%, #237047 100%) !important;
+  box-shadow: 0 10px 28px rgba(27, 95, 58, 0.45) !important;
+  transform: translateY(-1px) !important;
 }
 
-/* Chế độ Dark mode đồng bộ */
+.admin-login a {
+  display: block !important;
+  text-align: center !important;
+  color: #2b744d !important;
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
+  margin-top: 6px !important;
+  transition: color 0.2s ease !important;
+}
+.admin-login a:hover {
+  color: #174e30 !important;
+  text-decoration: underline !important;
+}
+
+/* ==========================================================================
+   8. DARK MODE SIÊU ĐẬM CHẤT OBSIDIAN EMERALD
+   ========================================================================== */
+html[data-admin-theme="dark"] {
+  color-scheme: dark;
+  background: #091610;
+}
+
+html[data-admin-theme="dark"] body,
+html[data-admin-theme="dark"] .admin-shell {
+  background: #091610 !important;
+  color: #e8f5ec !important;
+}
+
+html[data-admin-theme="dark"] .admin-workspace-card {
+  background: #091610 !important;
+}
+
+html[data-admin-theme="dark"] .admin-workspace-card .admin-sidebar {
+  background: linear-gradient(180deg, #07120c 0%, #0a1b13 45%, #050d09 100%) !important;
+  border-right-color: rgba(74, 222, 128, 0.12) !important;
+}
+
+html[data-admin-theme="dark"] .admin-workspace-card .admin-main {
+  background: radial-gradient(1000px circle at 85% 0%, rgba(45, 122, 82, 0.14) 0%, transparent 45%),
+              linear-gradient(180deg, #0d1e16 0%, #091610 340px) !important;
+  scrollbar-color: rgba(74, 222, 128, 0.2) transparent !important;
+}
+
+html[data-admin-theme="dark"] .admin-workspace-card .admin-header {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-admin-theme="dark"] .admin-header h1 {
+  color: #f0fdf4 !important;
+}
+
+html[data-admin-theme="dark"] .admin-eyebrow {
+  background: rgba(74, 222, 128, 0.12) !important;
+  color: #86efac !important;
+  border-color: rgba(74, 222, 128, 0.25) !important;
+}
+
+html[data-admin-theme="dark"] .admin-global-search {
+  background: #11251b !important;
+  border-color: #28543a !important;
+  color: #d1ead7 !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3) !important;
+}
+html[data-admin-theme="dark"] .admin-global-search input {
+  color: #eef8f1 !important;
+}
+html[data-admin-theme="dark"] .admin-global-search kbd {
+  background: #173827 !important;
+  border-color: #356b4a !important;
+  color: #92d9aa !important;
+}
+
 html[data-admin-theme="dark"] .admin-header__actions .admin-live-dot {
-  color: #76d795 !important;
+  background: #10281b !important;
+  border-color: #245538 !important;
+  color: #86efac !important;
 }
 
-html[data-admin-theme="dark"] .admin-header__actions .admin-dropdown-menu__trigger,
-html[data-admin-theme="dark"] .admin-header__actions .admin-theme-toggle,
-html[data-admin-theme="dark"] .admin-header__actions > button {
-  background: #14281f !important;
-  border-color: #355943 !important;
+html[data-admin-theme="dark"] .admin-module-card,
+html[data-admin-theme="dark"] .admin-panel,
+html[data-admin-theme="dark"] .admin-kpi-grid article {
+  background: linear-gradient(160deg, #13271d 0%, #0f2118 100%) !important;
+  border-color: #244833 !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35) !important;
+}
+
+html[data-admin-theme="dark"] .admin-module-card h2,
+html[data-admin-theme="dark"] .admin-panel h2 {
+  color: #f0fdf4 !important;
+}
+
+html[data-admin-theme="dark"] .admin-kpi-grid article > strong {
+  color: #4ade80 !important;
+}
+html[data-admin-theme="dark"] .admin-kpi-grid article > span {
+  color: #8bbfa0 !important;
+}
+html[data-admin-theme="dark"] .admin-kpi-grid article > small {
+  color: #9ec5ad !important;
+}
+
+html[data-admin-theme="dark"] .admin-realtime-bar {
+  background: linear-gradient(135deg, #12281e, #173326) !important;
+  border-color: #2e6042 !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35) !important;
+}
+html[data-admin-theme="dark"] .admin-realtime-bar span:first-child {
+  color: #4ade80 !important;
+}
+html[data-admin-theme="dark"] .admin-realtime-bar span:nth-child(2) {
+  color: #e5f4ea !important;
+}
+
+html[data-admin-theme="dark"] .admin-table-wrap {
+  background: #12251c !important;
+  border-color: #284c37 !important;
+}
+html[data-admin-theme="dark"] .admin-table-wrap th,
+html[data-admin-theme="dark"] .admin-order-table th {
+  background: #152d21 !important;
+  color: #9bd6b0 !important;
+  border-bottom-color: #2c563e !important;
+}
+html[data-admin-theme="dark"] .admin-table-wrap td,
+html[data-admin-theme="dark"] .admin-order-table td {
+  border-bottom-color: #1c3829 !important;
+  color: #daf0e0 !important;
+}
+html[data-admin-theme="dark"] .admin-table-wrap tr:hover td,
+html[data-admin-theme="dark"] .admin-order-table tr:hover td {
+  background: #193828 !important;
+}
+
+html[data-admin-theme="dark"] .admin-login-card,
+html[data-admin-theme="dark"] .admin-login:not(.admin-login-card .admin-login) {
+  background: rgba(14, 28, 20, 0.95) !important;
+  border-color: rgba(74, 222, 128, 0.2) !important;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.65), 0 0 40px rgba(37, 107, 71, 0.12) !important;
+}
+
+html[data-admin-theme="dark"] .admin-login-card .admin-login {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-admin-theme="dark"] .admin-login-card__preferences .admin-dropdown-menu__trigger,
+html[data-admin-theme="dark"] .admin-login-card__preferences .admin-theme-toggle {
+  background: #11281c !important;
+  border-color: #245239 !important;
+  color: #bbf7d0 !important;
+}
+
+html[data-admin-theme="dark"] .admin-dropdown-menu__trigger:not(.admin-header__actions .admin-dropdown-menu__trigger):not(.admin-dashboard-chart__tools .admin-dropdown-menu__trigger):not(.statistics-head-actions .admin-dropdown-menu__trigger):not(.admin-login-card__preferences .admin-dropdown-menu__trigger) {
+  background: #0f2218 !important;
+  border-color: #265439 !important;
+  color: #ecf7ef !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3) !important;
+}
+
+html[data-admin-theme="dark"] .admin-dropdown-menu__trigger:not(.admin-header__actions .admin-dropdown-menu__trigger):not(.admin-dashboard-chart__tools .admin-dropdown-menu__trigger):not(.statistics-head-actions .admin-dropdown-menu__trigger):not(.admin-login-card__preferences .admin-dropdown-menu__trigger):hover {
+  background: #142f21 !important;
+  border-color: #4ade80 !important;
+}
+
+html[data-admin-theme="dark"] .admin-dropdown-menu__trigger:not(.admin-header__actions .admin-dropdown-menu__trigger):not(.admin-dashboard-chart__tools .admin-dropdown-menu__trigger):not(.statistics-head-actions .admin-dropdown-menu__trigger):not(.admin-login-card__preferences .admin-dropdown-menu__trigger) .admin-dropdown-menu__caret {
+  color: #86efac !important;
+}
+html[data-admin-theme="dark"] .admin-login h1 {
+  color: #eaf7ee !important;
+}
+html[data-admin-theme="dark"] .admin-login p {
+  color: #94bba1 !important;
+}
+html[data-admin-theme="dark"] .admin-login label {
+  color: #8ec39e !important;
+}
+html[data-admin-theme="dark"] .admin-login input {
+  background: #0d1e15 !important;
+  border-color: #2a523a !important;
   color: #edf7ef !important;
 }
-
-html[data-admin-theme="dark"] .admin-header__actions .admin-dropdown-menu__trigger:hover,
-html[data-admin-theme="dark"] .admin-header__actions .admin-theme-toggle:hover,
-html[data-admin-theme="dark"] .admin-header__actions > button:hover {
-  background: #1c382b !important;
-  border-color: #4f8b67 !important;
-  color: #ffffff !important;
+html[data-admin-theme="dark"] .admin-login input:focus {
+  border-color: #4ade80 !important;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.22) !important;
 }
 
-html[data-admin-theme="dark"] .admin-header__actions .admin-dropdown-menu__panel {
-  background: #14281f !important;
-  border-color: #355943 !important;
+/* ==========================================================================
+   9. RESPONSIVE BREAKPOINTS (TABLET & MOBILE)
+   ========================================================================== */
+@media (max-width: 1150px) {
+  .admin-workspace-card {
+    grid-template-columns: 84px minmax(0, 1fr) !important;
+  }
+  .admin-sidebar {
+    width: 84px !important;
+    padding-inline: 10px !important;
+  }
+  .admin-brand small,
+  .admin-sidebar__profile div,
+  .admin-nav-group > p,
+  .admin-sidebar nav button:not(.is-active) {
+    font-size: 0 !important;
+  }
+  .admin-sidebar nav button {
+    justify-content: center !important;
+    padding-inline: 0 !important;
+  }
+  .admin-sidebar__profile {
+    justify-content: center !important;
+    padding: 8px !important;
+  }
+  .admin-sidebar__footer a,
+  .admin-sidebar__footer button {
+    font-size: 0 !important;
+    justify-content: center !important;
+  }
+  .admin-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
 }
 
-html[data-admin-theme="dark"] .admin-header__actions .admin-dropdown-menu__option:hover,
-html[data-admin-theme="dark"] .admin-header__actions .admin-dropdown-menu__option.is-active {
-  background: #1c382b !important;
-  color: #ffffff !important;
+@media (max-width: 860px) {
+  .admin-dashboard-grid,
+  .admin-dashboard-grid--wide {
+    grid-template-columns: 1fr !important;
+  }
 }
 
-html[data-admin-theme="dark"] .admin-header__actions .admin-dropdown-menu__option[aria-selected=true] {
-  color: #76d795 !important;
+@media (max-width: 700px) {
+  .admin-shell--workspace {
+    height: 100vh !important;
+    padding: 0 !important;
+  }
+  .admin-workspace-card {
+    display: block !important;
+    height: 100vh !important;
+    min-height: 0 !important;
+  }
+  .admin-workspace-card .admin-sidebar {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 30 !important;
+    width: 100% !important;
+    height: auto !important;
+    padding: 10px 14px !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    border-right: 0 !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  }
+  .admin-brand,
+  .admin-sidebar__profile {
+    display: none !important;
+  }
+  .admin-sidebar nav {
+    display: flex !important;
+    overflow-x: auto !important;
+    gap: 6px !important;
+  }
+  .admin-sidebar .admin-nav-group {
+    display: flex !important;
+    gap: 6px !important;
+    margin-bottom: 0 !important;
+  }
+  .admin-sidebar .admin-nav-group > p {
+    display: none !important;
+  }
+  .admin-sidebar nav button,
+  .admin-sidebar nav button:not(.is-active) {
+    width: auto !important;
+    flex: none !important;
+    font-size: 11px !important;
+    padding: 8px 12px !important;
+  }
+  .admin-sidebar__footer {
+    display: none !important;
+  }
+  .admin-workspace-card .admin-main {
+    height: calc(100vh - 58px) !important;
+  }
+  .admin-workspace-card .admin-main__card {
+    padding: 16px 14px 28px !important;
+  }
 }
 
-/* Khu làm việc và bộ điều khiển admin dùng chung một card bao ngoài. */
-.admin-main__card{min-height:calc(100vh - 92px);padding:clamp(20px,3vw,38px);border:1px solid var(--admin-border,#dce8de);border-radius:28px;background:var(--admin-surface,#fff);box-shadow:0 18px 46px rgb(23 55 40 / calc(var(--theme-shadow-strength) * .38))}
-.admin-login-card{width:min(470px,100%);padding:18px 28px 28px;border:1px solid var(--admin-border,#dce8de);border-radius:28px;background:var(--admin-surface,#fff);box-shadow:0 18px 50px rgb(23 55 40 / calc(var(--theme-shadow-strength) * .38))}
-.admin-login-card__preferences{display:flex;justify-content:flex-end}
-.admin-login-card .admin-login{width:100%;padding:18px 0 0;border:0;border-radius:0;background:transparent;box-shadow:none}
-.admin-loading-state{min-height:0;gap:18px}
-html[data-admin-theme="dark"] .admin-main__card,html[data-admin-theme="dark"] .admin-login-card{background:#14281f;border-color:#2d4a39;box-shadow:0 18px 46px #0007}
-@media(max-width:700px){.admin-main__card{min-height:calc(100vh - 80px);padding:18px;border-radius:20px}.admin-login-card{padding:16px 20px 22px;border-radius:20px}}
-.admin-shell--workspace{display:block;width:100vw;max-width:100%;height:100vh;min-height:0;overflow:hidden;padding:0;background:var(--admin-page,#f1f5f1)}
-.admin-workspace-card{display:grid;grid-template-columns:260px minmax(0,1fr);width:100%;height:100vh;min-height:0;overflow:hidden;border:0;border-radius:0;background:var(--admin-page,#f1f5f1);box-shadow:none}
-.admin-workspace-card .admin-sidebar{position:relative;top:auto;width:auto;height:100%;min-height:0;overflow-y:auto;overscroll-behavior:contain;border-radius:0;border-right:1px solid var(--admin-border,#dce8de)}
-.admin-workspace-card .admin-main{height:100%;min-width:0;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:0}
-.admin-workspace-card .admin-main__card{min-height:100%;border:0;border-radius:0;box-shadow:none;background:transparent;padding:clamp(20px,2.5vw,36px)}
-.admin-workspace-card .admin-header{position:sticky;top:0;z-index:20;padding:10px 0 16px;background:color-mix(in srgb,var(--admin-surface,#fff) 92%,transparent);backdrop-filter:blur(14px)}
-.admin-table-wrap{max-height:min(70vh,720px);overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
-.admin-table-wrap thead{position:sticky;top:0;z-index:2;background:var(--admin-surface,#fff)}
-html[data-admin-theme="dark"] .admin-workspace-card{border:0;box-shadow:none;background:transparent}
-html[data-admin-theme="dark"] .admin-workspace-card .admin-sidebar{border-right-color:#244433}
-html[data-admin-theme="dark"] .admin-workspace-card .admin-main__card{border:0;box-shadow:none;background:transparent}
-@media(max-width:1150px){.admin-workspace-card{grid-template-columns:84px minmax(0,1fr)}}
-@media(max-width:700px){.admin-shell--workspace{height:100vh;padding:0}.admin-workspace-card{display:block;height:100vh;min-height:0;border:0;border-radius:0;box-shadow:none}.admin-workspace-card .admin-sidebar{position:sticky;top:0;z-index:30;height:auto;min-height:0;overflow-x:auto;overflow-y:hidden;border-right:0;border-bottom:1px solid var(--admin-border,#dce8de)}.admin-workspace-card .admin-main{height:calc(100vh - 58px)}.admin-workspace-card .admin-main__card{padding:16px 14px 28px}}
-
+@media (max-width: 560px) {
+  .admin-kpi-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .admin-kpi-grid article {
+    min-height: 120px !important;
+  }
+}

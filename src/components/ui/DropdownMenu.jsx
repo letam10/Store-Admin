@@ -55,7 +55,6 @@ export default function DropdownMenu({ value, options = [], onChange, ariaLabel,
     const closeOnOutsideClick = (event) => {
       if (!rootRef.current?.contains(event.target)) {
         setOpen(false)
-        triggerRef.current?.focus()
       }
     }
     document.addEventListener('pointerdown', closeOnOutsideClick)
@@ -142,7 +141,7 @@ export default function DropdownMenu({ value, options = [], onChange, ariaLabel,
   }
 
   const classes = ['admin-dropdown-menu', open ? 'is-open' : '', disabled ? 'is-disabled' : '', className].filter(Boolean).join(' ')
-  return <div ref={rootRef} className={classes}>
+  return <div ref={rootRef} className={classes} onClick={(event) => event.stopPropagation()}>
     <button
       ref={triggerRef}
       className="admin-dropdown-menu__trigger"
@@ -154,13 +153,16 @@ export default function DropdownMenu({ value, options = [], onChange, ariaLabel,
       aria-haspopup="listbox"
       aria-activedescendant={open && activeOption ? `${listId}-${activeIndex}` : undefined}
       disabled={disabled}
-      onClick={() => (open ? closeMenu() : openMenu())}
+      onClick={(event) => {
+        event.stopPropagation()
+        open ? closeMenu() : openMenu()
+      }}
       onKeyDown={handleTriggerKeyDown}
     >
       <span className="admin-dropdown-menu__value">{triggerLabel}</span>
       <span className="admin-dropdown-menu__caret" aria-hidden="true">⌄</span>
     </button>
-    {open && <ul id={listId} className="admin-dropdown-menu__panel" role="listbox" aria-label={ariaLabel}>
+    {open && <ul id={listId} className="admin-dropdown-menu__panel" role="listbox" aria-label={ariaLabel} onClick={(event) => event.stopPropagation()}>
       {normalizedOptions.map((option, index) => <li
         key={`${String(option.value)}-${index}`}
         id={`${listId}-${index}`}
@@ -168,9 +170,16 @@ export default function DropdownMenu({ value, options = [], onChange, ariaLabel,
         role="option"
         aria-selected={index === selectedIndex}
         aria-disabled={option.disabled || undefined}
-        onMouseDown={(event) => event.preventDefault()}
+        onMouseDown={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        }}
         onMouseEnter={() => { if (!option.disabled) setActiveIndex(index) }}
-        onClick={() => selectOption(index)}
+        onClick={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          selectOption(index)
+        }}
       >
         <span>{option.label}</span>
         {index === selectedIndex && <span aria-hidden="true">✓</span>}
