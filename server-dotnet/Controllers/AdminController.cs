@@ -20,7 +20,7 @@ namespace StoreApi.Controllers;
 [Route("api/admin")]
 [TypeFilter(typeof(AdminAccessFilter))]
 // Vai trò kiểu AdminController: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
-public sealed class AdminController(StoreDb db, AiChatService aiChatService, ChatStreamService chat, IHostApplicationLifetime lifetime) : ControllerBase
+public sealed class AdminController(StoreDb db, AiChatService aiChatService, ChatStreamService chat, IHostApplicationLifetime lifetime, StorefrontCache? cache = null) : ControllerBase
 {
     private const string Cookie = "store_admin_session";
 
@@ -94,6 +94,7 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Cha
         var stockCount = request.StockCount ?? 20;
 
         var product = db.CreateCatalogProduct(id, request.Name.Trim(), category, request.Price.Value, description, image, features, "green", symbol, label, stockCount);
+        cache?.InvalidateCatalog();
         return StatusCode(StatusCodes.Status201Created, new { product });
     }
 
@@ -106,6 +107,7 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Cha
         if (!ValidProductInput(request)) return BadRequest(new { error = "INVALID_PRODUCT" });
 
         var updated = db.UpdateCatalogProduct(id, request.Name, request.Category, request.Price, request.Description, request.Image, request.Label ?? request.Badge, request.StockCount, request.Symbol);
+        if (updated is not null) cache?.InvalidateCatalog();
         return updated is null ? NotFound(new { error = "PRODUCT_NOT_FOUND" }) : Ok(new { product = updated });
     }
 
@@ -121,7 +123,12 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Cha
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
         if (id is "1" or "2" or "3" or "4") return BadRequest(new { error = "FEATURED_PRODUCT_PROTECTED" });
 
-        try { return db.DeleteCatalogProduct(id) ? Ok(new { ok = true, id }) : NotFound(new { error = "PRODUCT_NOT_FOUND" }); }
+        try
+        {
+            var deleted = db.DeleteCatalogProduct(id);
+            if (deleted) cache?.InvalidateCatalog();
+            return deleted ? Ok(new { ok = true, id }) : NotFound(new { error = "PRODUCT_NOT_FOUND" });
+        }
         catch (InvalidOperationException ex) when (ex.Message == "PRODUCT_IN_USE") { return Conflict(new { error = ex.Message }); }
     }
 
@@ -134,6 +141,7 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Cha
         if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
         if (!db.UpdateOffer(id, request.DiscountPercent, request.StockCount)) return BadRequest(new { error = "INVALID_PRODUCT_OFFER" });
+        cache?.InvalidateCatalog();
         var product = db.GetCatalogProduct(id);
         return product is null ? NotFound(new { error = "PRODUCT_NOT_FOUND" })
             : Ok(new { offer = new { product.DiscountPercent, product.StockCount } });
@@ -181,6 +189,7 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Cha
         if (topLevelAdminTheme.ValueKind == JsonValueKind.Object) adminTheme = topLevelAdminTheme.Clone();
 
         db.SaveAppearance(legacy, theme, adminTheme);
+        cache?.InvalidateAppearance();
         return Ok(new { appearance = db.Appearance(), theme = db.Theme(), adminTheme = db.AdminTheme() });
     }
 

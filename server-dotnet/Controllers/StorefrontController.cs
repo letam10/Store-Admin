@@ -17,17 +17,17 @@ namespace StoreApi.Controllers;
 [ApiController]
 [Route("api/storefront")]
 // Vai trò kiểu StorefrontController: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
-public sealed class StorefrontController(StoreDb db) : ControllerBase
+public sealed class StorefrontController(StoreDb db, StorefrontCache cache) : ControllerBase
 {
     private const string Cookie = "store_customer_session";
 
     [HttpGet("catalog")]
     // Chức năng Catalog: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.
-    public IActionResult Catalog() => Ok(new { products = db.Catalog() });
+    public IActionResult Catalog() => Ok(new { products = cache.GetCatalog(db.Catalog) });
 
     [HttpGet("appearance")]
     // Chức năng Appearance: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.
-    public IActionResult Appearance() => Ok(new { appearance = db.Appearance(), theme = db.Theme() });
+    public IActionResult Appearance() => Ok(cache.GetAppearance(() => new { appearance = db.Appearance(), theme = db.Theme() }));
 
     [HttpPost("products/{id}/view")]
     // Chức năng ViewProduct: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.

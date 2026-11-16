@@ -358,6 +358,9 @@
   margin-bottom: 6px;
 }
 
+.admin-eyebrow + h1,
+.admin-eyebrow + h2,
+.admin-eyebrow + h3,
 .admin-header h1 {
   font-size: clamp(26px, 3.2vw, 36px);
   font-weight: 900;
@@ -365,6 +368,7 @@
   color: #123223;
   line-height: 1.15;
   margin: 0;
+  padding-left: 12px;
 }
 
 /* Ô tìm kiếm toàn cục */

@@ -2,9 +2,13 @@
  * Tệp: server-dotnet/Program.cs
  * Mục đích: Điểm khởi động ASP.NET Core C# và đăng ký DI, EF Core SQL Server, CORS, Swagger, controllers và Menu quản lý.
  */
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using StoreApi.Data;
+using StoreApi.Middlewares;
+using StoreApi.UI;
+using System.IO.Compression;
 
 // Nạp các biến cấu hình từ file .env nếu có (GOOGLE_CLIENT_ID, SMTP, ...)
 var candidateEnvPaths = new[]
@@ -117,14 +121,81 @@ else
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(connectionString));
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        options.InvalidModelStateResponseFactory = context =>
+        {
+            var errors = context.ModelState
+                .Where(e => e.Value?.Errors.Count > 0)
+                .ToDictionary(
+                    kvp => System.Text.Json.JsonNamingPolicy.CamelCase.ConvertName(kvp.Key),
+                    kvp => kvp.Value!.Errors.Select(e =>
+                    {
+                        var msg = e.ErrorMessage;
+                        if (string.IsNullOrWhiteSpace(msg))
+                            msg = "Dữ liệu trường này không hợp lệ.";
+                        else if (msg.Contains("is required", StringComparison.OrdinalIgnoreCase))
+                            msg = "Trường này là bắt buộc.";
+                        else if (msg.Contains("could not be converted", StringComparison.OrdinalIgnoreCase))
+                            msg = "Định dạng dữ liệu không đúng kiểu quy định.";
+                        return msg;
+                    }).ToArray()
+                );
+
+            var response = new
+            {
+                ok = false,
+                error = "INVALID_INPUT",
+                message = "Dữ liệu nhập vào chưa hợp lệ. Vui lòng kiểm tra lại các trường thông tin.",
+                errors,
+                traceId = System.Diagnostics.Activity.Current?.Id ?? context.HttpContext.TraceIdentifier
+            };
+
+            return new Microsoft.AspNetCore.Mvc.BadRequestObjectResult(response);
+        };
+    });
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options => options.SwaggerDoc("v1", new OpenApiInfo
+builder.Services.AddSwaggerGen(options =>
 {
-    Title = "Store API (ASP.NET Core)",
-    Version = "v1",
-    Description = "ASP.NET Core Web API kết nối SQL Server với Entity Framework Core."
-}));
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "OmniCart Backend API",
+        Version = "v1",
+        Description = "ASP.NET Core Web API kết nối SQL Server với Entity Framework Core, phục vụ storefront và trang quản trị.",
+        Contact = new OpenApiContact
+        {
+            Name = "OmniCart Engineering Team",
+            Email = "support@omnicart.local"
+        }
+    });
+
+    options.TagActionsBy(api =>
+    {
+        if (api.GroupName != null) return new[] { api.GroupName };
+        var controllerName = api.ActionDescriptor.RouteValues["controller"];
+        return new[]
+        {
+            controllerName switch
+            {
+                "Storefront" => "1. Storefront (Danh mục & Cửa hàng)",
+                "Customer" => "2. Customer (Khách hàng & Đơn hàng)",
+                "Products" => "3. Products (Quản lý hàng hóa EF Core)",
+                "Support" => "4. Support & AI (Hỗ trợ khách & Ollama)",
+                "Health" => "5. Health Checks (Giám sát hệ thống)",
+                "Admin" => "6. Admin (Quản trị vận hành)",
+                "AdminAccounts" => "6. Admin - Tài khoản",
+                "AdminOperationalExports" => "6. Admin - Xuất dữ liệu",
+                "AdminReports" => "6. Admin - Báo cáo",
+                "AdminSePay" => "6. Admin - SePay",
+                "AdminUnmatchedPayments" => "6. Admin - Đối soát thanh toán",
+                "AdminVouchers" => "6. Admin - Khuyến mãi & Voucher",
+                _ => controllerName ?? "General"
+            }
+        };
+    });
+    options.DocInclusionPredicate((docName, api) => true);
+});
 
 builder.Services.AddSingleton<StoreDb>();
 builder.Services.AddSingleton<StoreApi.Services.EmailService>();
@@ -139,29 +210,113 @@ builder.Services.AddSingleton<StoreApi.Services.ChatStreamService>();
 
 builder.Services.AddHttpContextAccessor();
 
+// Đăng ký Response Compression (Brotli + Gzip) để giảm payload JSON/SVG tải về cho Frontend
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
+    {
+        "application/json",
+        "text/json",
+        "image/svg+xml"
+    });
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options => options.Level = CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(options => options.Level = CompressionLevel.Fastest);
+
+// Đăng ký Memory Cache và Cache chuyên dụng cho Storefront
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<StoreApi.Services.StorefrontCache>();
+
 var frontendUrl = (builder.Configuration["FRONTEND_URL"] ?? Environment.GetEnvironmentVariable("FRONTEND_URL") ?? "http://127.0.0.1:5173").TrimEnd('/');
 
-builder.Services.AddCors(options => options.AddPolicy("local-frontends", policy => policy
-    .SetIsOriginAllowed(origin =>
+// Rà soát CORS: Cho phép rõ ràng http://127.0.0.1:5174, http://localhost:5174, http://127.0.0.1:5173, http://localhost:5173
+builder.Services.AddCors(options => options.AddPolicy("local-frontends", policy =>
+{
+    var allowedOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:5174"
+    };
+
+    if (!string.IsNullOrWhiteSpace(frontendUrl))
+    {
+        allowedOrigins.Add(frontendUrl);
+    }
+
+    policy.SetIsOriginAllowed(origin =>
     {
         if (string.IsNullOrWhiteSpace(origin)) return false;
+        if (allowedOrigins.Contains(origin)) return true;
         try
         {
             var uri = new Uri(origin);
-            return uri.Host is "localhost" or "127.0.0.1" || origin.Equals(frontendUrl, StringComparison.OrdinalIgnoreCase);
+            return uri.Host is "localhost" or "127.0.0.1";
         }
         catch { return false; }
     })
     .AllowAnyHeader()
     .AllowAnyMethod()
-    .AllowCredentials()));
+    .AllowCredentials()
+    .WithExposedHeaders("x-csrf-token", "Content-Disposition");
+}));
 
 var app = builder.Build();
 
-app.UseSwagger();
-app.UseSwaggerUI(options => options.SwaggerEndpoint("/swagger/v1/swagger.json", "Store API v1"));
+app.UseMiddleware<ExceptionHandlingMiddleware>();
+app.UseResponseCompression();
+app.UseMiddleware<RequestTimingMiddleware>();
+
+app.UseStatusCodePages(async statusCodeContext =>
+{
+    var response = statusCodeContext.HttpContext.Response;
+    var request = statusCodeContext.HttpContext.Request;
+
+    if (response.StatusCode == StatusCodes.Status404NotFound)
+    {
+        var acceptHeader = request.Headers.Accept.ToString();
+        var isApi = request.Path.StartsWithSegments("/api");
+
+        if (acceptHeader.Contains("text/html") && !isApi)
+        {
+            response.ContentType = "text/html; charset=utf-8";
+            await response.WriteAsync(BackendViews.RenderNotFoundHtml(request.Path));
+        }
+    }
+});
+
+app.UseStaticFiles();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint("/swagger/v1/swagger.json", "OmniCart API v1 (Development)");
+        options.DocumentTitle = "OmniCart API Documentation";
+        options.InjectStylesheet("/swagger/custom-swagger.css");
+        options.DefaultModelsExpandDepth(-1);
+        options.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
+    });
+}
 
 app.UseCors("local-frontends");
+
+app.MapGet("/", () => Results.Content(BackendViews.RenderRootDashboardHtml(), "text/html; charset=utf-8"));
+
+app.MapGet("/health", () => Results.Ok(new
+{
+    ok = true,
+    status = "ok",
+    service = "OmniCart Backend API",
+    runtime = ".NET 8.0",
+    timestamp = DateTimeOffset.UtcNow
+}));
+
 app.MapControllers();
 
 // Tự dựng StoreDb cho máy mới pull về: tạo database + tables + seed nếu rỗng.
