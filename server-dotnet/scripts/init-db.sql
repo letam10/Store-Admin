@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Khởi tạo schema cơ sở dữ liệu SQL Server cho hệ thống Store & Store-Admin
+  - Liên kết trực tiếp: Store-Admin/sync-db.ps1, Store-Admin/server-dotnet/Data/StoreDb.cs
+  - Vùng ảnh hưởng khi sửa: Toàn bộ cấu trúc bảng và khóa ngoại khi thành viên chạy sync-db
+*/
 -- =========================================================
 -- SQL Server Migration Script for Store / Store-Admin
 -- Compatible with Microsoft SQL Server 2019 / 2022 / 2025
@@ -141,9 +147,13 @@ GO
 -- 10. Table: product_views
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'product_views')
 CREATE TABLE product_views (
-  product_id NVARCHAR(255) PRIMARY KEY,
+  product_id NVARCHAR(255) PRIMARY KEY FOREIGN KEY REFERENCES catalog_products(id) ON DELETE CASCADE,
   view_count INT NOT NULL DEFAULT 0 CHECK(view_count >= 0)
 );
+GO
+IF NOT EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_product_views_catalog_products')
+  ALTER TABLE product_views ADD CONSTRAINT FK_product_views_catalog_products
+    FOREIGN KEY (product_id) REFERENCES catalog_products(id) ON DELETE CASCADE;
 GO
 
 -- 11. Table: admin_records
@@ -213,10 +223,14 @@ GO
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'customer_favorites')
 CREATE TABLE customer_favorites (
   customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
-  product_id NVARCHAR(255) NOT NULL,
+  product_id NVARCHAR(255) NOT NULL FOREIGN KEY REFERENCES catalog_products(id) ON DELETE CASCADE,
   created_at NVARCHAR(100) NOT NULL,
   PRIMARY KEY(customer_id, product_id)
 );
+GO
+IF NOT EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_customer_favorites_catalog_products')
+  ALTER TABLE customer_favorites ADD CONSTRAINT FK_customer_favorites_catalog_products
+    FOREIGN KEY (product_id) REFERENCES catalog_products(id) ON DELETE CASCADE;
 GO
 
 -- 17. Table: product_reviews
@@ -225,7 +239,7 @@ CREATE TABLE product_reviews (
   id BIGINT IDENTITY(1,1) PRIMARY KEY,
   customer_id BIGINT NOT NULL FOREIGN KEY REFERENCES customers(id) ON DELETE CASCADE,
   customer_name NVARCHAR(255) NULL,
-  product_id NVARCHAR(255) NOT NULL,
+  product_id NVARCHAR(255) NOT NULL FOREIGN KEY REFERENCES catalog_products(id) ON DELETE CASCADE,
   rating INT NOT NULL CHECK(rating BETWEEN 1 AND 5),
   comment NVARCHAR(MAX) NOT NULL,
   admin_reply NVARCHAR(MAX) NOT NULL DEFAULT '',
@@ -236,6 +250,10 @@ CREATE TABLE product_reviews (
 GO
 IF COL_LENGTH('product_reviews', 'customer_name') IS NULL
   ALTER TABLE product_reviews ADD customer_name NVARCHAR(255) NULL;
+GO
+IF NOT EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_product_reviews_catalog_products')
+  ALTER TABLE product_reviews ADD CONSTRAINT FK_product_reviews_catalog_products
+    FOREIGN KEY (product_id) REFERENCES catalog_products(id) ON DELETE CASCADE;
 GO
 
 -- 18. Table: customer_orders

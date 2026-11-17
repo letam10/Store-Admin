@@ -1,7 +1,9 @@
 /*
- * Tệp: server-dotnet/Data/StoreDb.cs
- * Mục đích: Lớp truy cập Microsoft SQL Server bằng Microsoft.Data.SqlClient cho API C#.
- */
+  FILE NOTE
+  - Mục đích: Lớp truy cập Microsoft SQL Server bằng Microsoft.Data.SqlClient cho API C#.
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/AppDbContext.cs, Store-Admin/server-dotnet/Controllers/*.cs, Store-Admin/sync-db.ps1
+  - Vùng ảnh hưởng khi sửa: Toàn bộ truy vấn SQL, khởi tạo bảng, migration và xử lý dữ liệu cửa hàng
+*/
 using System.Diagnostics;
 using System.Data;
 using System.Text.Json;
@@ -342,6 +344,24 @@ public sealed partial class StoreDb
                   product_id NVARCHAR(255) PRIMARY KEY,
                   view_count INT NOT NULL DEFAULT 0 CHECK(view_count >= 0)
                 );
+
+                IF NOT EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_customer_favorites_catalog_products')
+                BEGIN
+                  ALTER TABLE customer_favorites ADD CONSTRAINT FK_customer_favorites_catalog_products
+                    FOREIGN KEY (product_id) REFERENCES catalog_products(id) ON DELETE CASCADE;
+                END;
+
+                IF NOT EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_product_reviews_catalog_products')
+                BEGIN
+                  ALTER TABLE product_reviews ADD CONSTRAINT FK_product_reviews_catalog_products
+                    FOREIGN KEY (product_id) REFERENCES catalog_products(id) ON DELETE CASCADE;
+                END;
+
+                IF NOT EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_product_views_catalog_products')
+                BEGIN
+                  ALTER TABLE product_views ADD CONSTRAINT FK_product_views_catalog_products
+                    FOREIGN KEY (product_id) REFERENCES catalog_products(id) ON DELETE CASCADE;
+                END;
 
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'settings')
                 CREATE TABLE settings (
