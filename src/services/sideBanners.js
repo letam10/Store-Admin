@@ -4,10 +4,12 @@
  * Mục đích: Chuẩn hóa cấu hình banner hai bên trang chủ (appearance.sideBanners) dùng chung
  * giữa ThemeEditor (nhánh Admin) và trang chủ phía khách (nhánh Store).
  * Thành phần chính: parseSideBanners, serializeSideBanners, editorSideBanners,
- * padSideBannerList, normalizeSideBannerSlot, normalizeHexColor.
+ * padSideBannerList, normalizeSideBannerSlot, normalizeHexColor, commonSideBannerCount.
  * Liên kết trực tiếp: src/pages/ThemeEditor.jsx (trạng thái chỉnh sửa), trang chủ Store (render).
  * Cẩn trọng: khi sửa hàm, schema hoặc export phải kiểm tra các tệp gọi nó; chuỗi JSON đã lưu
  * chỉ chứa slot có productId thật, ô trống chỉ tồn tại trong trạng thái chỉnh sửa.
+ * Số lượng banner là CHUNG cho cả 2 bên: editor luôn đệm 2 bên tới cùng một số ô
+ * (bên nhiều hơn quyết định số chung, kẹp 5-20); ô trống vẫn bị loại khi lưu như cũ.
  */
 export const SIDE_BANNER_MIN_COUNT = 5
 export const SIDE_BANNER_MAX_COUNT = 20
@@ -92,15 +94,25 @@ export function padSideBannerList(list, count) {
   return next
 }
 
+// Chức năng commonSideBannerCount: số lượng banner CHUNG cho cả 2 bên.
+// Lấy bên nhiều slot hơn làm số chung (kẹp 5-20); cấu hình cũ 2 bên lệch nhau
+// thì bên ít hơn được đệm ô trống tới số chung khi mở editor.
+export function commonSideBannerCount(value) {
+  const parsed = parseSideBanners(value)
+  return clampCount(Math.max(parsed.left.length, parsed.right.length, SIDE_BANNER_DEFAULT_COUNT))
+}
+
 // Chức năng editorSideBanners: trạng thái chỉnh sửa cho ThemeEditor.
-// Mỗi bên luôn có 5-20 ô sửa được, mặc định 5 ô mỗi bên khi chưa có cấu hình;
-// đã lưu 7 slot thì mở ra 7 ô (ô trống chỉ đệm tới mức tối thiểu 5).
+// 2 bên LUÔN cùng số ô (số lượng chung): chưa có cấu hình thì 5 ô mỗi bên;
+// đã lưu 7 slot một bên thì cả 2 bên mở ra 7 ô, bên ít hơn được đệm ô trống;
+// ô trống chỉ tồn tại trong trạng thái chỉnh sửa, khi lưu vẫn bị loại như cũ.
 export function editorSideBanners(value) {
   const parsed = parseSideBanners(value)
+  const count = commonSideBannerCount(parsed)
   return {
     version: 1,
-    left: padSideBannerList(parsed.left),
-    right: padSideBannerList(parsed.right),
+    left: padSideBannerList(parsed.left, count),
+    right: padSideBannerList(parsed.right, count),
   }
 }
 
