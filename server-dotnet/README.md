@@ -1,3 +1,10 @@
+<!--
+  FILE NOTE
+  - Mục đích: Tài liệu hướng dẫn thiết lập, chạy API backend .NET và cấu hình AI local 16k context, thinking off.
+  - Liên kết trực tiếp: appsettings.json, .env.example, Services/AiChatService.cs, docs/AI-LOCAL.md
+  - Vùng ảnh hưởng khi sửa: Thành viên trong nhóm tham khảo để dựng môi trường và đồng bộ cấu hình.
+-->
+
 # Store API bằng C# (cổng 5000)
 
 Backend ASP.NET Core là backend chính để chạy và nghiệm thu Store cùng Store-Admin trên cổng 5000. Backend Node cũ chỉ được giữ để rollback, không phải nguồn catalog hoặc nguồn kiểm thử chính.
@@ -77,6 +84,6 @@ ollama pull qwen3.5:4b
 ollama list
 ```
 
-Mặc định dự án dùng `AI_CONTEXT_SIZE=32768`, `AI_THINKING=medium` và timeout 120 giây. Medium là mức giới hạn sinh 4.096 token của ứng dụng; Qwen bật `think=true`. Dữ kiện được truy xuất từ StoreDb theo câu hỏi, lời đáp do model sinh trực tiếp. Xem [AI Local](../docs/AI-LOCAL.md) về context, lịch sử, trạng thái chưa hoàn tất và bảo vệ tài khoản. Sau khi sửa `.env`, khởi động lại API.
+Mặc định dự án dùng `AI_CONTEXT_SIZE=16384`, `AI_THINKING=off` và timeout 120 giây. Khi tắt thinking (`think=false`), mô hình phản hồi nhanh và trả lời chính xác dựa trên dữ liệu thật trích xuất từ StoreDb cùng các câu hỏi giao tiếp thường ngày. Xem [AI Local](../docs/AI-LOCAL.md) về context, lịch sử, trạng thái chưa hoàn tất và bảo vệ tài khoản. Sau khi sửa `.env`, khởi động lại API.
 
 Lịch sử chat được lưu theo tài khoản trong các bảng `conversations`, `messages` và `chat_turns`, nên việc Store làm mới phiên khách mỗi phút không còn xóa hội thoại. Backend chỉ đưa các lượt gần nhất vào prompt; dữ liệu sản phẩm, danh mục, giá và tồn kho vẫn được đọc lại trực tiếp từ `catalog_products` ở mỗi câu hỏi.

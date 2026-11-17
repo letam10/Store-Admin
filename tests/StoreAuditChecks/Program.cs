@@ -1,9 +1,16 @@
+/*
+  FILE NOTE
+  - Mục đích: Chương trình kiểm thử tự động (Audit Checks) cho tiếng Việt, DB QA và AI local.
+  - Liên kết trực tiếp: CurrentAiAudit.cs, Services/AiChatService.cs, Data/StoreDb.cs
+  - Vùng ảnh hưởng khi sửa: Bộ kiểm thử và báo cáo kiểm tra tự động của hệ thống.
+*/
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using StoreApi.Data;
+using StoreApi.Models;
 using StoreApi.Security;
 using StoreApi.Services;
 
@@ -20,7 +27,7 @@ var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Diction
 {
     ["ConnectionStrings:StoreDb"] = connectionString, ["SEPAY_ENABLED"] = "false", ["SEPAY_API_TOKEN"] = "",
     ["OLLAMA_HOST"] = "http://127.0.0.1:11434", ["OLLAMA_MODEL"] = "qwen3.5:4b",
-    ["AI_CONTEXT_SIZE"] = "32768", ["AI_THINKING"] = "medium",
+    ["AI_CONTEXT_SIZE"] = "16384", ["AI_THINKING"] = "off",
     ["ADMIN_NOTIFICATION_EMAILS"] = "admin1@example.invalid,admin2@example.invalid"
 }).Build();
 using (var context = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseSqlServer(connectionString).Options))
@@ -42,7 +49,7 @@ void Check(bool condition, string label)
     if (!condition) throw new Exception("FAIL: " + label);
     checks.Add(label);
 }
-string Fingerprint(string select) => (string)Sql($"SELECT CONVERT(varchar(64),HASHBYTES('SHA2_256',CAST(({select} FOR JSON PATH) AS nvarchar(max))),2)")!;
+string Fingerprint(string select) => (string?)Sql($"SELECT CONVERT(varchar(64),HASHBYTES('SHA2_256',CAST(ISNULL(({select} FOR JSON PATH), '[]') AS nvarchar(max))),2)") ?? "";
 string MoneyFingerprint() => string.Join(':', new[]
 {
     Fingerprint("SELECT id,price,stock_count,discount_percent,category,image FROM catalog_products ORDER BY id"),
@@ -112,7 +119,7 @@ Check(VietnameseLabels.Tier("diamond") == "Kim cương" && VietnameseLabels.Stat
     && VietnameseLabels.Payment("bank_transfer") == "Chuyển khoản ngân hàng", "export enum labels in Vietnamese");
 
 var receipt = new OrderInvoiceData("QA-RECEIPT-4750", "customer@example.invalid", "Khách kiểm tra", "0900000000",
-    "Địa chỉ kiểm tra", "delivery", "bank_transfer", [new("Sản phẩm thử thanh toán", 1, 5000, 5000)],
+    "Địa chỉ kiểm tra", "delivery", "bank_transfer", [new("Túi vải Canvas mini đựng phụ kiện", 1, 5000, 5000)],
     5000, 250, 0, 4750, "diamond", "2026-11-13T02:25:41Z", "2026-11-14T02:23:00Z");
 var html = EmailTemplates.BuildInvoiceEmailHtml(receipt, "http://localhost:5197");
 Check(html.Contains("4.750 ₫") && html.Contains("09:25 · 13/11/2026"), "receipt formats Vietnamese money and UTC+7 dates");
@@ -122,10 +129,70 @@ var unsafeHtml = EmailTemplates.BuildInvoiceEmailHtml(receipt with { Recipient =
 Check(!unsafeHtml.Contains("<script>"), "receipt escapes customer supplied markup");
 Directory.CreateDirectory(Path.Combine(output, "preview"));
 File.WriteAllText(Path.Combine(output, "preview", "invoice.html"), html);
+
+// Kiểm tra dữ liệu sản phẩm và kế thừa ngữ cảnh hội thoại đa lượt trong AI Store Context
+var manualPatch = patches["manual-e6573516"];
+Check(manualPatch.GetProperty("name").GetString() == "Túi vải Canvas mini đựng phụ kiện", "manual patch has real product name");
+Check(!manualPatch.GetProperty("description").GetString()!.Contains("thử thanh toán") && !manualPatch.GetProperty("description").GetString()!.Contains("kiểm tra quy trình"), "manual patch removes test phrases");
+
+var testProduct = db.Catalog().FirstOrDefault(p => p.Id == "manual-e6573516");
+if (testProduct is not null)
+{
+    Check(testProduct.Name == "Túi vải Canvas mini đựng phụ kiện" && testProduct.Price == 5000, "manual-e6573516 updated to real store product");
+    Check(!testProduct.Description.Contains("thử thanh toán") && !testProduct.Description.Contains("kiểm tra quy trình"), "manual-e6573516 removes test phrases");
+}
+
+var singleFacts = JsonDocument.Parse(AiStoreContext.Build("Cho tôi thông tin về iPhone 13 Pro", [], db, false).Json);
+var iPhoneObj = singleFacts.RootElement.GetProperty("catalog").GetProperty("products")[0];
+Check(iPhoneObj.TryGetProperty("id", out _) && iPhoneObj.TryGetProperty("name", out _)
+    && iPhoneObj.TryGetProperty("price", out _) && iPhoneObj.TryGetProperty("salePrice", out _)
+    && iPhoneObj.TryGetProperty("discountPercent", out _) && iPhoneObj.TryGetProperty("stockCount", out _)
+    && iPhoneObj.TryGetProperty("category", out _) && iPhoneObj.TryGetProperty("image", out var img)
+    && !string.IsNullOrWhiteSpace(img.GetString()) && iPhoneObj.TryGetProperty("description", out _), "product facts contain complete details including image and prices");
+
+var cheapestFacts = JsonDocument.Parse(AiStoreContext.Build("Giá thấp nhất", [], db, false).Json);
+var cheapestProducts = cheapestFacts.RootElement.GetProperty("catalog").GetProperty("products");
+Check(cheapestProducts.GetArrayLength() >= 5 && cheapestProducts.GetArrayLength() <= 10, "cheapest query returns top products list");
+
+var saleFacts = JsonDocument.Parse(AiStoreContext.Build("Sản phẩm giảm giá", [], db, false).Json);
+var saleProducts = saleFacts.RootElement.GetProperty("catalog").GetProperty("products");
+Check(saleProducts.GetArrayLength() >= 5 && saleProducts.GetArrayLength() <= 10, "sale query returns top products list");
+
+var turnSale = new ChatTurnData("req-1", "Cửa hàng có sản phẩm nào giảm giá không?", "Có nhiều sản phẩm đang giảm giá.", "completed", "[]", "null", "null");
+var multiSale = JsonDocument.Parse(AiStoreContext.Build("Giá thấp nhất", [turnSale], db, false).Json);
+Check(multiSale.RootElement.GetProperty("catalog").GetProperty("query").GetProperty("onSale").GetBoolean(), "multi-turn preserves onSale context");
+
+var turnCat = new ChatTurnData("req-2", "Shop có laptop không?", "Shop có các mẫu laptop sau.", "completed", "[]", "null", "null");
+var multiCat = JsonDocument.Parse(AiStoreContext.Build("Còn hàng không?", [turnCat], db, false).Json);
+Check(multiCat.RootElement.GetProperty("catalog").GetProperty("query").GetProperty("selectedCategory").GetString() == "Laptop", "multi-turn preserves selectedCategory context");
+
+var turnProduct = new ChatTurnData("req-3", "Cho tôi thông tin về iPhone 13 Pro", "Dạ iPhone 13 Pro là mẫu máy...", "completed", "[]", "null", "null");
+var multiProduct = JsonDocument.Parse(AiStoreContext.Build("Có màu gì?", [turnProduct], db, false).Json);
+var multiProducts = multiProduct.RootElement.GetProperty("catalog").GetProperty("products");
+Check(multiProducts.GetArrayLength() == 1 && multiProducts[0].GetProperty("id").GetString() == "dummyjson-123", "multi-turn preserves namedProduct for detail follow-up");
+
+var multiUnrelated = JsonDocument.Parse(AiStoreContext.Build("Thời tiết hôm nay thế nào?", [turnCat], db, false).Json);
+Check(!multiUnrelated.RootElement.TryGetProperty("catalog", out _), "multi-turn does not leak catalog into unrelated questions");
+
+var multiMath = JsonDocument.Parse(AiStoreContext.Build("1 + 1 bằng mấy?", [turnCat], db, false).Json);
+Check(!multiMath.RootElement.TryGetProperty("catalog", out _), "multi-turn does not leak catalog into math questions");
+
+var todaySaleFacts = JsonDocument.Parse(AiStoreContext.Build("Hôm nay có sản phẩm nào giảm giá không?", [], db, false).Json);
+Check(todaySaleFacts.RootElement.TryGetProperty("catalog", out var todaySaleCatalog) && todaySaleCatalog.GetProperty("products").GetArrayLength() > 0, "today query does not block catalog for sale questions");
+
+var todayFollowUpFacts = JsonDocument.Parse(AiStoreContext.Build("Sản phẩm này hôm nay giá bao nhiêu?", [turnProduct], db, false).Json);
+Check(todayFollowUpFacts.RootElement.TryGetProperty("catalog", out var todayFollowUpCatalog) && todayFollowUpCatalog.GetProperty("products")[0].GetProperty("id").GetString() == "dummyjson-123", "today follow-up preserves namedProduct context");
+
+var paymentWithProductFacts = JsonDocument.Parse(AiStoreContext.Build("Tôi muốn thanh toán chuyển khoản cho tai nghe Everyday", [], db, false).Json);
+Check(paymentWithProductFacts.RootElement.TryGetProperty("catalog", out _) && paymentWithProductFacts.RootElement.TryGetProperty("payment", out _), "payment query with product preserves both catalog and payment");
+
+var allSaleFacts = JsonDocument.Parse(AiStoreContext.Build("Cho tôi xem toàn bộ sản phẩm giảm giá", [], db, false).Json);
+Check(allSaleFacts.RootElement.TryGetProperty("catalog", out var allSaleCatalog) && allSaleCatalog.GetProperty("products").GetArrayLength() >= 5, "all sale query returns full sale products");
+
 await RuntimeChecks.RunAsync(db, Check);
 
 var fixture = new { database, username = customerName, customerId, admin = adminName, staff = staffName, password,
-    api = "http://127.0.0.1:5097", orderId, context = 32768, model = "qwen3.5:4b" };
+    api = "http://127.0.0.1:5097", orderId, context = 16384, model = "qwen3.5:4b" };
 File.WriteAllText(Path.Combine(output, "qa-fixture.json"), JsonSerializer.Serialize(fixture));
 File.WriteAllText(Path.Combine(output, "backend-results.json"), JsonSerializer.Serialize(new { database, passed = checks.Count, checks, migrated }, new JsonSerializerOptions { WriteIndented = true }));
 Console.WriteLine(JsonSerializer.Serialize(new { database, passed = checks.Count, checks }));

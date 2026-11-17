@@ -1,8 +1,8 @@
 /*
   FILE NOTE
   - Mục đích: Lớp truy cập Microsoft SQL Server bằng Microsoft.Data.SqlClient cho API C#.
-  - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/AppDbContext.cs, Store-Admin/server-dotnet/Controllers/*.cs, Store-Admin/sync-db.ps1
-  - Vùng ảnh hưởng khi sửa: Toàn bộ truy vấn SQL, khởi tạo bảng, migration và xử lý dữ liệu cửa hàng
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/AppDbContext.cs, Store-Admin/server-dotnet/Controllers/*.cs, Store-Admin/sync-db.ps1, Services/AiStoreContext.cs
+  - Vùng ảnh hưởng khi sửa: Toàn bộ truy vấn SQL, khởi tạo bảng, migration và xử lý dữ liệu cửa hàng, dữ liệu sản phẩm mẫu.
 */
 using System.Diagnostics;
 using System.Data;
@@ -444,6 +444,26 @@ public sealed partial class StoreDb
                 );
                 """;
             command.ExecuteNonQuery();
+
+            using (var updateManual = db.CreateCommand())
+            {
+                updateManual.CommandText = """
+                    UPDATE catalog_products
+                    SET name = N'Túi vải Canvas mini đựng phụ kiện',
+                        description = N'Túi vải Canvas mini tiện dụng với chất liệu vải canvas bền đẹp, đường may chắc chắn. Thiết kế nhỏ gọn, phong cách trẻ trung, phù hợp đựng tai nghe, cáp sạc, chìa khóa và các phụ kiện cá nhân hằng ngày.'
+                    WHERE id = 'manual-e6573516' AND (name LIKE N'%thử thanh toán%' OR description LIKE N'%thử thanh toán%' OR description LIKE N'%kiểm tra quy trình%');
+
+                    UPDATE Products
+                    SET Name = N'Túi vải Canvas mini đựng phụ kiện',
+                        Description = N'Túi vải Canvas mini tiện dụng với chất liệu vải canvas bền đẹp, đường may chắc chắn. Thiết kế nhỏ gọn, phong cách trẻ trung, phù hợp đựng tai nghe, cáp sạc, chìa khóa và các phụ kiện cá nhân hằng ngày.'
+                    WHERE (Id = 7 OR Name LIKE N'%thử thanh toán%') AND (Name LIKE N'%thử thanh toán%' OR Description LIKE N'%thử thanh toán%' OR Description LIKE N'%kiểm tra quy trình%');
+
+                    UPDATE customer_orders
+                    SET items_json = REPLACE(REPLACE(REPLACE(items_json, N'S\u1EA3n ph\u1EA9m th\u1EED thanh to\u00E1n 5.000\u0111', N'T\u00FAi v\u1EA3i Canvas mini \u0111\u1EF1ng ph\u1EE5 ki\u1EC7n'), N'Sản phẩm thử thanh toán 5.000đ', N'Túi vải Canvas mini đựng phụ kiện'), N'Sản phẩm thử thanh toán', N'Túi vải Canvas mini đựng phụ kiện')
+                    WHERE items_json LIKE N'%manual-e6573516%' AND (items_json LIKE N'%th\u1EED thanh to\u00E1n%' OR items_json LIKE N'%thử thanh toán%');
+                    """;
+                try { updateManual.ExecuteNonQuery(); } catch { }
+            }
     }
 
     public IReadOnlyList<ChatTurnData> GetChatTurns(string conversationId, string ownerKey, string kind)

@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Bộ kiểm thử đánh giá AI Chat thực tế (Ollama Qwen) với các kịch bản tra cứu Store và câu hỏi đời sống thường ngày.
+  - Liên kết trực tiếp: Program.cs, Services/AiChatService.cs, Services/AiStoreContext.cs
+  - Vùng ảnh hưởng khi sửa: Báo cáo kết quả kiểm tra tự động AI local.
+*/
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
@@ -51,7 +57,11 @@ public static class CurrentAiAudit
             "Cho tôi thông tin về iPhone 13 Pro.",
             "Chuyển khoản đúng mã và số tiền thì website có tự xác nhận không?",
             "Tôi được trả hàng trong thời hạn nào, tính từ lúc nào?",
-            "Tôi chỉ xem sản phẩm và hỏi tư vấn mà không mua có được không?"
+            "Tôi chỉ xem sản phẩm và hỏi tư vấn mà không mua có được không?",
+            "Chào bạn, hôm nay là thứ mấy và ngày bao nhiêu?",
+            "Thời tiết hôm nay thế nào?",
+            "Cửa hàng có những mặt hàng gì?",
+            "1 + 1 bằng mấy?"
         };
         var results = new List<object>();
         foreach (var question in questions)

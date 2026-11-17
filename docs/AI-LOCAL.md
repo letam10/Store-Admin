@@ -1,3 +1,10 @@
+<!--
+  FILE NOTE
+  - Mục đích: Tài liệu kiến trúc và hướng dẫn vận hành AI Local Ollama, Context size 16k, tắt thinking mode.
+  - Liên kết trực tiếp: server-dotnet/Services/AiChatService.cs, OllamaChatClient.cs, AiStoreContext.cs
+  - Vùng ảnh hưởng khi sửa: Toàn bộ tài liệu kỹ thuật về AI của dự án.
+-->
+
 # AI Local và điểm thành viên
 
 API dùng Ollama tại `http://127.0.0.1:11434`, model `qwen3.5:4b`. Từ thư mục `Store-Admin/server-dotnet`, chạy `dotnet run`, rồi bấm **1**: menu mở API, Store, Admin, khởi động Ollama nếu chưa chạy và nạp mô hình vào bộ nhớ. Dòng AI phân biệt dịch vụ đang chạy, mô hình đã tải và mô hình đã nạp; chỉ báo sẵn sàng khi `/api/ps` xác nhận.
@@ -6,7 +13,7 @@ Máy thành viên cần clone `Store` và `Store-Admin` cạnh nhau, cài Node t
 
 Mô hình được nạp sẵn với `keep_alive=10m`; sau thời gian không dùng, Ollama có thể giải phóng bộ nhớ, câu hỏi kế tiếp sẽ nạp lại. Phím 2/0 dừng các dịch vụ website theo menu và chỉ dừng Ollama nếu chính menu đã mở nó. Ollama đã chạy bên ngoài menu được giữ nguyên. Nếu dùng `npm run dev:api`, lệnh phát triển tắt menu tương tác; khởi động Ollama riêng bằng `ollama serve`.
 
-Mặc định `AI_CONTEXT_SIZE=32768`, `AI_THINKING=medium`. Context chọn ở admin được lưu vào database và đưa vào `options.num_ctx` cho yêu cầu tiếp theo. Medium dùng giới hạn sinh 4.096 token (bao gồm suy luận và câu trả lời); high 8.192. Đây là mức tài nguyên của ứng dụng. Qwen đang dùng `think=true`, không khẳng định model có thang medium riêng khi `/api/show` chưa công bố. Cấu hình cá nhân trong `.env` được ưu tiên; không commit khóa SMTP/OAuth.
+Mặc định `AI_CONTEXT_SIZE=16384`, `AI_THINKING=off`. Context chọn ở admin được lưu vào database và đưa vào `options.num_ctx` cho yêu cầu tiếp theo. Khi tắt thinking (`think=false`), mô hình phản hồi tức thì và trả lời chuẩn xác dựa trên dữ liệu thật và các câu hỏi giao tiếp đời sống thường ngày. Giới hạn sinh token là 4.096 token. Cấu hình cá nhân trong `.env` được ưu tiên; không commit khóa SMTP/OAuth.
 
 Đây là truy xuất dữ liệu thật theo câu hỏi, không fine-tune trọng số. Dữ kiện gồm catalog/giá sau giảm/tồn kho, mã công khai còn hạn, nội dung liên hệ đã đăng trên website, chính sách thanh toán/đổi trả/điểm, ngày giờ Việt Nam. Chưa công bố chương trình tháng sau hay ngày nhập hàng thì AI phải nói chưa có dữ liệu. Nhân viên được coi là đang online khi tab admin đang hiển thị gửi heartbeat trong 90 giây gần nhất; không đảm bảo họ trả lời ngay.
 

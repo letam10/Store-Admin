@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Quản lý vòng đời tiến trình Ollama local (tìm kiếm exe, khởi động service serve, kiểm tra trạng thái và nạp trước model với num_ctx).
+  - Liên kết trực tiếp: Data/ConsoleMenu.cs, Services/AiChatService.cs
+  - Vùng ảnh hưởng khi sửa: Khởi động tự động và nạp mô hình vào RAM/VRAM qua Console Menu.
+*/
 using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;

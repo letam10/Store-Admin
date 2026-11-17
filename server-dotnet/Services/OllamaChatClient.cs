@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Client giao tiếp HTTP trực tiếp với API Ollama (/api/chat, /api/tags), quản lý streaming SSE và thinking mode.
+  - Liên kết trực tiếp: AiChatService.cs, OllamaRuntime.cs
+  - Vùng ảnh hưởng khi sửa: Tốc độ và định dạng phản hồi stream AI, cờ suy luận think, timeout và hàng đợi Semaphore.
+*/
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -38,6 +44,7 @@ public sealed class OllamaChatClient : IDisposable
             using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
             using var reader = new StreamReader(stream);
             var hasContent = false;
+            var insideThink = false;
             while (await reader.ReadLineAsync(timeout.Token) is { } line)
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
@@ -48,6 +55,38 @@ public sealed class OllamaChatClient : IDisposable
                 if (root.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var content)
                     && content.GetString() is { Length: > 0 } text)
                 {
+                    if (thinkingMode == "off")
+                    {
+                        if (insideThink)
+                        {
+                            var endIdx = text.IndexOf("</think>", StringComparison.OrdinalIgnoreCase);
+                            if (endIdx >= 0)
+                            {
+                                insideThink = false;
+                                text = text[(endIdx + 8)..];
+                            }
+                            else
+                            {
+                                continue;
+                            }
+                        }
+                        if (text.Contains("<think>", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var startIdx = text.IndexOf("<think>", StringComparison.OrdinalIgnoreCase);
+                            var before = text[..startIdx];
+                            var endIdx = text.IndexOf("</think>", startIdx + 7, StringComparison.OrdinalIgnoreCase);
+                            if (endIdx >= 0)
+                            {
+                                text = before + text[(endIdx + 8)..];
+                            }
+                            else
+                            {
+                                insideThink = true;
+                                text = before;
+                            }
+                        }
+                        if (string.IsNullOrWhiteSpace(text)) continue;
+                    }
                     hasContent |= !string.IsNullOrWhiteSpace(text);
                     await delta(text);
                 }

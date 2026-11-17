@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Trích xuất và xây dựng ngữ cảnh dữ liệu thực tế (sản phẩm, giá gốc/giảm, tồn kho, ảnh, ưu đãi, đa lượt hội thoại) từ StoreDb để cung cấp cho AI.
+  - Liên kết trực tiếp: AiChatService.cs, StoreDb.cs, StoreDb.AiFacts.cs
+  - Vùng ảnh hưởng khi sửa: Dữ liệu JSON facts gửi cho mô hình AI, nguồn tham khảo (sources) hiển thị trên UI.
+*/
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -27,8 +33,18 @@ public static class AiStoreContext
 
     private static object Product(CatalogProduct item) => new
     {
-        item.Id, item.Name, category = VietnameseLabels.Category(item.Category), originalPriceVnd = item.Price, priceVnd = SalePrice(item),
-        item.DiscountPercent, item.StockCount, stockUnit = "sản phẩm", url = "/products/" + Uri.EscapeDataString(item.Id),
+        id = item.Id,
+        name = item.Name,
+        price = item.Price,
+        originalPriceVnd = item.Price,
+        salePrice = SalePrice(item),
+        priceVnd = SalePrice(item),
+        discountPercent = item.DiscountPercent,
+        stockCount = item.StockCount,
+        stockUnit = "sản phẩm",
+        category = VietnameseLabels.Category(item.Category),
+        image = item.Image,
+        url = "/products/" + Uri.EscapeDataString(item.Id),
         description = item.Description.Length <= 350 ? item.Description : item.Description[..350]
     };
 
@@ -72,7 +88,7 @@ public static class AiStoreContext
         var query = Normalize(message);
         var nextMonthOnly = (query.Contains("thang sau") || query.Contains("thang sao"))
             && !query.Contains("thang nay") && !query.Contains("hien tai");
-        var stockQuestion = query.Contains("het hang") || query.Contains("het kho");
+        var stockQuestion = query.Contains("het hang") || query.Contains("het kho") || query.Contains("con hang") || query.Contains("con khong");
         var mentioned = MentionedProducts(catalog, query);
         var namedProduct = mentioned.Length == 1 ? mentioned[0] : null;
         var categories = catalog.Select(p => p.Category).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -83,12 +99,150 @@ public static class AiStoreContext
         var cheapest = query.Contains("thap nhat") || query.Contains("re nhat");
         var expensive = query.Contains("cao nhat") || query.Contains("dat nhat") || query.Contains("mac nhat");
         var similar = query.Contains("tuong tu") || query.Contains("thay the");
-        var countMatch = Regex.Match(query, @"\b(\d{1,2})\s+(san pham|mat hang|mon)\b");
-        var count = countMatch.Success ? Math.Clamp(int.Parse(countMatch.Groups[1].Value), 1, 12) : cheapest || expensive ? 1 : 6;
-        IEnumerable<CatalogProduct> matches = mentioned.Length > 1 ? mentioned : catalog;
-        if (selectedCategory is not null) matches = matches.Where(p => p.Category.Equals(selectedCategory, StringComparison.OrdinalIgnoreCase));
-        if (onSale) matches = matches.Where(p => p.DiscountPercent > 0 && p.StockCount > 0);
 
+        bool Has(params string[] phrases) => phrases.Any(p => Regex.IsMatch(query, @"(?<![a-z0-9])" + Regex.Escape(p) + @"(?![a-z0-9])"));
+
+        // Xác định rõ câu hỏi có ý định về sản phẩm, giá cả, mua sắm hoặc danh mục cửa hàng hay không
+        var hasExplicitProductIntent = Has(
+            "san pham", "hang hoa", "mat hang", "gia", "gia ca", "tuong tu", "het hang", "con hang", "dien tu", "laptop",
+            "may tinh xach tay", "mua", "co ban", "ban chay", "danh muc", "co gi", "shop co", "cua hang co", "tim", "kiem",
+            "tu van", "mau sac", "kich thuoc", "thiet bi", "phu kien", "anh", "hinh", "hinh anh", "top", "danh sach",
+            "xem them", "chi tiet", "thong so", "sale", "giam gia", "re nhat", "thap nhat", "cao nhat", "dat nhat",
+            "con khong", "cai nay", "mon nay", "em nay", "san pham nay", "san pham do", "cai do", "mon do", "em do",
+            "bao nhieu tien", "gia bao nhieu", "bao hanh"
+        ) || selectedCategory is not null || mentioned.Length > 0 || onSale || cheapest || expensive || similar;
+
+        // Câu hỏi hoàn toàn ngoài lề (thời tiết, toán học, hỏi giờ/thứ đơn thuần không dính sản phẩm)
+        // hoặc câu hỏi thuần chính sách/liên hệ mà không kèm tên/ngữ cảnh sản phẩm
+        var isOffTopicOrStorePolicyOnly = query.Contains("thoi tiet")
+            || query.Contains("1 + 1") || query.Contains("1+1")
+            || Regex.IsMatch(query, @"\b\d+\s*[\+\-\*\/]\s*\d+\b")
+            || ((query.Contains("ngay may") || query.Contains("thu may") || query.Contains("may gio")) && !hasExplicitProductIntent)
+            || ((query.Contains("dia chi") || query.Contains("gio mo cua") || query.Contains("so dien thoai") || query.Contains("hotline")
+                || query.Contains("doi tra") || query.Contains("tra hang") || query.Contains("hoan tien") || query.Contains("huy don")
+                || query.Contains("chuyen khoan") || query.Contains("stk") || query.Contains("thanh toan") || query.Contains("ngan hang"))
+                && !hasExplicitProductIntent);
+
+        // Đa lượt hội thoại (Multi-turn Context): Duyệt lại 1-2 lượt chat gần nhất để kế thừa ngữ cảnh
+        var completedTurns = history.Where(t => t.Status == "completed").ToList();
+        var recentTurns = (completedTurns.Count > 0 ? completedTurns : history.Where(t => !string.IsNullOrWhiteSpace(t.UserContent)).ToList())
+            .TakeLast(2).Reverse().ToList();
+
+        var isBroadQuery = query.Contains("tat ca") || query.Contains("toan bo") || query.Contains("nhung mat hang gi")
+            || query.Contains("co nhung gi") || query.Contains("danh muc") || query.Contains("cac loai hang");
+
+        if (!isOffTopicOrStorePolicyOnly && recentTurns.Count > 0)
+        {
+            // 1. Kế thừa danh mục (selectedCategory)
+            if (selectedCategory is null && !isBroadQuery)
+            {
+                foreach (var turn in recentTurns)
+                {
+                    var prevNorm = Normalize(turn.UserContent);
+                    var prevCat = categories.OrderByDescending(c => c.Length)
+                        .FirstOrDefault(c => prevNorm.Contains(Normalize(c), StringComparison.Ordinal));
+                    if (prevNorm.Contains("may tinh xach tay", StringComparison.Ordinal) && categories.Contains("Laptop"))
+                        prevCat = "Laptop";
+                    if (prevCat is not null)
+                    {
+                        selectedCategory = prevCat;
+                        break;
+                    }
+                }
+            }
+
+            // 2. Kế thừa trạng thái giảm giá (onSale)
+            if (!onSale && !isBroadQuery && !query.Contains("khong giam") && !query.Contains("khong sale"))
+            {
+                var isFollowUp = cheapest || expensive || stockQuestion || query.Contains("con khong")
+                    || query.Contains("xem them") || query.Contains("con gi") || query.Contains("mau gi")
+                    || query.Contains("gia") || query.Contains("danh sach") || query.Contains("top")
+                    || query.Contains("nhung san pham") || query.Contains("cac san pham")
+                    || query.Contains("cai nay") || query.Contains("cai do") || query.Contains("mon nay")
+                    || query.Length <= 40;
+
+                if (isFollowUp)
+                {
+                    foreach (var turn in recentTurns)
+                    {
+                        var prevNorm = Normalize(turn.UserContent);
+                        if (prevNorm.Contains("giam gia") || prevNorm.Contains("sale") || prevNorm.Contains("khuyen mai") || prevNorm.Contains("uu dai"))
+                        {
+                            onSale = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 3. Kế thừa sản phẩm cụ thể (namedProduct)
+            if (namedProduct is null && !cheapest && !expensive && !isBroadQuery)
+            {
+                var isDetailInquiry = stockQuestion || query.Contains("con hang") || query.Contains("con khong")
+                    || query.Contains("mau gi") || query.Contains("mau sac") || query.Contains("size") || query.Contains("kich thuoc")
+                    || query.Contains("gia bao nhieu") || query.Contains("bao nhieu tien") || query.Contains("gia ca")
+                    || query.Contains("anh") || query.Contains("hinh") || query.Contains("thong so") || query.Contains("cau hinh")
+                    || query.Contains("chi tiet") || query.Contains("mo ta") || query.Contains("xuat xu") || query.Contains("bao hanh")
+                    || query.Contains("san pham nay") || query.Contains("san pham do") || query.Contains("cai nay") || query.Contains("cai do")
+                    || query.Contains("mon nay") || query.Contains("mon do") || query.Contains("em nay") || query.Contains("em do")
+                    || (query.Length <= 30 && (query.Contains("gia") || query.Contains("mau") || query.Contains("con")));
+
+                if (isDetailInquiry)
+                {
+                    foreach (var turn in recentTurns)
+                    {
+                        var prevMentioned = MentionedProducts(catalog, Normalize(turn.UserContent));
+                        if (prevMentioned.Length == 1)
+                        {
+                            namedProduct = prevMentioned[0];
+                            break;
+                        }
+                        if (!string.IsNullOrWhiteSpace(turn.SourcesJson))
+                        {
+                            try
+                            {
+                                using var doc = JsonDocument.Parse(turn.SourcesJson);
+                                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                                {
+                                    var catalogIds = doc.RootElement.EnumerateArray()
+                                        .Where(e => e.TryGetProperty("id", out var idProp) && idProp.GetString()?.StartsWith("catalog-") == true)
+                                        .Select(e => e.GetProperty("id").GetString()![8..])
+                                        .ToList();
+                                    if (catalogIds.Count == 1)
+                                    {
+                                        var found = catalog.FirstOrDefault(p => p.Id == catalogIds[0]);
+                                        if (found is not null)
+                                        {
+                                            namedProduct = found;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                }
+            }
+        }
+
+        var wantsAll = query.Contains("toan bo") || query.Contains("tat ca") || query.Contains("het");
+        var countMatch = Regex.Match(query, @"\b(\d{1,2})\s+(san pham|mat hang|mon|cai|item)\b");
+        var count = countMatch.Success
+            ? Math.Clamp(int.Parse(countMatch.Groups[1].Value), 1, 50)
+            : wantsAll || (onSale && query.Contains("toan bo")) || (selectedCategory is not null && wantsAll) ? 30
+            : (cheapest || expensive || onSale || selectedCategory is not null) ? 10 : 8;
+
+        IEnumerable<CatalogProduct> matches = (namedProduct is not null && !cheapest && !expensive) ? [namedProduct] : mentioned.Length > 1 ? mentioned : catalog;
+        if (namedProduct is null)
+        {
+            if (selectedCategory is not null) matches = matches.Where(p => p.Category.Equals(selectedCategory, StringComparison.OrdinalIgnoreCase));
+            if (onSale) matches = matches.Where(p => p.DiscountPercent > 0 && p.StockCount > 0);
+        }
+
+        var ignored = new HashSet<string>("toi minh ban cho voi cua la co va hay nhung cac mot ve nay nao giup xin hoi store san pham hien tai hang hoa dang bao nhieu tim vai giam gia nhat chao alo hello hi oi nhe nha da vang ok cam on tam biet lam sao the nao xem them nua top danh sach re thap cao dat mac bao ton kho chi tiet mo ta mau anh hinh thoi tiet hom nay may gio thu chuc vui tot ngay thang nam khong duoc chua gi the sao bang muon can biet toan bo tat ca het day du liet ke".Split(' '));
+        var terms = Regex.Matches(query, @"[a-z0-9]+").Select(m => m.Value).Where(t => t.Length > 1 && !ignored.Contains(t)).Distinct().ToArray();
+        var termMatched = false;
         CatalogProduct? anchor = null;
         if (similar)
         {
@@ -120,12 +274,16 @@ public static class AiStoreContext
         else if (namedProduct is not null) matches = [namedProduct];
         else
         {
-            var ignored = new HashSet<string>("toi minh ban cho voi cua la co va hay nhung cac mot ve nay nao giup xin hoi store san pham hien tai hang hoa dang bao nhieu tim vai giam gia nhat".Split(' '));
-            var terms = Regex.Matches(query, @"[a-z0-9]+").Select(m => m.Value).Where(t => t.Length > 1 && !ignored.Contains(t)).Distinct().ToArray();
             var scored = matches.Select(p => new { Item = p, Score = terms.Count(t => Regex.IsMatch(Normalize(p.Name + " " + p.Category + " " + p.Description), @"\b" + Regex.Escape(t) + @"\b")) }).ToArray();
-            if (scored.Any(p => p.Score > 0) && selectedCategory is null && !onSale)
-                matches = scored.Where(p => p.Score > 0).OrderByDescending(p => p.Item.Id == namedProduct?.Id)
-                    .ThenByDescending(p => p.Score).ThenByDescending(p => p.Item.StockCount > 0).Select(p => p.Item);
+            termMatched = scored.Any(p => p.Score > 0);
+            if (termMatched)
+            {
+                var termMatches = scored.Where(p => p.Score > 0);
+                if (onSale)
+                    matches = termMatches.OrderByDescending(p => p.Score).ThenByDescending(p => p.Item.DiscountPercent).ThenBy(p => SalePrice(p.Item)).Select(p => p.Item);
+                else
+                    matches = termMatches.OrderByDescending(p => p.Score).ThenByDescending(p => p.Item.StockCount > 0).ThenBy(p => p.Item.Id).Select(p => p.Item);
+            }
             else if (onSale) matches = matches.OrderByDescending(p => p.DiscountPercent).ThenBy(SalePrice);
             else matches = matches.OrderByDescending(p => p.StockCount > 0).ThenBy(p => p.Id);
         }
@@ -136,9 +294,19 @@ public static class AiStoreContext
         object? report = null;
         if (admin && new[] { "doanh thu", "bao cao", "thong ke", "loi nhuan" }.Any(query.Contains))
             report = db.CalculateAdminRevenue(now.AddDays(-30).ToString("yyyy-MM-dd"), now.ToString("yyyy-MM-dd"));
+        var dayOfWeek = now.DayOfWeek switch
+        {
+            DayOfWeek.Monday => "Thứ Hai",
+            DayOfWeek.Tuesday => "Thứ Ba",
+            DayOfWeek.Wednesday => "Thứ Tư",
+            DayOfWeek.Thursday => "Thứ Năm",
+            DayOfWeek.Friday => "Thứ Sáu",
+            DayOfWeek.Saturday => "Thứ Bảy",
+            _ => "Chủ Nhật"
+        };
         var facts = new
         {
-            observedAt = now.ToString("O"), today = now.ToString("dd/MM/yyyy"), timeZone = "Asia/Ho_Chi_Minh", currency = "VND",
+            observedAt = now.ToString("O"), today = now.ToString("dd/MM/yyyy"), dayOfWeek, timeZone = "Asia/Ho_Chi_Minh", currency = "VND",
             assistant = new { name = "Trợ lý AI của Store", canBrowseWithoutPurchase = true,
                 purchaseObligation = "Khách được xem website, hỏi tư vấn và rời đi mà không bắt buộc mua hàng", canExecuteTransactions = false },
             contact,
@@ -180,7 +348,7 @@ public static class AiStoreContext
                 zeroDueAfterVouchers = "Đơn 0đ được xác nhận ngay bằng voucher, không cần chuyển tiền hoặc QR",
                 lateOrIncorrectTransferRequiresStoreReview = true },
             afterSales = new { limits = AfterSalesPolicy.Description, methods = "Cả online và offline đều được yêu cầu đổi/trả từ tài khoản > đơn đã thanh toán > dịch vụ sau mua",
-                returnDeadline = $"Chỉ trong vòng tối đa {AfterSalesPolicy.ReturnDays} ngày kể từ khi giao thành công. Quá hạn thì không được gửi yêu cầu đổi/trả; không phải chờ đủ 7 ngày",
+                returnDeadline = $"Khách hàng được yêu cầu đổi/trả bất kỳ lúc nào trong vòng {AfterSalesPolicy.ReturnDays} ngày kể từ ngày đơn hàng giao thành công (không cần chờ đến hết {AfterSalesPolicy.ReturnDays} ngày). Sau {AfterSalesPolicy.ReturnDays} ngày (quá hạn) hệ thống sẽ không tiếp nhận đổi/trả.",
                 cancelBeforeShipping = true,
                 returnRefund = "Tiền hàng; không hoàn phí giao ban đầu. Khách thanh toán cước gửi trả cho đơn vị vận chuyển",
                 exchange = "Đổi sang sản phẩm khác; bù/hoàn chênh lệch = giá hàng thay thế + cước giao thay thế - tiền hàng cũ. Nhận tại cửa hàng không có cước giao",
@@ -190,17 +358,18 @@ public static class AiStoreContext
         var sources = new List<object> { new { id = "store-facts", label = "Dữ liệu và chính sách Store tại thời điểm hỏi" } };
         sources.AddRange(selected.Select(p => (object)new { id = "catalog-" + p.Id, label = p.Name }));
         // Chỉ đưa nhóm dữ kiện liên quan vào lượt hỏi; không bắt model phân tích cả cửa hàng khi chỉ hỏi voucher/ngày giờ.
-        bool Has(params string[] words) => words.Any(query.Contains);
-        var fields = new HashSet<string> { "observedAt", "today", "timeZone", "currency", "assistant" };
-        if (Has("san pham", "hang hoa", "mat hang", "gia", "tuong tu", "het hang", "dien tu", "laptop") || selectedCategory is not null || mentioned.Length > 0)
+        var fields = new HashSet<string> { "observedAt", "today", "dayOfWeek", "timeZone", "currency", "assistant" };
+        if (!isOffTopicOrStorePolicyOnly && (hasExplicitProductIntent || selectedCategory is not null || mentioned.Length > 0 || namedProduct is not null || onSale || cheapest || expensive || similar || termMatched))
             fields.Add("catalog");
-        if (Has("voucher", "ma giam", "uu dai", "khuyen mai")) fields.Add("publicVouchers");
-        if (Has("uu dai", "khuyen mai", "thang")) fields.Add("promotions");
-        if (Has("nhan vien", "online", "cham soc", "ho tro", "lien he", "het hang")) fields.Add("support");
-        if (Has("lien he", "cham soc", "dia chi", "o dau", "truc tiep", "dien thoai", "email", "gio mo", "het hang")) fields.Add("contact");
-        if (Has("thanh toan", "qr", "chuyen khoan", "chuyen tien", "cod")) fields.Add("payment");
-        if (Has("tra hang", "doi hang", "doi tra", "hoan tien", "huy don", "doi lich", "phi")) fields.Add("afterSales");
-        if (Has("diem", "thanh vien", "hang vang", "kim cuong", "luot quay")) fields.Add("loyalty");
+        else if (isOffTopicOrStorePolicyOnly && hasExplicitProductIntent)
+            fields.Add("catalog");
+        if (Has("voucher", "ma giam", "uu dai", "khuyen mai", "giam gia", "sale", "discount")) fields.Add("publicVouchers");
+        if (Has("uu dai", "khuyen mai", "thang", "giam gia", "sale", "chuong trinh")) fields.Add("promotions");
+        if (Has("nhan vien", "online", "cham soc", "ho tro", "lien he", "het hang", "tu van")) fields.Add("support");
+        if (Has("lien he", "cham soc", "dia chi", "o dau", "truc tiep", "dien thoai", "email", "gio mo", "het hang", "hotline", "so dien thoai")) fields.Add("contact");
+        if (Has("thanh toan", "qr", "chuyen khoan", "chuyen tien", "cod", "ngan hang", "stk", "so tai khoan")) fields.Add("payment");
+        if (Has("tra hang", "doi hang", "doi tra", "hoan tien", "huy don", "doi lich", "phi", "bao hanh")) fields.Add("afterSales");
+        if (Has("diem", "thanh vien", "hang vang", "kim cuong", "luot quay", "tich diem", "vong quay")) fields.Add("loyalty");
         if (report is not null) fields.Add("adminReport");
         if (!fields.Contains("catalog")) sources.RemoveRange(1, sources.Count - 1);
         var snapshot = JsonSerializer.SerializeToElement(facts, JsonOptions);

@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Màn hình điều phối admin, session, module, dashboard và cài đặt AI context size.
+  - Liên kết trực tiếp: ../api/chat.js, ./AdminModules.jsx, ../services/adminState.js
+  - Vùng ảnh hưởng khi sửa: Giao diện quản trị, cài đặt ngữ cảnh AI, session và chat hỗ trợ admin.
+*/
 /**
  * @codex-vn-doc
  * Tệp: src/pages/Admin.jsx
@@ -64,7 +70,7 @@ export default function Admin() {
   const [loginError, setLoginError] = useState('')
   const [pageError, setPageError] = useState('')
   const [settings, setSettings] = useState(null)
-  const [contextSize, setContextSize] = useState(32768)
+  const [contextSize, setContextSize] = useState(16384)
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
   const [thinkingMode, setThinkingMode] = useState('off')
   const [messages, setMessages] = useState([])
@@ -147,7 +153,7 @@ export default function Admin() {
     settingsEpochRef.current += 1
     if (removeStorageFor) sessionStorage.removeItem(adminConversationKey(removeStorageFor))
     setSettings(null)
-    setContextSize(32768)
+    setContextSize(16384)
     setThinkingEnabled(false)
     setThinkingMode('off')
     setMessages([])
