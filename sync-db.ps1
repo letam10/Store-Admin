@@ -233,6 +233,25 @@ ORDER BY t.name, ic.key_ordinal;
     }
     $r.Close()
 
+    $uniqueCols = @{}
+    $uqCmd = $conn.CreateCommand()
+    $uqCmd.CommandText = @"
+SELECT t.name AS TableName, c.name AS ColName 
+FROM sys.indexes i
+INNER JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+INNER JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+INNER JOIN sys.tables t ON i.object_id = t.object_id
+WHERE i.is_unique = 1 AND i.is_primary_key = 0
+ORDER BY t.name, i.index_id, ic.key_ordinal;
+"@
+    $r = $uqCmd.ExecuteReader()
+    while ($r.Read()) {
+        $t = $r['TableName']
+        if (-not $uniqueCols.ContainsKey($t)) { $uniqueCols[$t] = @() }
+        $uniqueCols[$t] += $r['ColName']
+    }
+    $r.Close()
+
     $sb = New-Object System.Text.StringBuilder
     $null = $sb.AppendLine("-- =========================================================")
     $null = $sb.AppendLine("-- Store & Store-Admin - Database Seed / Sync Data")
@@ -290,7 +309,13 @@ ORDER BY t.name, ic.key_ordinal;
                 $valueRows += "  (" + ($valStrs -join ', ') + ")"
             }
 
-            $matchConds = @($primaryKeys | ForEach-Object { "target.[$_] = src.[$_]" }) -join ' AND '
+            $condList = @(@($primaryKeys | ForEach-Object { "target.[$_] = src.[$_]" }) -join ' AND ')
+            if ($uniqueCols.ContainsKey($table)) {
+                foreach ($uCol in $uniqueCols[$table]) {
+                    $condList += "target.[$uCol] = src.[$uCol]"
+                }
+            }
+            $matchConds = $condList -join ' OR '
 
             $null = $sb.AppendLine("INSERT INTO [$table] ($colListSql)")
             $null = $sb.AppendLine("SELECT $srcColListSql")
