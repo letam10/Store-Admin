@@ -1,6 +1,6 @@
 ﻿-- =========================================================
 -- Store & Store-Admin - Database Seed / Sync Data
--- Exported on: 2026-11-17 09:32:00
+-- Exported on: 2026-11-17 12:58:00
 -- =========================================================
 USE [StoreDb];
 GO
@@ -64,8 +64,8 @@ FROM (VALUES
   (N'catalog.manifest.selectedCount', N'500', N'2026-11-11T12:25:47.9585900+00:00'),
   (N'catalog.vietnamese.20261113-v1', N'{"renamed":501,"preserved":0,"skipped":0}', N'2026-11-13T04:06:22.7760875+00:00'),
   (N'payment_settings', N'{"mode":"manual","bankName":"MBBank","bankBin":"970422","accountNumber":"0862129776","accountName":"L\u00CA \u0110\u1ED6 MINH T\u00C2M"}', N'2026-11-11T12:34:56.2266657+00:00'),
-  (N'sepay.last_error', N'', N'2026-11-14T13:53:54.3083163+00:00'),
-  (N'sepay.sync.0862129776', N'2026-11-14T13:53:54.0967358+00:00', N'2026-11-14T13:53:54.3079846+00:00'),
+  (N'sepay.last_error', N'', N'2026-11-17T05:50:57.4203550+00:00'),
+  (N'sepay.sync.0862129776', N'2026-11-17T05:50:57.2382485+00:00', N'2026-11-17T05:50:57.4187440+00:00'),
   (N'storefront_appearance', N'{"brandName":"store","brandTagline":"EVERYDAY","headerSearchPlaceholder":"T\u00ECm s\u1EA3n ph\u1EA9m, danh m\u1EE5c\u2026","navHome":"Trang ch\u1EE7","navProducts":"H\u00E0ng h\u00F3a","navFavorites":"Y\u00EAu th\u00EDch","navRewards":"May m\u1EAFn","navMembership":"Th\u00E0nh vi\u00EAn","navContact":"\u0110\u1ECBa ch\u1EC9 \u0026 li\u00EAn h\u1EC7","heroTitle":"Ch\u1ECDn m\u00F3n b\u1EA1n y\u00EAu. S\u1ED1ng theo c\u00E1ch ri\u00EAng.","heroDescription":"Kh\u00E1m ph\u00E1 s\u1EA3n ph\u1EA9m n\u1ED5i b\u1EADt, \u01B0u \u0111\u00E3i v\u00E0 c\u00E1c nh\u00F3m h\u00E0ng d\u1EC5 t\u00ECm.","heroButton":"Kh\u00E1m ph\u00E1 c\u1EEDa h\u00E0ng","footerText":"Nh\u1EEFng \u0111i\u1EC1u nh\u1ECF, cho m\u1ED9t ng\u00E0y t\u1ED1t h\u01A1n.","footerSupport":"\u0110\u1ED9i ng\u0169 Store lu\u00F4n s\u1EB5n s\u00E0ng h\u1ED7 tr\u1EE3 b\u1EA1n.","footerInfo":"Gi\u00E1 v\u00E0 \u01B0u \u0111\u00E3i \u0111\u01B0\u1EE3c c\u1EADp nh\u1EADt t\u1EA1i c\u1EEDa h\u00E0ng. \u0110i\u1EC3m th\u00E0nh vi\u00EAn \u0111\u01B0\u1EE3c c\u1ED9ng sau khi x\u00E1c nh\u1EADn thanh to\u00E1n.","footerShopTitle":"Mua s\u1EAFm","footerProducts":"H\u00E0ng h\u00F3a","footerCart":"Gi\u1ECF h\u00E0ng","footerMembership":"Th\u00E0nh vi\u00EAn","footerRewards":"V\u00F2ng quay may m\u1EAFn","footerSupportTitle":"H\u1ED7 tr\u1EE3","footerContact":"\u0110\u1ECBa ch\u1EC9 \u0026 li\u00EAn h\u1EC7","footerAccount":"T\u00E0i kho\u1EA3n c\u1EE7a b\u1EA1n","footerInfoTitle":"Th\u00F4ng tin","footerCopyright":"\u00A9 2026 Store","accentColor":"#4f8b67","bannerLabel":"STORE EVERYDAY","contactAddress":"123 Nguy\u1EC5n Hu\u1EC7, Ph\u01B0\u1EDDng B\u1EBFn Ngh\u00E9, Qu\u1EADn 1, TP. H\u1ED3 Ch\u00ED Minh","contactPhone":"0901234567","contactEmail":"support@store.vn","contactHours":"08:00 - 21:00 m\u1ED7i ng\u00E0y"}', N'2026-11-12T10:56:11.1294954+00:00')
 ) AS src([key], [value], [updated_at])
 WHERE NOT EXISTS (SELECT 1 FROM [settings] target WHERE target.[key] = src.[key]);
