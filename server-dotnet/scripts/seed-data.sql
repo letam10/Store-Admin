@@ -1,6 +1,6 @@
 ﻿-- =========================================================
 -- Store & Store-Admin - Database Seed / Sync Data
--- Exported on: 2026-11-17 12:58:00
+-- Exported on: 2026-11-17 14:17:35
 -- =========================================================
 USE [StoreDb];
 GO
@@ -27,46 +27,46 @@ GO
 INSERT INTO [settings] ([key], [value], [updated_at])
 SELECT src.[key], src.[value], src.[updated_at]
 FROM (VALUES
-  (N'appearance.accentColor', N'#4f8b67', N'2026-11-12T10:56:11.1956626+00:00'),
-  (N'appearance.adminTheme', N'{"schemaVersion":1,"defaultMode":"light","presetId":"olive","light":{"colors":{"page":"#f5f3e8","surface":"#fffdf7","surfaceAlt":"#eaebd9","text":"#303725","muted":"#6f765b","border":"#d8dcc1","accent":"#7d8651","accentStrong":"#596133","accentSoft":"#e3e7c9","control":"#fffdf7","controlActive":"#e8ebcf","danger":"#a84f45","success":"#3f7c55"},"radius":{"card":16,"control":10,"panel":20},"shadowStrength":22},"dark":{"colors":{"page":"#171b12","surface":"#242b1a","surfaceAlt":"#343d25","text":"#f2f5df","muted":"#b7c092","border":"#56633a","accent":"#a8b66b","accentStrong":"#c3d58a","accentSoft":"#3b4726","control":"#2b341f","controlActive":"#53652f","danger":"#ee8b83","success":"#75c995"},"radius":{"card":16,"control":10,"panel":20},"shadowStrength":28}}', N'2026-11-12T10:56:11.1384645+00:00'),
-  (N'appearance.bannerLabel', N'STORE EVERYDAY', N'2026-11-12T10:56:11.1976752+00:00'),
-  (N'appearance.brandName', N'store', N'2026-11-12T10:56:11.1406916+00:00'),
-  (N'appearance.brandTagline', N'EVERYDAY', N'2026-11-12T10:56:11.1426081+00:00'),
-  (N'appearance.contactAddress', N'123 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh', N'2026-11-12T10:56:11.1997938+00:00'),
-  (N'appearance.contactEmail', N'support@store.vn', N'2026-11-12T10:56:11.2041075+00:00'),
-  (N'appearance.contactHours', N'08:00 - 21:00 mỗi ngày', N'2026-11-12T10:56:11.2065862+00:00'),
-  (N'appearance.contactPhone', N'0901234567', N'2026-11-12T10:56:11.2020443+00:00'),
-  (N'appearance.footerAccount', N'Tài khoản của bạn', N'2026-11-12T10:56:11.1908155+00:00'),
-  (N'appearance.footerCart', N'Giỏ hàng', N'2026-11-12T10:56:11.1801878+00:00'),
-  (N'appearance.footerContact', N'Địa chỉ & liên hệ', N'2026-11-12T10:56:11.1885321+00:00'),
-  (N'appearance.footerCopyright', N'© 2026 Store', N'2026-11-12T10:56:11.1933216+00:00'),
-  (N'appearance.footerInfo', N'Giá và ưu đãi được cập nhật tại cửa hàng. Điểm thành viên được cộng sau khi xác nhận thanh toán.', N'2026-11-12T10:56:11.1725256+00:00'),
-  (N'appearance.footerInfoTitle', N'Thông tin', N'2026-11-12T10:56:11.1911694+00:00'),
-  (N'appearance.footerMembership', N'Thành viên', N'2026-11-12T10:56:11.1821383+00:00'),
-  (N'appearance.footerProducts', N'Hàng hóa', N'2026-11-12T10:56:11.1776157+00:00'),
-  (N'appearance.footerRewards', N'Vòng quay may mắn', N'2026-11-12T10:56:11.1841729+00:00'),
-  (N'appearance.footerShopTitle', N'Mua sắm', N'2026-11-12T10:56:11.1749142+00:00'),
-  (N'appearance.footerSupport', N'Đội ngũ Store luôn sẵn sàng hỗ trợ bạn.', N'2026-11-12T10:56:11.1703784+00:00'),
-  (N'appearance.footerSupportTitle', N'Hỗ trợ', N'2026-11-12T10:56:11.1862562+00:00'),
-  (N'appearance.footerText', N'Những điều nhỏ, cho một ngày tốt hơn.', N'2026-11-12T10:56:11.1680803+00:00'),
-  (N'appearance.headerSearchPlaceholder', N'Tìm sản phẩm, danh mục…', N'2026-11-12T10:56:11.1448138+00:00'),
-  (N'appearance.heroButton', N'Khám phá cửa hàng', N'2026-11-12T10:56:11.1658429+00:00'),
-  (N'appearance.heroDescription', N'Khám phá sản phẩm nổi bật, ưu đãi và các nhóm hàng dễ tìm.', N'2026-11-12T10:56:11.1634460+00:00'),
-  (N'appearance.heroTitle', N'Chọn món bạn yêu. Sống theo cách riêng.', N'2026-11-12T10:56:11.1612688+00:00'),
-  (N'appearance.navContact', N'Địa chỉ & liên hệ', N'2026-11-12T10:56:11.1591024+00:00'),
-  (N'appearance.navFavorites', N'Yêu thích', N'2026-11-12T10:56:11.1528281+00:00'),
-  (N'appearance.navHome', N'Trang chủ', N'2026-11-12T10:56:11.1471775+00:00'),
-  (N'appearance.navMembership', N'Thành viên', N'2026-11-12T10:56:11.1569278+00:00'),
-  (N'appearance.navProducts', N'Hàng hóa', N'2026-11-12T10:56:11.1498963+00:00'),
-  (N'appearance.navRewards', N'May mắn', N'2026-11-12T10:56:11.1549208+00:00'),
-  (N'appearance.theme', N'{"schemaVersion":1,"defaultMode":"light","presetId":"terracotta","light":{"colors":{"page":"#f7f1e9","surface":"#fffdf7","surfaceAlt":"#f4e6dd","text":"#3f2925","muted":"#76645d","border":"#e2cec4","accent":"#b85f43","accentStrong":"#8f402d","accentSoft":"#f2d7cd","control":"#fffdf7","controlActive":"#f5ded4","danger":"#a84f45","success":"#3f7c55"},"radius":{"card":16,"control":10,"panel":20},"shadowStrength":22},"dark":{"colors":{"page":"#1e1613","surface":"#2b1d18","surfaceAlt":"#3a2820","text":"#fff2ea","muted":"#d0a99a","border":"#68483a","accent":"#e08a6b","accentStrong":"#f0a487","accentSoft":"#5a3026","control":"#34231d","controlActive":"#6b3b2d","danger":"#ee8b83","success":"#75c995"},"radius":{"card":16,"control":10,"panel":20},"shadowStrength":28}}', N'2026-11-12T10:56:11.1357335+00:00'),
+  (N'appearance.accentColor', N'#4f8b67', N'2026-11-17T06:17:58.0411164+00:00'),
+  (N'appearance.adminTheme', N'{"schemaVersion":1,"defaultMode":"light","presetId":"forest","light":{"colors":{"page":"#f7f3ea","surface":"#fffdf7","surfaceAlt":"#eaf1e8","text":"#18362a","muted":"#66766b","border":"#d6dfd2","accent":"#4f8b67","accentStrong":"#2f6847","accentSoft":"#e0eee2","control":"#fffdf7","controlActive":"#dcebdd","danger":"#a84f45","success":"#3f7c55"},"radius":{"card":16,"control":10,"panel":20},"shadowStrength":22},"dark":{"colors":{"page":"#0e1c15","surface":"#14281f","surfaceAlt":"#1d3528","text":"#edf7ef","muted":"#a8c4af","border":"#355943","accent":"#76b98a","accentStrong":"#9bd3a8","accentSoft":"#254b31","control":"#193127","controlActive":"#28543a","danger":"#ee8b83","success":"#75c995"},"radius":{"card":16,"control":10,"panel":20},"shadowStrength":28}}', N'2026-11-17T06:17:58.0249087+00:00'),
+  (N'appearance.bannerLabel', N'STORE EVERYDAY', N'2026-11-17T06:17:58.0413142+00:00'),
+  (N'appearance.brandName', N'store', N'2026-11-17T06:17:58.0277768+00:00'),
+  (N'appearance.brandTagline', N'EVERYDAY', N'2026-11-17T06:17:58.0285790+00:00'),
+  (N'appearance.contactAddress', N'123 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh', N'2026-11-17T06:17:58.0415211+00:00'),
+  (N'appearance.contactEmail', N'support@store.vn', N'2026-11-17T06:17:58.0423145+00:00'),
+  (N'appearance.contactHours', N'08:00 - 21:00 mỗi ngày', N'2026-11-17T06:17:58.0425978+00:00'),
+  (N'appearance.contactPhone', N'0901234567', N'2026-11-17T06:17:58.0419790+00:00'),
+  (N'appearance.footerAccount', N'Tài khoản của bạn', N'2026-11-17T06:17:58.0405226+00:00'),
+  (N'appearance.footerCart', N'Giỏ hàng', N'2026-11-17T06:17:58.0394998+00:00'),
+  (N'appearance.footerContact', N'Địa chỉ & liên hệ', N'2026-11-17T06:17:58.0403380+00:00'),
+  (N'appearance.footerCopyright', N'© 2026 Store', N'2026-11-17T06:17:58.0409209+00:00'),
+  (N'appearance.footerInfo', N'Giá và ưu đãi được cập nhật tại cửa hàng. Điểm thành viên được cộng sau khi xác nhận thanh toán.', N'2026-11-17T06:17:58.0386007+00:00'),
+  (N'appearance.footerInfoTitle', N'Thông tin', N'2026-11-17T06:17:58.0407137+00:00'),
+  (N'appearance.footerMembership', N'Thành viên', N'2026-11-17T06:17:58.0397254+00:00'),
+  (N'appearance.footerProducts', N'Hàng hóa', N'2026-11-17T06:17:58.0392828+00:00'),
+  (N'appearance.footerRewards', N'Vòng quay may mắn', N'2026-11-17T06:17:58.0399381+00:00'),
+  (N'appearance.footerShopTitle', N'Mua sắm', N'2026-11-17T06:17:58.0390247+00:00'),
+  (N'appearance.footerSupport', N'Đội ngũ Store luôn sẵn sàng hỗ trợ bạn.', N'2026-11-17T06:17:58.0337234+00:00'),
+  (N'appearance.footerSupportTitle', N'Hỗ trợ', N'2026-11-17T06:17:58.0401398+00:00'),
+  (N'appearance.footerText', N'Những điều nhỏ, cho một ngày tốt hơn.', N'2026-11-17T06:17:58.0333874+00:00'),
+  (N'appearance.headerSearchPlaceholder', N'Tìm sản phẩm, danh mục…', N'2026-11-17T06:17:58.0289837+00:00'),
+  (N'appearance.heroButton', N'Khám phá cửa hàng', N'2026-11-17T06:17:58.0323689+00:00'),
+  (N'appearance.heroDescription', N'Khám phá sản phẩm nổi bật, ưu đãi và các nhóm hàng dễ tìm.', N'2026-11-17T06:17:58.0320185+00:00'),
+  (N'appearance.heroTitle', N'Chọn món bạn yêu. Sống theo cách riêng.', N'2026-11-17T06:17:58.0317009+00:00'),
+  (N'appearance.navContact', N'Địa chỉ & liên hệ', N'2026-11-17T06:17:58.0313668+00:00'),
+  (N'appearance.navFavorites', N'Yêu thích', N'2026-11-17T06:17:58.0301521+00:00'),
+  (N'appearance.navHome', N'Trang chủ', N'2026-11-17T06:17:58.0292874+00:00'),
+  (N'appearance.navMembership', N'Thành viên', N'2026-11-17T06:17:58.0307032+00:00'),
+  (N'appearance.navProducts', N'Hàng hóa', N'2026-11-17T06:17:58.0297881+00:00'),
+  (N'appearance.navRewards', N'May mắn', N'2026-11-17T06:17:58.0304346+00:00'),
+  (N'appearance.theme', N'{"schemaVersion":1,"defaultMode":"light","presetId":"forest","light":{"colors":{"page":"#f7f3ea","surface":"#fffdf7","surfaceAlt":"#eaf1e8","text":"#18362a","muted":"#66766b","border":"#d6dfd2","accent":"#4f8b67","accentStrong":"#2f6847","accentSoft":"#e0eee2","control":"#fffdf7","controlActive":"#dcebdd","danger":"#a84f45","success":"#3f7c55"},"radius":{"card":16,"control":10,"panel":20},"shadowStrength":22},"dark":{"colors":{"page":"#0e1c15","surface":"#14281f","surfaceAlt":"#1d3528","text":"#edf7ef","muted":"#a8c4af","border":"#355943","accent":"#76b98a","accentStrong":"#9bd3a8","accentSoft":"#254b31","control":"#193127","controlActive":"#28543a","danger":"#ee8b83","success":"#75c995"},"radius":{"card":16,"control":10,"panel":20},"shadowStrength":28}}', N'2026-11-17T06:17:58.0245282+00:00'),
   (N'catalog.manifest.backfill.v1', N'completed', N'2026-10-18T02:52:51.4800141+00:00'),
   (N'catalog.manifest.selectedCount', N'500', N'2026-11-11T12:25:47.9585900+00:00'),
   (N'catalog.vietnamese.20261113-v1', N'{"renamed":501,"preserved":0,"skipped":0}', N'2026-11-13T04:06:22.7760875+00:00'),
   (N'payment_settings', N'{"mode":"manual","bankName":"MBBank","bankBin":"970422","accountNumber":"0862129776","accountName":"L\u00CA \u0110\u1ED6 MINH T\u00C2M"}', N'2026-11-11T12:34:56.2266657+00:00'),
-  (N'sepay.last_error', N'', N'2026-11-17T05:50:57.4203550+00:00'),
-  (N'sepay.sync.0862129776', N'2026-11-17T05:50:57.2382485+00:00', N'2026-11-17T05:50:57.4187440+00:00'),
-  (N'storefront_appearance', N'{"brandName":"store","brandTagline":"EVERYDAY","headerSearchPlaceholder":"T\u00ECm s\u1EA3n ph\u1EA9m, danh m\u1EE5c\u2026","navHome":"Trang ch\u1EE7","navProducts":"H\u00E0ng h\u00F3a","navFavorites":"Y\u00EAu th\u00EDch","navRewards":"May m\u1EAFn","navMembership":"Th\u00E0nh vi\u00EAn","navContact":"\u0110\u1ECBa ch\u1EC9 \u0026 li\u00EAn h\u1EC7","heroTitle":"Ch\u1ECDn m\u00F3n b\u1EA1n y\u00EAu. S\u1ED1ng theo c\u00E1ch ri\u00EAng.","heroDescription":"Kh\u00E1m ph\u00E1 s\u1EA3n ph\u1EA9m n\u1ED5i b\u1EADt, \u01B0u \u0111\u00E3i v\u00E0 c\u00E1c nh\u00F3m h\u00E0ng d\u1EC5 t\u00ECm.","heroButton":"Kh\u00E1m ph\u00E1 c\u1EEDa h\u00E0ng","footerText":"Nh\u1EEFng \u0111i\u1EC1u nh\u1ECF, cho m\u1ED9t ng\u00E0y t\u1ED1t h\u01A1n.","footerSupport":"\u0110\u1ED9i ng\u0169 Store lu\u00F4n s\u1EB5n s\u00E0ng h\u1ED7 tr\u1EE3 b\u1EA1n.","footerInfo":"Gi\u00E1 v\u00E0 \u01B0u \u0111\u00E3i \u0111\u01B0\u1EE3c c\u1EADp nh\u1EADt t\u1EA1i c\u1EEDa h\u00E0ng. \u0110i\u1EC3m th\u00E0nh vi\u00EAn \u0111\u01B0\u1EE3c c\u1ED9ng sau khi x\u00E1c nh\u1EADn thanh to\u00E1n.","footerShopTitle":"Mua s\u1EAFm","footerProducts":"H\u00E0ng h\u00F3a","footerCart":"Gi\u1ECF h\u00E0ng","footerMembership":"Th\u00E0nh vi\u00EAn","footerRewards":"V\u00F2ng quay may m\u1EAFn","footerSupportTitle":"H\u1ED7 tr\u1EE3","footerContact":"\u0110\u1ECBa ch\u1EC9 \u0026 li\u00EAn h\u1EC7","footerAccount":"T\u00E0i kho\u1EA3n c\u1EE7a b\u1EA1n","footerInfoTitle":"Th\u00F4ng tin","footerCopyright":"\u00A9 2026 Store","accentColor":"#4f8b67","bannerLabel":"STORE EVERYDAY","contactAddress":"123 Nguy\u1EC5n Hu\u1EC7, Ph\u01B0\u1EDDng B\u1EBFn Ngh\u00E9, Qu\u1EADn 1, TP. H\u1ED3 Ch\u00ED Minh","contactPhone":"0901234567","contactEmail":"support@store.vn","contactHours":"08:00 - 21:00 m\u1ED7i ng\u00E0y"}', N'2026-11-12T10:56:11.1294954+00:00')
+  (N'sepay.last_error', N'', N'2026-11-17T07:17:34.9557163+00:00'),
+  (N'sepay.sync.0862129776', N'2026-11-17T07:17:34.7689066+00:00', N'2026-11-17T07:17:34.9548538+00:00'),
+  (N'storefront_appearance', N'{"brandName":"store","brandTagline":"EVERYDAY","headerSearchPlaceholder":"T\u00ECm s\u1EA3n ph\u1EA9m, danh m\u1EE5c\u2026","navHome":"Trang ch\u1EE7","navProducts":"H\u00E0ng h\u00F3a","navFavorites":"Y\u00EAu th\u00EDch","navRewards":"May m\u1EAFn","navMembership":"Th\u00E0nh vi\u00EAn","navContact":"\u0110\u1ECBa ch\u1EC9 \u0026 li\u00EAn h\u1EC7","heroTitle":"Ch\u1ECDn m\u00F3n b\u1EA1n y\u00EAu. S\u1ED1ng theo c\u00E1ch ri\u00EAng.","heroDescription":"Kh\u00E1m ph\u00E1 s\u1EA3n ph\u1EA9m n\u1ED5i b\u1EADt, \u01B0u \u0111\u00E3i v\u00E0 c\u00E1c nh\u00F3m h\u00E0ng d\u1EC5 t\u00ECm.","heroButton":"Kh\u00E1m ph\u00E1 c\u1EEDa h\u00E0ng","footerText":"Nh\u1EEFng \u0111i\u1EC1u nh\u1ECF, cho m\u1ED9t ng\u00E0y t\u1ED1t h\u01A1n.","footerSupport":"\u0110\u1ED9i ng\u0169 Store lu\u00F4n s\u1EB5n s\u00E0ng h\u1ED7 tr\u1EE3 b\u1EA1n.","footerInfo":"Gi\u00E1 v\u00E0 \u01B0u \u0111\u00E3i \u0111\u01B0\u1EE3c c\u1EADp nh\u1EADt t\u1EA1i c\u1EEDa h\u00E0ng. \u0110i\u1EC3m th\u00E0nh vi\u00EAn \u0111\u01B0\u1EE3c c\u1ED9ng sau khi x\u00E1c nh\u1EADn thanh to\u00E1n.","footerShopTitle":"Mua s\u1EAFm","footerProducts":"H\u00E0ng h\u00F3a","footerCart":"Gi\u1ECF h\u00E0ng","footerMembership":"Th\u00E0nh vi\u00EAn","footerRewards":"V\u00F2ng quay may m\u1EAFn","footerSupportTitle":"H\u1ED7 tr\u1EE3","footerContact":"\u0110\u1ECBa ch\u1EC9 \u0026 li\u00EAn h\u1EC7","footerAccount":"T\u00E0i kho\u1EA3n c\u1EE7a b\u1EA1n","footerInfoTitle":"Th\u00F4ng tin","footerCopyright":"\u00A9 2026 Store","accentColor":"#4f8b67","bannerLabel":"STORE EVERYDAY","contactAddress":"123 Nguy\u1EC5n Hu\u1EC7, Ph\u01B0\u1EDDng B\u1EBFn Ngh\u00E9, Qu\u1EADn 1, TP. H\u1ED3 Ch\u00ED Minh","contactPhone":"0901234567","contactEmail":"support@store.vn","contactHours":"08:00 - 21:00 m\u1ED7i ng\u00E0y"}', N'2026-11-17T06:17:58.0240497+00:00')
 ) AS src([key], [value], [updated_at])
 WHERE NOT EXISTS (SELECT 1 FROM [settings] target WHERE target.[key] = src.[key]);
 GO
@@ -3260,7 +3260,7 @@ GO
 INSERT INTO [catalog_products] ([id], [source], [source_id], [name], [category], [price], [description], [image], [features_json], [tone], [symbol], [label], [source_url], [source_price_cents], [source_currency], [imported_at], [discount_percent], [stock_count])
 SELECT src.[id], src.[source], src.[source_id], src.[name], src.[category], src.[price], src.[description], src.[image], src.[features_json], src.[tone], src.[symbol], src.[label], src.[source_url], src.[source_price_cents], src.[source_currency], src.[imported_at], src.[discount_percent], src.[stock_count]
 FROM (VALUES
-  (N'manual-e6573516', N'admin-manual', N'manual-e6573516', N'Sản phẩm thử thanh toán', N'Tự Thiết Kế', 5000, N'Sản phẩm được tạo theo yêu cầu chủ cửa hàng để tự kiểm tra quy trình đặt hàng và thanh toán. Giá niêm yết 5.000đ.', N'/products/ai-generated-500/0002-2.webp', N'[]', N'green', N'✦', N'Mới', N'local://admin-manual', 5000, N'VND', N'2026-11-11T12:34:57.5445905+00:00', 0, 19)
+  (N'manual-e6573516', N'admin-manual', N'manual-e6573516', N'Túi vải Canvas mini đựng phụ kiện', N'Tự Thiết Kế', 5000, N'Túi vải Canvas mini tiện dụng với chất liệu vải canvas bền đẹp, đường may chắc chắn. Thiết kế nhỏ gọn, phong cách trẻ trung, phù hợp đựng tai nghe, cáp sạc, chìa khóa và các phụ kiện cá nhân hằng ngày.', N'/products/ai-generated-500/0002-2.webp', N'[]', N'green', N'✦', N'Mới', N'local://admin-manual', 5000, N'VND', N'2026-11-11T12:34:57.5445905+00:00', 0, 19)
 ) AS src([id], [source], [source_id], [name], [category], [price], [description], [image], [features_json], [tone], [symbol], [label], [source_url], [source_price_cents], [source_currency], [imported_at], [discount_percent], [stock_count])
 WHERE NOT EXISTS (SELECT 1 FROM [catalog_products] target WHERE target.[id] = src.[id]);
 GO
@@ -3279,7 +3279,7 @@ Mã hoặc tên mẫu: Everyday Tote.', N'/products/ai-generated-500/0002-2.webp
   (4, N'Ly đựng cà phê và trà', 159000.00, N'Đồ gia dụng', N'Ly sứ giữ nhiệt cao cấp', N'/products/cup.svg'),
   (5, N'Bàn phím cơ Không Dây', 1450000.00, N'Điện tử', N'Bàn phím cơ layout 75% switch êm ái', N'/products/keyboard.svg'),
   (6, N'Bình nước thể thao 1L', 180000.00, N'Đồ gia dụng', N'Bình giữ nhiệt inox 304', N'/products/bottle.svg'),
-  (7, N'Sản phẩm thử thanh toán', 5000.00, N'Tự Thiết Kế', N'Sản phẩm được tạo theo yêu cầu chủ cửa hàng để tự kiểm tra quy trình đặt hàng và thanh toán. Giá niêm yết 5.000đ.', N'/products/ai-generated-500/0002-2.webp')
+  (7, N'Túi vải Canvas mini đựng phụ kiện', 5000.00, N'Tự Thiết Kế', N'Túi vải Canvas mini tiện dụng với chất liệu vải canvas bền đẹp, đường may chắc chắn. Thiết kế nhỏ gọn, phong cách trẻ trung, phù hợp đựng tai nghe, cáp sạc, chìa khóa và các phụ kiện cá nhân hằng ngày.', N'/products/ai-generated-500/0002-2.webp')
 ) AS src([Id], [Name], [Price], [Category], [Description], [Image])
 WHERE NOT EXISTS (SELECT 1 FROM [Products] target WHERE target.[Id] = src.[Id]);
 GO
@@ -3300,12 +3300,13 @@ FROM (VALUES
 WHERE NOT EXISTS (SELECT 1 FROM [voucher_codes] target WHERE target.[code] = src.[code]);
 GO
 
--- Table: customers (1 rows)
+-- Table: customers (2 rows)
 SET IDENTITY_INSERT [customers] ON;
 INSERT INTO [customers] ([id], [username], [email], [password_salt], [password_hash], [points], [paid_goods_total], [spin_credits], [created_at], [google_sub], [totp_secret], [totp_enabled], [totp_pending_secret], [totp_verified_at])
 SELECT src.[id], src.[username], src.[email], src.[password_salt], src.[password_hash], src.[points], src.[paid_goods_total], src.[spin_credits], src.[created_at], src.[google_sub], src.[totp_secret], src.[totp_enabled], src.[totp_pending_secret], src.[totp_verified_at]
 FROM (VALUES
-  (1, N'letam10', N'ledominhtam1998@gmail.com', N'6633abe174478c99037b2842734fb202', N'7ffbac0c970d3113f3eead40bae7b6f19a8e100bfb8a57b7e06d9301f23d1ee5792d2b8d43131de3cffb2bad721d4f72b2bccd7687a495db21fda31aa12b07f4', 60405, 4750, 0, N'2026-10-12T17:04:58.6722304+00:00', NULL, NULL, 0, N'ZYHRUMARNFMWJ5MMYWZEAKOUO55RXLI5', NULL)
+  (1, N'letam10', N'ledominhtam1998@gmail.com', N'6633abe174478c99037b2842734fb202', N'7ffbac0c970d3113f3eead40bae7b6f19a8e100bfb8a57b7e06d9301f23d1ee5792d2b8d43131de3cffb2bad721d4f72b2bccd7687a495db21fda31aa12b07f4', 60405, 4750, 0, N'2026-10-12T17:04:58.6722304+00:00', NULL, NULL, 0, N'ZYHRUMARNFMWJ5MMYWZEAKOUO55RXLI5', NULL),
+  (2, N'はる', N'harutv666@gmail.com', N'571e2efc3337b6f08bfc97a561981051', N'09c7647d1b9bf274fa9cd2410304de0dc8d9f81ad3d146214e5c332984e638c2e4f13e3c5f0e548cc2c11d311a7bdc95935ee8782d4f572545cb06439f9ff4dc', 0, 0, 0, N'2026-11-17T07:13:13.3240073+00:00', N'106023766708496837548', NULL, 0, NULL, NULL)
 ) AS src([id], [username], [email], [password_salt], [password_hash], [points], [paid_goods_total], [spin_credits], [created_at], [google_sub], [totp_secret], [totp_enabled], [totp_pending_secret], [totp_verified_at])
 WHERE NOT EXISTS (SELECT 1 FROM [customers] target WHERE target.[id] = src.[id]);
 GO
@@ -3389,13 +3390,11 @@ FROM (VALUES
 WHERE NOT EXISTS (SELECT 1 FROM [customer_orders] target WHERE target.[id] = src.[id]);
 GO
 
--- Table: admin_records (7 rows)
+-- Table: admin_records (5 rows)
 SET IDENTITY_INSERT [admin_records] ON;
 INSERT INTO [admin_records] ([id], [module], [title], [data_json], [status], [created_at], [updated_at])
 SELECT src.[id], src.[module], src.[title], src.[data_json], src.[status], src.[created_at], src.[updated_at]
 FROM (VALUES
-  (1, N'inventory', N'Máº«u kiá»ƒm thá»­ Â· Phiáº¿u nháº­p kho', N'{"sku":"1","location":"Kho chÃ­nh","quantity":"120","note":"Bá»• sung dá»¯ liá»‡u kiá»ƒm thá»­"}', N'Äang dÃ¹ng', N'2026-10-18T04:50:45.5977725', N'2026-10-18T04:50:45.5977725'),
-  (2, N'logistics', N'Máº«u kiá»ƒm thá»­ Â· Giao Ä‘Æ¡n Store', N'{"order":"TEST-ORDER-20261018-001","carrier":"Store Express","status":"Äang xá»­ lÃ½","eta":"2026-10-20"}', N'Äang xá»­ lÃ½', N'2026-10-18T04:50:45.5977725', N'2026-10-18T04:50:45.5977725'),
   (3, N'returns', N'Máº«u kiá»ƒm thá»­ Â· YÃªu cáº§u Ä‘á»•i hÃ ng', N'{"customer":"letam10","order":"TEST-ORDER-20261018-001","reason":"Äá»•i Ã½","assignee":"CSKH"}', N'Chá» duyá»‡t', N'2026-10-18T04:50:45.5977725', N'2026-10-18T04:50:45.5977725'),
   (4, N'order-types', N'Mã hàng', N'{"priority":"Cao","sla":"24 gi\u00E1","note":"Li\u00EAn h\u1EC7 admin"}', N'Đang xử lý', N'2026-10-18T04:50:45.5977725', N'2026-10-20T01:57:13.9205548+00:00'),
   (5, N'support', N'Mua hàng bị lỗi', N'{"customer":"letam10","topic":"Tr\u1EA3 h\u00E0ng h\u00F3a","assignee":"CSKH 01","email":"ledominhtam1998@gmail.com","message":"Y\u00EAu c\u1EA7u li\u00EAn h\u1EC7 l\u1EA1i"}', N'Đang dùng', N'2026-10-18T04:50:45.5977725', N'2026-10-20T01:56:50.1012934+00:00'),
