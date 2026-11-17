@@ -48,45 +48,7 @@ if ([string]::IsNullOrWhiteSpace($DataFile)) {
     $DataFile = Join-Path $ScriptsDir 'seed-data.sql'
 }
 
-function Get-ConnectionString([string]$TargetDb = '') {
-    $server = 'localhost'
-    $dbName = $(if (-not [string]::IsNullOrWhiteSpace($TargetDb)) { $TargetDb } else { $Database })
-
-    if (-not [string]::IsNullOrWhiteSpace($SqlInstance)) {
-        $server = $SqlInstance
-    } else {
-        $envFile = Join-Path $DotnetDir '.env'
-        $foundInEnv = $false
-        if (Test-Path $envFile) {
-            $line = Get-Content $envFile | Where-Object { $_ -match '^ConnectionStrings__StoreDb=(.+)$' } | Select-Object -First 1
-            if ($line -and ($line -match 'Server=([^;]+)')) {
-                $server = $matches[1].Trim()
-                $foundInEnv = $true
-            }
-            if ([string]::IsNullOrWhiteSpace($TargetDb) -and $line -and ($line -match 'Database=([^;]+)')) {
-                $dbName = $matches[1].Trim()
-            }
-        }
-        if (-not $foundInEnv) {
-            $appFile = Join-Path $DotnetDir 'appsettings.json'
-            if (Test-Path $appFile) {
-                try {
-                    $appJson = Get-Content $appFile -Raw | ConvertFrom-Json
-                    $rawCs = $appJson.ConnectionStrings.StoreDb
-                    if ($rawCs -and ($rawCs -match 'Server=([^;]+)')) {
-                        $server = $matches[1].Trim()
-                    }
-                    if ([string]::IsNullOrWhiteSpace($TargetDb) -and $rawCs -and ($rawCs -match 'Database=([^;]+)')) {
-                        $dbName = $matches[1].Trim()
-                    }
-                } catch {}
-            }
-        }
-    }
-
-    $dbPart = $(if ([string]::IsNullOrWhiteSpace($TargetDb)) { $dbName } else { $TargetDb })
-    return "Server=$server;Database=$dbPart;Integrated Security=True;TrustServerCertificate=True;Encrypt=False;MultipleActiveResultSets=True;"
-}
+$script:ResolvedServer = $null
 
 function Test-SqlConnection([string]$connStr) {
     try {
@@ -99,6 +61,90 @@ function Test-SqlConnection([string]$connStr) {
     }
 }
 
+function Get-DatabaseServer() {
+    if ($script:ResolvedServer) {
+        return $script:ResolvedServer
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($SqlInstance)) {
+        $script:ResolvedServer = $SqlInstance
+        return $script:ResolvedServer
+    }
+
+    # 1. Thu doc tu .env
+    $envFile = Join-Path $DotnetDir '.env'
+    if (Test-Path $envFile) {
+        $line = Get-Content $envFile | Where-Object { $_ -match '^ConnectionStrings__StoreDb=(.+)$' } | Select-Object -First 1
+        if ($line -and ($line -match 'Server=([^;]+)')) {
+            $candidate = $matches[1].Trim()
+            if (Test-SqlConnection "Server=$candidate;Database=master;Integrated Security=True;TrustServerCertificate=True;Encrypt=False;") {
+                $script:ResolvedServer = $candidate
+                return $candidate
+            }
+        }
+    }
+
+    # 2. Thu doc tu appsettings.json
+    $appFile = Join-Path $DotnetDir 'appsettings.json'
+    if (Test-Path $appFile) {
+        try {
+            $appJson = Get-Content $appFile -Raw | ConvertFrom-Json
+            $rawCs = $appJson.ConnectionStrings.StoreDb
+            if ($rawCs -and ($rawCs -match 'Server=([^;]+)')) {
+                $candidate = $matches[1].Trim()
+                if (Test-SqlConnection "Server=$candidate;Database=master;Integrated Security=True;TrustServerCertificate=True;Encrypt=False;") {
+                    $script:ResolvedServer = $candidate
+                    return $candidate
+                }
+            }
+        } catch {}
+    }
+
+    # 3. Thu cac instance SQL Server pho bien tren may cuc bo
+    $candidates = @('(localdb)\mssqllocaldb', 'localhost', '.\SQLEXPRESS', '127.0.0.1')
+    foreach ($c in $candidates) {
+        if (Test-SqlConnection "Server=$c;Database=master;Integrated Security=True;TrustServerCertificate=True;Encrypt=False;") {
+            $script:ResolvedServer = $c
+            return $c
+        }
+    }
+
+    $fallback = '(localdb)\mssqllocaldb'
+    $script:ResolvedServer = $fallback
+    return $fallback
+}
+
+function Get-ConnectionString([string]$TargetDb = '') {
+    $server = Get-DatabaseServer
+    $dbName = $(if (-not [string]::IsNullOrWhiteSpace($TargetDb)) { $TargetDb } else { $Database })
+
+    if ([string]::IsNullOrWhiteSpace($TargetDb)) {
+        $envFile = Join-Path $DotnetDir '.env'
+        $foundInEnv = $false
+        if (Test-Path $envFile) {
+            $line = Get-Content $envFile | Where-Object { $_ -match '^ConnectionStrings__StoreDb=(.+)$' } | Select-Object -First 1
+            if ($line -and ($line -match 'Database=([^;]+)')) {
+                $dbName = $matches[1].Trim()
+                $foundInEnv = $true
+            }
+        }
+        if (-not $foundInEnv) {
+            $appFile = Join-Path $DotnetDir 'appsettings.json'
+            if (Test-Path $appFile) {
+                try {
+                    $appJson = Get-Content $appFile -Raw | ConvertFrom-Json
+                    $rawCs = $appJson.ConnectionStrings.StoreDb
+                    if ($rawCs -and ($rawCs -match 'Database=([^;]+)')) {
+                        $dbName = $matches[1].Trim()
+                    }
+                } catch {}
+            }
+        }
+    }
+
+    return "Server=$server;Database=$dbName;Integrated Security=True;TrustServerCertificate=True;Encrypt=False;MultipleActiveResultSets=True;"
+}
+
 function Format-SqlValue($val, [string]$dataType) {
     if ($null -eq $val -or [System.DBNull]::Value.Equals($val)) {
         return "NULL"
@@ -108,6 +154,16 @@ function Format-SqlValue($val, [string]$dataType) {
     }
     if ($val -is [byte] -or $val -is [int16] -or $val -is [int32] -or $val -is [int64] -or $val -is [decimal] -or $val -is [double] -or $val -is [single]) {
         return "$val"
+    }
+    if ($val -is [System.DateTimeOffset]) {
+        return "N'$($val.ToString('o'))'"
+    }
+    if ($val -is [System.DateTime]) {
+        return "N'$($val.ToString('yyyy-MM-ddTHH:mm:ss.fff'))'"
+    }
+    if ($val -is [byte[]]) {
+        $hex = [System.BitConverter]::ToString($val).Replace('-', '')
+        return "0x$hex"
     }
     $strVal = "$val".Replace("'", "''")
     return "N'$strVal'"
@@ -136,7 +192,17 @@ function Export-Database() {
         'product_reviews',
         'product_views',
         'customer_orders',
-        'admin_records'
+        'admin_records',
+        'checkout_intents',
+        'bank_payment_receipts',
+        'sepay_transactions',
+        'checkout_unmatched_payments',
+        'after_sales_refunds',
+        'admin_events',
+        'notification_outbox',
+        'conversations',
+        'messages',
+        'chat_turns'
     )
 
     $identityCols = @{}
@@ -244,7 +310,7 @@ ORDER BY t.name, ic.key_ordinal;
     }
 
     $null = $sb.AppendLine("-- Bat lai toan bo kiem tra khoa ngoai")
-    $null = $sb.AppendLine("EXEC sp_MSforeachtable 'ALTER TABLE ? WITH CHECK CHECK CONSTRAINT ALL';")
+    $null = $sb.AppendLine("EXEC sp_MSforeachtable 'ALTER TABLE ? CHECK CONSTRAINT ALL';")
     $null = $sb.AppendLine("GO`n")
 
     $conn.Close()
@@ -257,11 +323,12 @@ ORDER BY t.name, ic.key_ordinal;
 }
 
 function Sync-Database([bool]$ForceReset = $false) {
-    Write-Host "`n>>> [SYNC] Dang kiem tra co so du lieu '$Database'..." -ForegroundColor Cyan
+    $server = Get-DatabaseServer
+    Write-Host "`n>>> [SYNC] Dang kiem tra co so du lieu '$Database' (SQL Server: $server)..." -ForegroundColor Cyan
 
     $masterConnStr = Get-ConnectionString -TargetDb 'master'
     if (-not (Test-SqlConnection $masterConnStr)) {
-        Write-Host "Loi: Khong the ket noi toi SQL Server (master). Hay dam bao dich vu MSSQL dang chay!" -ForegroundColor Red
+        Write-Host "Loi: Khong the ket noi toi SQL Server '$server' (master). Hay dam bao dich vu MSSQL dang chay!" -ForegroundColor Red
         return
     }
 
@@ -281,13 +348,13 @@ function Sync-Database([bool]$ForceReset = $false) {
     }
 
     if (-not $dbExists) {
-        Write-Host "[1/3] Database '$Database' chua co - dang tu dong tao moi..." -ForegroundColor Green
+        Write-Host "[1/3] Database '$Database' chua co - dang tu dong tao moi tren '$server'..." -ForegroundColor Green
         $createDbCmd = $masterConn.CreateCommand()
         $createDbCmd.CommandText = "CREATE DATABASE [$Database];"
         $createDbCmd.ExecuteNonQuery()
         Write-Host "      Da tao database '$Database' thanh cong!" -ForegroundColor Green
     } else {
-        Write-Host "[1/3] Database '$Database' da ton tai - se tien hanh dong bo cap nhat." -ForegroundColor Green
+        Write-Host "[1/3] Database '$Database' da ton tai tren '$server' - se tien hanh dong bo cap nhat." -ForegroundColor Green
     }
     $masterConn.Close()
 
@@ -311,16 +378,23 @@ function Sync-Database([bool]$ForceReset = $false) {
 }
 
 function Execute-SqlFile([string]$filePath) {
+    $server = Get-DatabaseServer
     $hasSqlcmd = (Get-Command sqlcmd -ErrorAction SilentlyContinue)
-    $server = 'localhost'
-    if (-not [string]::IsNullOrWhiteSpace($SqlInstance)) { $server = $SqlInstance }
+    $useAdoNet = $false
 
     if ($hasSqlcmd) {
+        Write-Host "      [SQLCMD] Thuc thi qua sqlcmd (Server: $server)..." -ForegroundColor DarkGray
         & sqlcmd -S $server -C -d $Database -i $filePath
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "Luu y: sqlcmd co canh bao (exit code: $LASTEXITCODE) nhung van tiep tuc." -ForegroundColor Yellow
+            Write-Host "      [Luu y] sqlcmd tra ve exit code $LASTEXITCODE. Dang thuc thi bo tro qua ADO.NET..." -ForegroundColor Yellow
+            $useAdoNet = $true
         }
     } else {
+        $useAdoNet = $true
+    }
+
+    if ($useAdoNet) {
+        Write-Host "      [ADO.NET] Dang nap truc tiep qua System.Data.SqlClient (Server: $server)..." -ForegroundColor DarkGray
         $connStr = Get-ConnectionString
         $conn = New-Object System.Data.SqlClient.SqlConnection($connStr)
         $conn.Open()
@@ -334,7 +408,7 @@ function Execute-SqlFile([string]$filePath) {
                 try {
                     $cmd = $conn.CreateCommand()
                     $cmd.CommandText = $sql
-                    $cmd.CommandTimeout = 120
+                    $cmd.CommandTimeout = 180
                     $cmd.ExecuteNonQuery() | Out-Null
                 } catch {
                 }
@@ -346,8 +420,10 @@ function Execute-SqlFile([string]$filePath) {
 
 
 function Get-StoreDbStatus() {
+    $server = Get-DatabaseServer
     Write-Host "`n============================================================" -ForegroundColor Cyan
     Write-Host "           THONG TIN CSDL DU AN STORE ($Database)" -ForegroundColor Cyan
+    Write-Host "           SQL Server Instance: $server" -ForegroundColor DarkCyan
     Write-Host "============================================================" -ForegroundColor Cyan
 
     $connStr = Get-ConnectionString

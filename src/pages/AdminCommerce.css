@@ -46,3 +46,134 @@ html[data-admin-theme='dark'] .admin-voucher-filters button.is-active{background
 @media(max-width:500px){.voucher-management .admin-voucher-list article{grid-template-columns:1fr}.voucher-management .voucher-editor-actions{justify-content:flex-start}}
 
 .admin-commerce-head,.admin-order-detail>header{display:flex;justify-content:space-between;align-items:center;gap:16px}.admin-table-scroll{overflow:auto}.admin-order-table{width:100%;border-collapse:collapse}.admin-order-table th,.admin-order-table td{padding:13px 9px;border-bottom:1px solid var(--admin-line,#d9e3db);text-align:left;vertical-align:top}.admin-order-table small{display:block;font-size:12px}.admin-order-detail{margin-top:20px}.admin-order-detail form,.admin-payment-settings{display:grid;gap:12px;margin-top:18px;max-width:660px}.admin-order-detail label,.admin-payment-settings label{display:grid;gap:5px;margin:10px 0}.admin-order-detail input,.admin-order-detail textarea,.admin-payment-settings input,.admin-payment-settings select{padding:10px;border:1px solid #a1b8a8;border-radius:8px;width:100%;color:inherit;background:transparent}.admin-confirm-check{display:flex!important;align-items:center;gap:9px!important}.admin-confirm-check input{width:18px;height:18px;flex-shrink:0}.admin-order-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:16px}.admin-order-detail button,.admin-payment-settings button,.admin-order-table button,.admin-commerce-head>button{padding:9px 13px;border:1px solid #94b59d;background:#306c47;color:#fff;border-radius:8px;cursor:pointer}.admin-order-detail button:disabled,.admin-payment-settings button:disabled{opacity:.55;cursor:wait}.admin-fee-list>div{display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid #8fa796}.admin-fee-list dd{margin:0;font-weight:700}.admin-policy{margin:15px 0;padding:14px;border-radius:10px;background:var(--admin-panel,#edf5ed)}html[data-admin-theme=dark] .admin-order-table td{color:#e9f3ed}html[data-admin-theme=dark] .admin-order-table small{color:#c1d8c8}@media(max-width:640px){.admin-commerce-head{align-items:flex-start}.admin-order-table{min-width:720px}.admin-fee-list>div{font-size:13px}}
+
+/* Dark mode comprehensive coverage for Commerce & Orders */
+html[data-admin-theme="dark"] .admin-commerce-form input,
+html[data-admin-theme="dark"] .admin-commerce-form select,
+html[data-admin-theme="dark"] .admin-commerce-list textarea,
+html[data-admin-theme="dark"] .admin-order-detail input,
+html[data-admin-theme="dark"] .admin-order-detail textarea,
+html[data-admin-theme="dark"] .admin-payment-settings input,
+html[data-admin-theme="dark"] .admin-payment-settings select {
+  background: #0d1e15;
+  color: #edf7ef;
+  border-color: #2a523a;
+}
+html[data-admin-theme="dark"] .admin-commerce-form input:focus,
+html[data-admin-theme="dark"] .admin-commerce-form select:focus,
+html[data-admin-theme="dark"] .admin-commerce-list textarea:focus,
+html[data-admin-theme="dark"] .admin-order-detail input:focus,
+html[data-admin-theme="dark"] .admin-order-detail textarea:focus,
+html[data-admin-theme="dark"] .admin-payment-settings input:focus,
+html[data-admin-theme="dark"] .admin-payment-settings select:focus {
+  border-color: #4ade80;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.22);
+  outline: none;
+}
+html[data-admin-theme="dark"] .admin-clickable-row:hover {
+  background: #193828;
+}
+html[data-admin-theme="dark"] .admin-link-button {
+  color: #86efac;
+}
+html[data-admin-theme="dark"] .admin-detail-panel {
+  background: linear-gradient(160deg, #13271d 0%, #0f2118 100%);
+  border-color: #284c37;
+  color: #e8f5ec;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+}
+html[data-admin-theme="dark"] .admin-detail-panel > button {
+  background: #162f22;
+  border-color: #2b543c;
+  color: #c8e5cd;
+}
+html[data-admin-theme="dark"] .admin-detail-panel > button:hover {
+  background: #1f4230;
+  color: #f0fdf4;
+  border-color: #4ade80;
+}
+html[data-admin-theme="dark"] .admin-detail-panel dl div {
+  border-bottom-color: #1f3f2d;
+}
+html[data-admin-theme="dark"] .admin-detail-panel dt {
+  color: #8bbfa0;
+}
+html[data-admin-theme="dark"] .admin-detail-panel dd {
+  color: #f0fdf4;
+}
+html[data-admin-theme="dark"] .admin-commerce-list article {
+  background: linear-gradient(160deg, #13271d 0%, #0f2118 100%);
+  border-color: #244833;
+  color: #e8f5ec;
+}
+html[data-admin-theme="dark"] .admin-commerce-list blockquote {
+  background: #0f2218;
+  border-left-color: #4ade80;
+  color: #daf0e0;
+}
+html[data-admin-theme="dark"] .admin-after-actions fieldset {
+  border-color: #28543a;
+  background: #0f2218;
+  color: #e8f5ec;
+}
+html[data-admin-theme="dark"] .admin-after-actions legend {
+  color: #86efac;
+}
+html[data-admin-theme="dark"] .admin-after-actions input,
+html[data-admin-theme="dark"] .admin-after-actions textarea {
+  background: #0d1e15;
+  color: #edf7ef;
+  border-color: #2a523a;
+}
+html[data-admin-theme="dark"] .admin-policy {
+  background: #11281c;
+  border: 1px solid #28543a;
+  color: #c8e5cd;
+}
+html[data-admin-theme="dark"] .admin-fee-list > div {
+  border-bottom-color: #244833;
+}
+html[data-admin-theme="dark"] .admin-fee-list dt {
+  color: #8bbfa0;
+}
+html[data-admin-theme="dark"] .admin-fee-list dd {
+  color: #f0fdf4;
+}
+html[data-admin-theme="dark"] .admin-after-history summary {
+  color: #86efac;
+}
+html[data-admin-theme="dark"] .admin-after-history p {
+  border-top-color: #1f4230;
+  color: #daf0e0;
+}
+html[data-admin-theme="dark"] .admin-after-history small {
+  color: #8bbfa0;
+}
+html[data-admin-theme="dark"] .admin-order-detail h3,
+html[data-admin-theme="dark"] .admin-order-detail h4 {
+  color: #f0fdf4;
+}
+html[data-admin-theme="dark"] .admin-order-detail ul {
+  color: #daf0e0;
+}
+html[data-admin-theme="dark"] .admin-order-detail a {
+  color: #86efac;
+}
+html[data-admin-theme="dark"] .admin-order-detail a:hover {
+  color: #bbf7d0;
+  text-decoration: underline;
+}
+html[data-admin-theme="dark"] .admin-order-detail code {
+  background: #0d1e15;
+  color: #86efac;
+  border: 1px solid #28543a;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+html[data-admin-theme="dark"] article.admin-module-card[data-unmatched-id] {
+  background: #102419;
+  border-color: #244833;
+}
+html[data-admin-theme="dark"] details summary {
+  color: #86efac;
+}

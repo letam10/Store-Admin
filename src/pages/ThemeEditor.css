@@ -37,3 +37,69 @@ html[data-admin-theme] .admin-workspace-card .theme-preview button { color: var(
 .side-banner-color-inputs input[type="text"]{min-width:0;padding:7px;font-size:11px}
 @media(max-width:900px){.side-banner-slots{grid-template-columns:1fr}.side-banner-colors{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:560px){.side-banner-colors{grid-template-columns:1fr}}
+
+/* Theme Editor controls synchronization in Dark Mode */
+html[data-admin-theme="dark"] .theme-target-tabs button,
+html[data-admin-theme="dark"] .theme-mode-tabs button,
+html[data-admin-theme="dark"] .theme-preset-list button,
+html[data-admin-theme="dark"] .theme-preview-actions button {
+  background: #14281f;
+  border-color: #284c37;
+  color: #daf0e0;
+}
+html[data-admin-theme="dark"] .theme-target-tabs button:hover,
+html[data-admin-theme="dark"] .theme-mode-tabs button:hover,
+html[data-admin-theme="dark"] .theme-preset-list button:hover,
+html[data-admin-theme="dark"] .theme-preview-actions button:hover {
+  background: #1c3829;
+  border-color: #4ade80;
+  color: #f0fdf4;
+}
+html[data-admin-theme="dark"] .theme-target-tabs button.is-active,
+html[data-admin-theme="dark"] .theme-mode-tabs button.is-active,
+html[data-admin-theme="dark"] .theme-preset-list button.is-active {
+  background: #256b47;
+  border-color: #4ade80;
+  color: #ffffff;
+}
+html[data-admin-theme="dark"] .theme-controls fieldset {
+  background: #0f2218;
+  border-color: #244833;
+}
+html[data-admin-theme="dark"] .theme-controls legend {
+  color: #8bbfa0;
+}
+html[data-admin-theme="dark"] .theme-color-field label,
+html[data-admin-theme="dark"] .theme-range-row {
+  color: #daf0e0;
+}
+html[data-admin-theme="dark"] .theme-hex-input,
+html[data-admin-theme="dark"] .theme-legacy-controls input,
+html[data-admin-theme="dark"] .theme-legacy-controls textarea {
+  background: #091610;
+  border-color: #244d35;
+  color: #eef8f1;
+}
+html[data-admin-theme="dark"] .theme-hex-input:focus,
+html[data-admin-theme="dark"] .theme-legacy-controls input:focus,
+html[data-admin-theme="dark"] .theme-legacy-controls textarea:focus {
+  border-color: #4ade80;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.22);
+  outline: none;
+}
+html[data-admin-theme="dark"] .theme-editor-actions button:nth-child(n+2) {
+  background: #162f22;
+  border: 1px solid #28543a;
+  color: #c8e5cd;
+}
+html[data-admin-theme="dark"] .theme-editor-actions button:nth-child(n+2):hover {
+  background: #1f4230;
+  border-color: #4ade80;
+  color: #f0fdf4;
+}
+html[data-admin-theme="dark"] .theme-legacy-controls h3 {
+  color: #f0fdf4;
+}
+html[data-admin-theme="dark"] .theme-legacy-controls label {
+  color: #9ec5ad;
+}
