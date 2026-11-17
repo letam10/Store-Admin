@@ -971,6 +971,120 @@
 }
 
 /* ==========================================================================
+   6.1 BỔ SUNG GIAO DIỆN LIGHT MODE CHO CÁC MODULE VẬN HÀNH (LUXURY EMERALD)
+   ========================================================================== */
+.admin-detail-panel {
+  background: #f7faf8 !important;
+  border: 1px solid #d4e5d8 !important;
+  border-radius: 18px !important;
+  padding: 22px !important;
+  box-shadow: 0 4px 16px rgba(20, 55, 38, 0.04) !important;
+}
+.admin-detail-panel > button {
+  border: 1px solid #c8dcd0 !important;
+  border-radius: 9px !important;
+  background: #ffffff !important;
+  color: #355b43 !important;
+  padding: 7px 12px !important;
+  font-weight: 600 !important;
+  transition: all 0.15s ease !important;
+}
+.admin-detail-panel > button:hover {
+  background: #eef7f1 !important;
+  border-color: #2e8658 !important;
+  color: #123223 !important;
+}
+.admin-detail-panel dl div {
+  border-bottom: 1px solid #e2ece4 !important;
+}
+.admin-detail-panel dt {
+  color: #5c7767 !important;
+}
+.admin-detail-panel dd {
+  color: #123223 !important;
+  font-weight: 700 !important;
+}
+
+.admin-product-editor,
+.admin-record-editor {
+  background: #f8fbf8 !important;
+  border: 1px solid #d4e5d8 !important;
+  border-radius: 18px !important;
+  padding: 22px !important;
+  box-shadow: 0 4px 16px rgba(20, 55, 38, 0.04) !important;
+}
+.admin-editor-grid label {
+  color: #355b43 !important;
+  font-weight: 700 !important;
+  font-size: 12px !important;
+}
+.admin-editor-grid input,
+.admin-editor-grid select,
+.admin-editor-grid textarea {
+  border: 1px solid #cad9ce !important;
+  border-radius: 9px !important;
+  padding: 9px 12px !important;
+  background: #ffffff !important;
+  color: #123223 !important;
+  transition: all 0.18s ease !important;
+}
+.admin-editor-grid input:focus,
+.admin-editor-grid select:focus,
+.admin-editor-grid textarea:focus {
+  border-color: #256b47 !important;
+  box-shadow: 0 0 0 3px rgba(37, 107, 71, 0.18) !important;
+  outline: none !important;
+}
+.admin-editor-actions .button-secondary {
+  border: 1px solid #cad9ce !important;
+  border-radius: 9px !important;
+  background: #ffffff !important;
+  color: #355b43 !important;
+  font-weight: 600 !important;
+  transition: all 0.15s ease !important;
+}
+.admin-editor-actions .button-secondary:hover {
+  background: #f0f6f2 !important;
+  color: #123223 !important;
+  border-color: #256b47 !important;
+}
+
+.role-grid article,
+.order-type-grid article,
+.customer-grid article,
+.people-request-list article,
+.promo-admin-grid > section,
+.admin-voucher-list article {
+  border-radius: 16px !important;
+  border: 1px solid #dce8df !important;
+  transition: all 0.2s ease !important;
+}
+.role-grid article:hover,
+.order-type-grid article:hover,
+.customer-grid article:hover,
+.people-request-list article:hover,
+.admin-voucher-list article:hover {
+  border-color: #b8dcbf !important;
+  box-shadow: 0 6px 18px rgba(24, 54, 42, 0.06) !important;
+}
+.admin-link-button {
+  color: #256b47 !important;
+  font-weight: 700 !important;
+  transition: color 0.15s ease !important;
+}
+.admin-link-button:hover {
+  color: #16402b !important;
+  text-decoration: underline !important;
+}
+.admin-task-list div {
+  border-radius: 14px !important;
+  transition: all 0.18s ease !important;
+}
+.admin-task-list div:hover {
+  transform: translateX(3px) !important;
+}
+
+/* ==========================================================================
    7. TRANG ĐĂNG NHẬP ADMIN (LOGIN SCREEN SIÊU CAO CẤP)
    ========================================================================== */
 .admin-shell--login {
@@ -1311,6 +1425,236 @@ html[data-admin-theme="dark"] .admin-login input {
 html[data-admin-theme="dark"] .admin-login input:focus {
   border-color: #4ade80 !important;
   box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.22) !important;
+}
+
+/* ==========================================================================
+   8.1 DARK MODE GLOBAL FORM CONTROLS & INPUTS
+   ========================================================================== */
+html[data-admin-theme="dark"] input[type="text"],
+html[data-admin-theme="dark"] input[type="search"],
+html[data-admin-theme="dark"] input[type="number"],
+html[data-admin-theme="dark"] input[type="date"],
+html[data-admin-theme="dark"] input[type="datetime-local"],
+html[data-admin-theme="dark"] input[type="email"],
+html[data-admin-theme="dark"] input[type="password"],
+html[data-admin-theme="dark"] textarea,
+html[data-admin-theme="dark"] select {
+  background: #091610 !important;
+  border-color: #244d35 !important;
+  color: #eef8f1 !important;
+  color-scheme: dark;
+}
+html[data-admin-theme="dark"] input:focus,
+html[data-admin-theme="dark"] textarea:focus,
+html[data-admin-theme="dark"] select:focus {
+  border-color: #4ade80 !important;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.22) !important;
+  outline: none !important;
+}
+html[data-admin-theme="dark"] input[type="checkbox"] {
+  accent-color: #4ade80 !important;
+}
+
+/* ==========================================================================
+   8.2 DARK MODE SEARCH RESULTS & POPOVERS
+   ========================================================================== */
+html[data-admin-theme="dark"] .admin-search-results {
+  background: #102419 !important;
+  border-color: rgba(74, 222, 128, 0.22) !important;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.7), 0 0 20px rgba(74, 222, 128, 0.08) !important;
+}
+html[data-admin-theme="dark"] .admin-search-results button {
+  color: #daf0e0 !important;
+}
+html[data-admin-theme="dark"] .admin-search-results button:hover {
+  background: #1b3d2b !important;
+  color: #86efac !important;
+}
+html[data-admin-theme="dark"] .admin-search-results p {
+  color: #9ec5ad !important;
+}
+
+/* ==========================================================================
+   8.3 DARK MODE EDITORS, PANELS & DETAILS
+   ========================================================================== */
+html[data-admin-theme="dark"] .admin-detail-panel {
+  background: linear-gradient(160deg, #13271d 0%, #0f2118 100%) !important;
+  border-color: #284c37 !important;
+  color: #e8f5ec !important;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5) !important;
+}
+html[data-admin-theme="dark"] .admin-detail-panel > button {
+  background: #162f22 !important;
+  border-color: #2b543c !important;
+  color: #c8e5cd !important;
+}
+html[data-admin-theme="dark"] .admin-detail-panel > button:hover {
+  background: #1f4230 !important;
+  color: #f0fdf4 !important;
+  border-color: #4ade80 !important;
+}
+html[data-admin-theme="dark"] .admin-detail-panel dl div {
+  border-bottom-color: #1f3f2d !important;
+}
+html[data-admin-theme="dark"] .admin-detail-panel dt {
+  color: #8bbfa0 !important;
+}
+html[data-admin-theme="dark"] .admin-detail-panel dd {
+  color: #f0fdf4 !important;
+}
+
+html[data-admin-theme="dark"] .admin-product-editor,
+html[data-admin-theme="dark"] .admin-record-editor {
+  background: linear-gradient(160deg, #12261b 0%, #0d1e16 100%) !important;
+  border-color: #284c37 !important;
+  color: #e8f5ec !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4) !important;
+}
+html[data-admin-theme="dark"] .admin-editor-grid label {
+  color: #a3c9b2 !important;
+}
+html[data-admin-theme="dark"] .admin-editor-actions .button-secondary {
+  background: #14281f !important;
+  border-color: #284c37 !important;
+  color: #c8e5cd !important;
+}
+html[data-admin-theme="dark"] .admin-editor-actions .button-secondary:hover {
+  background: #1c3829 !important;
+  border-color: #4ade80 !important;
+  color: #f0fdf4 !important;
+}
+
+/* ==========================================================================
+   8.4 DARK MODE AI LOCAL & CHAT
+   ========================================================================== */
+html[data-admin-theme="dark"] .admin-meta > div {
+  background: linear-gradient(160deg, #13271d 0%, #0f2118 100%) !important;
+  border-color: #244833 !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
+}
+html[data-admin-theme="dark"] .admin-meta small {
+  color: #8bbfa0 !important;
+}
+html[data-admin-theme="dark"] .admin-meta strong {
+  color: #4ade80 !important;
+}
+html[data-admin-theme="dark"] .admin-context label {
+  color: #a3c9b2 !important;
+}
+html[data-admin-theme="dark"] .admin-warning {
+  background: rgba(234, 179, 8, 0.12) !important;
+  border: 1px solid rgba(234, 179, 8, 0.3) !important;
+  color: #fef08a !important;
+}
+html[data-admin-theme="dark"] .admin-panel__heading > span {
+  background: #1c3d2c !important;
+  color: #86efac !important;
+  border: 1px solid #28543a !important;
+}
+html[data-admin-theme="dark"] .admin-range label {
+  color: #a3c9b2 !important;
+}
+html[data-admin-theme="dark"] .admin-stats div {
+  background: #0d1e16 !important;
+  border: 1px solid #1f3f2d !important;
+}
+html[data-admin-theme="dark"] .admin-stats dt {
+  color: #8bbfa0 !important;
+}
+html[data-admin-theme="dark"] .admin-stats dd {
+  color: #4ade80 !important;
+}
+html[data-admin-theme="dark"] .admin-chat__message small {
+  color: #8bbfa0 !important;
+}
+html[data-admin-theme="dark"] .admin-chat__message p {
+  background: #11251b !important;
+  border: 1px solid #244833 !important;
+  color: #daf0e0 !important;
+}
+html[data-admin-theme="dark"] .admin-chat__message--user p {
+  background: #256b47 !important;
+  color: #f0fdf4 !important;
+  border: 1px solid #357a53 !important;
+}
+html[data-admin-theme="dark"] .admin-thinking {
+  color: #4ade80 !important;
+}
+html[data-admin-theme="dark"] .admin-chat__form {
+  border-top-color: #1f4230 !important;
+}
+html[data-admin-theme="dark"] .admin-source,
+html[data-admin-theme="dark"] .admin-muted {
+  color: #8bbfa0 !important;
+}
+
+/* ==========================================================================
+   8.5 DARK MODE BUTTONS, BADGES, ALERTS & CHIPS
+   ========================================================================== */
+html[data-admin-theme="dark"] .table-action {
+  background: #142b1f !important;
+  border-color: #264a35 !important;
+  color: #c8e5cd !important;
+}
+html[data-admin-theme="dark"] .table-action:hover:not(:disabled) {
+  background: #1a3828 !important;
+  border-color: #4ade80 !important;
+  color: #f0fdf4 !important;
+}
+html[data-admin-theme="dark"] .table-action--danger {
+  background: rgba(185, 28, 28, 0.16) !important;
+  border-color: rgba(239, 68, 68, 0.35) !important;
+  color: #fca5a5 !important;
+}
+html[data-admin-theme="dark"] .table-action--danger:hover:not(:disabled) {
+  background: rgba(185, 28, 28, 0.28) !important;
+  border-color: #f87171 !important;
+}
+html[data-admin-theme="dark"] .admin-error {
+  background: rgba(185, 28, 28, 0.18) !important;
+  border: 1px solid rgba(248, 113, 113, 0.35) !important;
+  color: #fca5a5 !important;
+}
+html[data-admin-theme="dark"] [role="alert"] {
+  color: #fca5a5 !important;
+}
+html[data-admin-theme="dark"] [role="status"] {
+  color: #86efac !important;
+}
+html[data-admin-theme="dark"] details summary {
+  color: #86efac !important;
+}
+html[data-admin-theme="dark"] .admin-link-button {
+  color: #86efac !important;
+}
+html[data-admin-theme="dark"] .admin-preview-badge {
+  background: #1c3a2a !important;
+  color: #86efac !important;
+  border: 1px solid rgba(74, 222, 128, 0.2) !important;
+}
+html[data-admin-theme="dark"] .admin-status-chip {
+  background: #193828 !important;
+  color: #86efac !important;
+  border: 1px solid rgba(74, 222, 128, 0.2) !important;
+}
+
+/* ==========================================================================
+   8.6 SMOOTH THEME SWITCHING TRANSITION
+   ========================================================================== */
+html {
+  transition: background-color 0.22s ease, color 0.22s ease;
+}
+.admin-shell,
+.admin-workspace-card,
+.admin-main,
+.admin-module-card,
+.admin-panel,
+.admin-detail-panel,
+.admin-kpi-grid article,
+.admin-global-search,
+.admin-dropdown-menu__trigger,
+.admin-dropdown-menu__panel {
+  transition: background-color 0.22s ease, border-color 0.22s ease, color 0.22s ease, box-shadow 0.22s ease;
 }
 
 /* ==========================================================================
