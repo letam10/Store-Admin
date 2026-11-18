@@ -189,6 +189,48 @@ Check(paymentWithProductFacts.RootElement.TryGetProperty("catalog", out _) && pa
 var allSaleFacts = JsonDocument.Parse(AiStoreContext.Build("Cho tôi xem toàn bộ sản phẩm giảm giá", [], db, false).Json);
 Check(allSaleFacts.RootElement.TryGetProperty("catalog", out var allSaleCatalog) && allSaleCatalog.GetProperty("products").GetArrayLength() >= 5, "all sale query returns full sale products");
 
+var turnCheapest = new ChatTurnData("req-cheap-1", "Sản phẩm rẻ nhất hiện nay là gì?", "Sản phẩm rẻ nhất là Túi vải Canvas...", "completed", "[{\"id\":\"catalog-manual-e6573516\",\"label\":\"Túi vải Canvas mini đựng phụ kiện\"}]", "null", "null");
+
+var rank2Facts = JsonDocument.Parse(AiStoreContext.Build("còn sản phẩm giá thấp thứ 2?", [turnCheapest], db, false).Json);
+Check(rank2Facts.RootElement.TryGetProperty("catalog", out var rank2Catalog)
+    && rank2Catalog.GetProperty("products").GetArrayLength() >= 10
+    && rank2Catalog.GetProperty("products")[0].GetProperty("rank").GetInt32() == 1
+    && rank2Catalog.GetProperty("products")[1].GetProperty("rank").GetInt32() == 2
+    && rank2Catalog.GetProperty("products")[1].GetProperty("salePrice").GetInt64() >= rank2Catalog.GetProperty("products")[0].GetProperty("salePrice").GetInt64(),
+    "second lowest price query returns full ranked list with rank 2");
+
+var rank3Facts = JsonDocument.Parse(AiStoreContext.Build("còn sản phẩm thấp thứ 3?", [turnCheapest], db, false).Json);
+Check(rank3Facts.RootElement.TryGetProperty("catalog", out var rank3Catalog)
+    && rank3Catalog.GetProperty("products").GetArrayLength() >= 10
+    && rank3Catalog.GetProperty("products")[2].GetProperty("rank").GetInt32() == 3
+    && rank3Catalog.GetProperty("products")[2].GetProperty("salePrice").GetInt64() >= rank3Catalog.GetProperty("products")[1].GetProperty("salePrice").GetInt64(),
+    "third lowest price query returns full ranked list with rank 3 and at least 10 items");
+
+var clarify3Facts = JsonDocument.Parse(AiStoreContext.Build("ý tôi là sản phẩm thấp thứ 3 không phải thấp thứ hai hay nhất?", [turnCheapest], db, false).Json);
+Check(clarify3Facts.RootElement.TryGetProperty("catalog", out var clarify3Catalog)
+    && clarify3Catalog.GetProperty("products").GetArrayLength() >= 10
+    && clarify3Catalog.GetProperty("products")[2].GetProperty("rank").GetInt32() == 3,
+    "clarification query for third lowest price returns full ranked list");
+
+// Edge case 1: Khách hỏi kiểm tra tồn kho kèm thứ bậc giá "sản phẩm thấp thứ 3 còn không?"
+var rank3StockFacts = JsonDocument.Parse(AiStoreContext.Build("sản phẩm thấp thứ 3 còn không?", [turnCheapest], db, false).Json);
+Check(rank3StockFacts.RootElement.TryGetProperty("catalog", out var rank3StockCatalog)
+    && rank3StockCatalog.GetProperty("products").GetArrayLength() >= 10
+    && rank3StockCatalog.GetProperty("products")[2].GetProperty("rank").GetInt32() == 3,
+    "rank query with stock phrase preserves full ranked product list");
+
+// Edge case 2: Đa lượt hỏi thứ bậc liên tiếp (Turn 1 -> Turn 2 -> Turn 3 -> Turn 4 hỏi tiếp "còn sản phẩm thứ 4?")
+var turnRank2 = new ChatTurnData("req-cheap-2", "còn sản phẩm giá thấp thứ 2?", "Sản phẩm giá thấp thứ 2 là...", "completed", "[]", "null", "null");
+var turnRank3 = new ChatTurnData("req-cheap-3", "còn sản phẩm thứ 3?", "Sản phẩm đứng thứ 3 về giá là...", "completed", "[]", "null", "null");
+var multiTurnRank4Facts = JsonDocument.Parse(AiStoreContext.Build("còn sản phẩm thứ 4?", [turnCheapest, turnRank2, turnRank3], db, false).Json);
+Check(multiTurnRank4Facts.RootElement.TryGetProperty("catalog", out var rank4Catalog)
+    && rank4Catalog.GetProperty("products").GetArrayLength() >= 10
+    && rank4Catalog.GetProperty("products")[3].GetProperty("rank").GetInt32() == 4,
+    "consecutive multi-turn ranking preserves price low order up to rank 4");
+
+var mathFacts = JsonDocument.Parse(AiStoreContext.Build("100x100:10=", [], db, false).Json);
+Check(!mathFacts.RootElement.TryGetProperty("catalog", out _), "arithmetic query with x and : does not leak catalog");
+
 await RuntimeChecks.RunAsync(db, Check);
 
 var fixture = new { database, username = customerName, customerId, admin = adminName, staff = staffName, password,

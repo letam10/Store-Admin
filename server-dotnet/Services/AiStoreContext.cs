@@ -1,8 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Trích xuất và xây dựng ngữ cảnh dữ liệu thực tế (sản phẩm, giá gốc/giảm, tồn kho, ảnh, ưu đãi, đa lượt hội thoại) từ StoreDb để cung cấp cho AI.
+  - Mục đích: Trích xuất và xây dựng ngữ cảnh dữ liệu thực tế (sản phẩm, giá gốc/giảm, tồn kho, ảnh, ưu đãi, đa lượt hội thoại, thứ bậc giá và so sánh) từ StoreDb để cung cấp danh sách phong phú 15-25 sản phẩm cho AI.
   - Liên kết trực tiếp: AiChatService.cs, StoreDb.cs, StoreDb.AiFacts.cs
-  - Vùng ảnh hưởng khi sửa: Dữ liệu JSON facts gửi cho mô hình AI, nguồn tham khảo (sources) hiển thị trên UI.
+  - Vùng ảnh hưởng khi sửa: Dữ liệu JSON facts gửi cho mô hình AI, nguồn tham khảo (sources) hiển thị trên UI, khả năng trả lời đa lượt thứ bậc giá và tra cứu kho.
 */
 using System.Globalization;
 using System.Text;
@@ -31,9 +31,10 @@ public static class AiStoreContext
     public static long SalePrice(CatalogProduct item) => (long)decimal.Round(
         item.Price * (100 - item.DiscountPercent) / 1000m, 0, MidpointRounding.ToEven) * 10;
 
-    private static object Product(CatalogProduct item) => new
+    private static object Product(CatalogProduct item, int? rank = null) => new
     {
         id = item.Id,
+        rank,
         name = item.Name,
         price = item.Price,
         originalPriceVnd = item.Price,
@@ -96,8 +97,93 @@ public static class AiStoreContext
             .FirstOrDefault(c => query.Contains(Normalize(c), StringComparison.Ordinal));
         if (query.Contains("may tinh xach tay", StringComparison.Ordinal) && categories.Contains("Laptop")) selectedCategory = "Laptop";
         var onSale = query.Contains("giam gia") || query.Contains("sale");
-        var cheapest = query.Contains("thap nhat") || query.Contains("re nhat");
-        var expensive = query.Contains("cao nhat") || query.Contains("dat nhat") || query.Contains("mac nhat");
+
+        // Nhận diện câu hỏi thứ bậc ("thu 2", "thu 3", "thu hai", "thu ba", "nhi", "ba", "tiep theo", "ke tiep", "dung sau", "dung truoc")
+        var ordinalMatch = Regex.Match(query, @"\bthu\s*(\d{1,2}|nhat|mot|hai|nhi|ba|tu|bon|nam|sau|bay|tam|chin|muoi)\b"
+            + @"|\b(re|thap|cao|dat|mac)\s+(nhat|nhi|ba|tu|bon|nam)\b"
+            + @"|\b(hang|dung|xep|ve)\s+(nhat|nhi|ba)\b");
+        var hasOrdinalTerm = ordinalMatch.Success
+            || query.Contains("tiep theo") || query.Contains("ke tiep")
+            || query.Contains("sau do") || query.Contains("dung sau") || query.Contains("dung truoc");
+
+        var rankNumber = 0;
+        if (ordinalMatch.Success)
+        {
+            var m = ordinalMatch.Value;
+            if (m.Contains("1") || m.Contains("nhat") || m.Contains("mot")) rankNumber = 1;
+            else if (m.Contains("2") || m.Contains("hai") || m.Contains("nhi")) rankNumber = 2;
+            else if (m.Contains("3") || m.Contains("ba")) rankNumber = 3;
+            else if (m.Contains("4") || m.Contains("tu") || m.Contains("bon")) rankNumber = 4;
+            else if (m.Contains("5") || m.Contains("nam")) rankNumber = 5;
+            else if (m.Contains("6") || m.Contains("sau")) rankNumber = 6;
+            else if (m.Contains("7") || m.Contains("bay")) rankNumber = 7;
+            else if (m.Contains("8") || m.Contains("tam")) rankNumber = 8;
+            else if (m.Contains("9") || m.Contains("chin")) rankNumber = 9;
+            else if (m.Contains("10") || m.Contains("muoi")) rankNumber = 10;
+            else if (ordinalMatch.Groups[1].Success && int.TryParse(ordinalMatch.Groups[1].Value, out var n)) rankNumber = n;
+        }
+        else if (hasOrdinalTerm)
+        {
+            rankNumber = 2;
+        }
+
+        // So sánh giá / danh sách giá / thứ hạng giá
+        var isPriceComparison = query.Contains("so sanh") || query.Contains("bang gia")
+            || query.Contains("chenh lech gia") || query.Contains("xep hang gia")
+            || query.Contains("thu tu gia") || query.Contains("danh sach gia");
+
+        // Nhận diện từ khóa giá thấp / rẻ
+        var priceLowKeywords = new[]
+        {
+            "thap nhat", "re nhat", "gia thap", "gia re", "re hon", "thap hon", "it tien nhat", "it tien", "re nhe",
+            "thap thu", "re thu", "thap nhi", "re nhi", "thap ba", "re ba", "gia thap thu", "gia re thu"
+        };
+        var hasPriceLow = priceLowKeywords.Any(query.Contains);
+
+        // Nhận diện từ khóa giá cao / đắt
+        var priceHighKeywords = new[]
+        {
+            "cao nhat", "dat nhat", "mac nhat", "gia cao", "gia dat", "gia mac", "cao hon", "dat hon", "mac hon",
+            "nhieu tien nhat", "nhieu tien", "cao thu", "dat thu", "mac thu", "cao nhi", "dat nhi", "mac nhi",
+            "cao ba", "dat ba", "mac ba", "gia cao thu", "gia dat thu", "gia mac thu"
+        };
+        var hasPriceHigh = priceHighKeywords.Any(query.Contains);
+
+        // Đa lượt hội thoại (Multi-turn Context): Duyệt lại 3-5 lượt chat gần nhất để kế thừa ngữ cảnh
+        var completedTurns = history.Where(t => t.Status == "completed").ToList();
+        var recentTurns = (completedTurns.Count > 0 ? completedTurns : history.Where(t => !string.IsNullOrWhiteSpace(t.UserContent)).ToList())
+            .TakeLast(5).Reverse().ToList();
+
+        var prevHadPriceLow = false;
+        var prevHadPriceHigh = false;
+        foreach (var turn in recentTurns)
+        {
+            var prevNorm = Normalize(turn.UserContent + " " + (turn.AssistantContent ?? ""));
+            if (priceLowKeywords.Any(prevNorm.Contains) || prevNorm.Contains("re nhat") || prevNorm.Contains("thap nhat") || prevNorm.Contains("gia re") || prevNorm.Contains("gia thap") || prevNorm.Contains("it tien"))
+            {
+                prevHadPriceLow = true;
+                break;
+            }
+            if (priceHighKeywords.Any(prevNorm.Contains) || prevNorm.Contains("cao nhat") || prevNorm.Contains("dat nhat") || prevNorm.Contains("mac nhat") || prevNorm.Contains("gia cao") || prevNorm.Contains("gia dat") || prevNorm.Contains("gia mac") || prevNorm.Contains("nhieu tien"))
+            {
+                prevHadPriceHigh = true;
+                break;
+            }
+        }
+
+        var isPriceRankingLow = hasPriceLow || (hasOrdinalTerm && prevHadPriceLow)
+            || ((query.Contains("khac") || query.Contains("nua") || query.Contains("con")) && prevHadPriceLow);
+        var isPriceRankingHigh = hasPriceHigh || (hasOrdinalTerm && prevHadPriceHigh)
+            || ((query.Contains("khac") || query.Contains("nua") || query.Contains("con")) && prevHadPriceHigh);
+
+        var cheapest = isPriceRankingLow || query.Contains("thap nhat") || query.Contains("re nhat");
+        var expensive = (!cheapest) && (isPriceRankingHigh || query.Contains("cao nhat") || query.Contains("dat nhat") || query.Contains("mac nhat"));
+        if (!expensive && (hasOrdinalTerm || isPriceComparison) && !cheapest)
+        {
+            cheapest = true;
+        }
+
+        var isRankingOrComparison = cheapest || expensive || isPriceComparison || hasOrdinalTerm;
         var similar = query.Contains("tuong tu") || query.Contains("thay the");
 
         bool Has(params string[] phrases) => phrases.Any(p => Regex.IsMatch(query, @"(?<![a-z0-9])" + Regex.Escape(p) + @"(?![a-z0-9])"));
@@ -109,24 +195,23 @@ public static class AiStoreContext
             "tu van", "mau sac", "kich thuoc", "thiet bi", "phu kien", "anh", "hinh", "hinh anh", "top", "danh sach",
             "xem them", "chi tiet", "thong so", "sale", "giam gia", "re nhat", "thap nhat", "cao nhat", "dat nhat",
             "con khong", "cai nay", "mon nay", "em nay", "san pham nay", "san pham do", "cai do", "mon do", "em do",
-            "bao nhieu tien", "gia bao nhieu", "bao hanh"
-        ) || selectedCategory is not null || mentioned.Length > 0 || onSale || cheapest || expensive || similar;
+            "bao nhieu tien", "gia bao nhieu", "bao hanh", "so sanh", "bang gia", "xep hang", "thu tu"
+        ) || selectedCategory is not null || mentioned.Length > 0 || onSale || cheapest || expensive || similar
+          || isRankingOrComparison || hasOrdinalTerm;
+
+        var isMathQuery = query.Contains("1 + 1") || query.Contains("1+1")
+            || Regex.IsMatch(query, @"\b\d+\s*[\+\-\*\/\:xX×÷]\s*\d+\b")
+            || (query.Contains("=") && Regex.IsMatch(query, @"\d+"));
 
         // Câu hỏi hoàn toàn ngoài lề (thời tiết, toán học, hỏi giờ/thứ đơn thuần không dính sản phẩm)
         // hoặc câu hỏi thuần chính sách/liên hệ mà không kèm tên/ngữ cảnh sản phẩm
         var isOffTopicOrStorePolicyOnly = query.Contains("thoi tiet")
-            || query.Contains("1 + 1") || query.Contains("1+1")
-            || Regex.IsMatch(query, @"\b\d+\s*[\+\-\*\/]\s*\d+\b")
+            || (isMathQuery && !hasExplicitProductIntent)
             || ((query.Contains("ngay may") || query.Contains("thu may") || query.Contains("may gio")) && !hasExplicitProductIntent)
             || ((query.Contains("dia chi") || query.Contains("gio mo cua") || query.Contains("so dien thoai") || query.Contains("hotline")
                 || query.Contains("doi tra") || query.Contains("tra hang") || query.Contains("hoan tien") || query.Contains("huy don")
                 || query.Contains("chuyen khoan") || query.Contains("stk") || query.Contains("thanh toan") || query.Contains("ngan hang"))
                 && !hasExplicitProductIntent);
-
-        // Đa lượt hội thoại (Multi-turn Context): Duyệt lại 1-2 lượt chat gần nhất để kế thừa ngữ cảnh
-        var completedTurns = history.Where(t => t.Status == "completed").ToList();
-        var recentTurns = (completedTurns.Count > 0 ? completedTurns : history.Where(t => !string.IsNullOrWhiteSpace(t.UserContent)).ToList())
-            .TakeLast(2).Reverse().ToList();
 
         var isBroadQuery = query.Contains("tat ca") || query.Contains("toan bo") || query.Contains("nhung mat hang gi")
             || query.Contains("co nhung gi") || query.Contains("danh muc") || query.Contains("cac loai hang");
@@ -175,17 +260,18 @@ public static class AiStoreContext
                 }
             }
 
-            // 3. Kế thừa sản phẩm cụ thể (namedProduct)
-            if (namedProduct is null && !cheapest && !expensive && !isBroadQuery)
+            // 3. Kế thừa sản phẩm cụ thể (namedProduct) - Tuyệt đối không kế thừa khi hỏi thứ bậc, giá hoặc so sánh
+            if (namedProduct is null && !cheapest && !expensive && !isBroadQuery && !isRankingOrComparison && !hasOrdinalTerm)
             {
-                var isDetailInquiry = stockQuestion || query.Contains("con hang") || query.Contains("con khong")
+                var isDetailInquiry = (stockQuestion || query.Contains("con hang") || query.Contains("con khong")
                     || query.Contains("mau gi") || query.Contains("mau sac") || query.Contains("size") || query.Contains("kich thuoc")
                     || query.Contains("gia bao nhieu") || query.Contains("bao nhieu tien") || query.Contains("gia ca")
                     || query.Contains("anh") || query.Contains("hinh") || query.Contains("thong so") || query.Contains("cau hinh")
                     || query.Contains("chi tiet") || query.Contains("mo ta") || query.Contains("xuat xu") || query.Contains("bao hanh")
                     || query.Contains("san pham nay") || query.Contains("san pham do") || query.Contains("cai nay") || query.Contains("cai do")
                     || query.Contains("mon nay") || query.Contains("mon do") || query.Contains("em nay") || query.Contains("em do")
-                    || (query.Length <= 30 && (query.Contains("gia") || query.Contains("mau") || query.Contains("con")));
+                    || (query.Length <= 30 && (query.Contains("gia") || query.Contains("mau") || query.Contains("con"))))
+                    && !hasOrdinalTerm && !isRankingOrComparison;
 
                 if (isDetailInquiry)
                 {
@@ -231,10 +317,12 @@ public static class AiStoreContext
         var count = countMatch.Success
             ? Math.Clamp(int.Parse(countMatch.Groups[1].Value), 1, 50)
             : wantsAll || (onSale && query.Contains("toan bo")) || (selectedCategory is not null && wantsAll) ? 30
-            : (cheapest || expensive || onSale || selectedCategory is not null) ? 10 : 8;
+            : isRankingOrComparison
+                ? Math.Clamp(Math.Max(10, rankNumber + 4), 10, 20)
+                : (cheapest || expensive || onSale || selectedCategory is not null) ? 10 : 8;
 
-        IEnumerable<CatalogProduct> matches = (namedProduct is not null && !cheapest && !expensive) ? [namedProduct] : mentioned.Length > 1 ? mentioned : catalog;
-        if (namedProduct is null)
+        IEnumerable<CatalogProduct> matches = (namedProduct is not null && !cheapest && !expensive && !isRankingOrComparison) ? [namedProduct] : mentioned.Length > 1 ? mentioned : catalog;
+        if (namedProduct is null || isRankingOrComparison)
         {
             if (selectedCategory is not null) matches = matches.Where(p => p.Category.Equals(selectedCategory, StringComparison.OrdinalIgnoreCase));
             if (onSale) matches = matches.Where(p => p.DiscountPercent > 0 && p.StockCount > 0);
@@ -271,7 +359,7 @@ public static class AiStoreContext
         }
         else if (cheapest || expensive)
             matches = cheapest ? matches.OrderBy(SalePrice).ThenBy(p => p.Id) : matches.OrderByDescending(SalePrice).ThenBy(p => p.Id);
-        else if (namedProduct is not null) matches = [namedProduct];
+        else if (namedProduct is not null && !isRankingOrComparison) matches = [namedProduct];
         else
         {
             var scored = matches.Select(p => new { Item = p, Score = terms.Count(t => Regex.IsMatch(Normalize(p.Name + " " + p.Category + " " + p.Description), @"\b" + Regex.Escape(t) + @"\b")) }).ToArray();
@@ -315,11 +403,22 @@ public static class AiStoreContext
                 total = catalog.Count, available = catalog.Count(p => p.StockCount > 0), outOfStock = catalog.Count(p => p.StockCount == 0),
                 categories = catalog.GroupBy(p => p.Category).Select(g => new { name = VietnameseLabels.Category(g.Key), count = g.Count(), available = g.Count(p => p.StockCount > 0) }),
                 saleCount = catalog.Count(p => p.DiscountPercent > 0 && p.StockCount > 0),
-                minimum = catalog.OrderBy(SalePrice).Take(1).Select(Product), maximum = catalog.OrderByDescending(SalePrice).Take(1).Select(Product),
-                query = new { selectedCategory, onSale, cheapest, expensive, similar, requestedCount = count, ambiguousProductName = mentioned.Length > 1,
+                minimum = catalog.OrderBy(SalePrice).Take(1).Select(p => Product(p, 1)), maximum = catalog.OrderByDescending(SalePrice).Take(1).Select(p => Product(p, 1)),
+                query = new { selectedCategory, onSale, cheapest, expensive, similar, isRankingOrComparison, requestedCount = count, ambiguousProductName = mentioned.Length > 1,
                     matchingCount = matching.Length, needsProductName = similar && anchor is null },
-                referenceProduct = anchor is null ? null : Product(anchor),
-                products = stockQuestion && namedProduct is null ? [] : selected.Select(Product),
+                priceRanking = isRankingOrComparison ? new
+                {
+                    sorted = true,
+                    order = cheapest ? "ascending (thấp đến cao)" : "descending (cao đến thấp)",
+                    description = cheapest
+                        ? "Danh sách products đã được sắp xếp từ giá thấp nhất đến cao hơn. Sản phẩm có rank=1 là giá thấp nhất (hạng 1), rank=2 là giá thấp thứ 2 (hạng 2), rank=3 là giá thấp thứ 3 (hạng 3), rank=4 là giá thấp thứ 4..."
+                        : "Danh sách products đã được sắp xếp từ giá cao nhất đến thấp hơn. Sản phẩm có rank=1 là giá cao nhất (hạng 1), rank=2 là giá cao thứ 2 (hạng 2), rank=3 là giá cao thứ 3 (hạng 3)..."
+                } : null,
+                referenceProduct = anchor is null ? null : Product(anchor, null),
+                products = isRankingOrComparison
+                    ? selected.Select((p, idx) => Product(p, idx + 1))
+                    : (stockQuestion && namedProduct is null && !onSale && selectedCategory is null && !cheapest && !expensive) ? []
+                    : selected.Select(p => Product(p, null)),
                 restockSchedule = (string?)null,
                 stockPolicy = new { checkoutRequiresAvailableStock = true, reserveOutOfStockSupported = false,
                     similarProductSearchAvailable = true, restockInquiryPage = "/contact", restockDateGuaranteed = false }
