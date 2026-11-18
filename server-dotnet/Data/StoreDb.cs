@@ -2239,12 +2239,14 @@ public sealed partial class StoreDb
         var list = new List<object>();
         while (reader.Read())
         {
+            var reviewerName = reader.IsDBNull(3) ? "Khách hàng" : reader.GetString(3);
             list.Add(new
             {
                 id = Convert.ToInt64(reader.GetValue(0)),
                 productId = reader.GetString(1),
                 customerId = Convert.ToInt64(reader.GetValue(2)),
-                customerName = reader.IsDBNull(3) ? "Khách hàng" : reader.GetString(3),
+                customerName = reviewerName,
+                username = reviewerName,
                 rating = Convert.ToInt32(reader.GetValue(4)),
                 comment = reader.GetString(5),
                 adminReply = reader.IsDBNull(6) ? "" : reader.GetString(6),

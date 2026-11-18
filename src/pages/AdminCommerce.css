@@ -74,7 +74,9 @@ html[data-admin-theme="dark"] .admin-clickable-row:hover {
   background: #193828;
 }
 html[data-admin-theme="dark"] .admin-link-button {
-  color: #86efac;
+  background: transparent !important;
+  border-color: transparent !important;
+  color: #86efac !important;
 }
 html[data-admin-theme="dark"] .admin-detail-panel {
   background: linear-gradient(160deg, #13271d 0%, #0f2118 100%);

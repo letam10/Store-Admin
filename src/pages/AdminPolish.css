@@ -1068,11 +1068,25 @@
   box-shadow: 0 6px 18px rgba(24, 54, 42, 0.06) !important;
 }
 .admin-link-button {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  font: inherit !important;
+  text-align: left !important;
+  cursor: pointer !important;
   color: #256b47 !important;
   font-weight: 700 !important;
   transition: color 0.15s ease !important;
 }
 .admin-link-button:hover {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
   color: #16402b !important;
   text-decoration: underline !important;
 }
@@ -1625,7 +1639,18 @@ html[data-admin-theme="dark"] details summary {
   color: #86efac !important;
 }
 html[data-admin-theme="dark"] .admin-link-button {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
   color: #86efac !important;
+}
+html[data-admin-theme="dark"] .admin-link-button:hover {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: #bbf7d0 !important;
+  text-decoration: underline !important;
 }
 html[data-admin-theme="dark"] .admin-preview-badge {
   background: #1c3a2a !important;
@@ -1764,3 +1789,41 @@ html {
     min-height: 120px !important;
   }
 }
+
+/* Đảm bảo nút dạng text-link (admin-link-button) như tên khách hàng không bao giờ bị dính nền màu hay viền */
+.admin-link-button,
+.admin-module-card button.admin-link-button,
+.admin-table-wrap button.admin-link-button,
+button.admin-link-button {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+}
+
+html[data-admin-theme="dark"] .admin-link-button,
+html[data-admin-theme="dark"] .admin-module-card button.admin-link-button,
+html[data-admin-theme="dark"] .admin-table-wrap button.admin-link-button,
+html[data-admin-theme="dark"] button.admin-link-button {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: #86efac !important;
+}
+
+html[data-admin-theme="dark"] .admin-link-button:hover,
+html[data-admin-theme="dark"] .admin-module-card button.admin-link-button:hover,
+html[data-admin-theme="dark"] .admin-table-wrap button.admin-link-button:hover,
+html[data-admin-theme="dark"] button.admin-link-button:hover {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: #bbf7d0 !important;
+  text-decoration: underline !important;
+}
+
