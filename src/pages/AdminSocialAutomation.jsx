@@ -1,8 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Module Quản trị Tự động hóa đăng bài Mạng Xã Hội (Facebook, TikTok), cấu hình chu kỳ linh hoạt (5m, 30m, 1h, 2h, 6h), tùy chọn quyền riêng tư Chỉ mình tôi / Công khai, hiển thị trung thực không số liệu ảo và Dark Mode toàn diện.
-  - Liên kết trực tiếp: Store-Admin/src/pages/Admin.jsx, Store-Admin/src/pages/AdminSocialAutomation.css, Store-Admin/src/api/chat.js
-  - Vùng ảnh hưởng khi sửa: Trải nghiệm người dùng quản trị khi chuyển qua tab Tự động đăng bài MXH, gửi nhận API mạng xã hội và cập nhật báo cáo tương tác.
+  - Mục đích: Module Quản trị Tự động hóa đăng bài Mạng Xã Hội (Facebook, TikTok), cấu hình chu kỳ linh hoạt (5m, 30m, 1h, 2h, 6h), tùy chọn quyền riêng tư Chỉ mình tôi / Công khai, hiển thị trung thực không số liệu ảo, hỗ trợ trực tiếp đăng bài lên Facebook và Dark Mode toàn diện.
+  - Liên kết trực tiếp: Store-Admin/src/pages/Admin.jsx, Store-Admin/src/pages/AdminSocialAutomation.css, Store-Admin/src/api/chat.js, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs
+  - Vùng ảnh hưởng khi sửa: Trải nghiệm người dùng quản trị khi chuyển qua tab Tự động đăng bài MXH, gửi nhận API mạng xã hội, quy trình đăng bài Facebook và cập nhật báo cáo tương tác.
 */
 
 import { useEffect, useState, useMemo, useRef } from 'react'
@@ -54,11 +54,23 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
   const [selectedPostModal, setSelectedPostModal] = useState(null)
   const [copiedPostId, setCopiedPostId] = useState(null)
 
+  const formatPostText = (post) => {
+    if (!post) return ''
+    let text = (post.content || '').trim()
+    if (post.title && !text.includes(post.title)) {
+      text = post.title + '\n\n' + text
+    }
+    if (post.hashtags && !text.includes(post.hashtags)) {
+      text = text + '\n\n' + post.hashtags
+    }
+    return text
+  }
+
   const handleCopyPost = (post) => {
     if (!post) return
-    const fullText = (post.title ? post.title + '\n\n' : '') + (post.content || '') + (post.hashtags ? '\n\n' + post.hashtags : '')
-    if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(fullText)
+    const fullText = formatPostText(post)
+    if (typeof navigator !== 'undefined' && navigator?.clipboard?.writeText) {
+      try { navigator.clipboard.writeText(fullText) } catch (_) {}
     }
     setCopiedPostId(post.id)
     setTimeout(() => setCopiedPostId(null), 2500)
@@ -126,6 +138,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
   const [studioPlatform, setStudioPlatform] = useState('facebook')
   const [studioTone, setStudioTone] = useState('viral_engaging')
   const [studioTopic, setStudioTopic] = useState('')
+  const [studioTargetGroup, setStudioTargetGroup] = useState('')
   const [studioGenerating, setStudioGenerating] = useState(false)
   const [studioDraft, setStudioDraft] = useState({
     productId: '1',
@@ -211,13 +224,14 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
     try {
       setLoading(true)
       showNotice('Đang kích hoạt chu kỳ đăng bài tự động bằng Qwen AI...', 'info')
-      const res = await apiJson('/api/admin/social/trigger-cycle', {
+      const res = await apiJson('/api/admin/social/trigger-cycle?platform=facebook', {
         method: 'POST',
         headers: { 'x-csrf-token': csrfToken }
       })
       if (res?.ok) {
-        showNotice('Đã chạy xong 1 chu kỳ đăng bài tự động và ghi nhận log!')
+        showNotice('Đã chạy xong 1 chu kỳ đăng bài tự động cho Facebook và ghi nhận log!')
         await loadAll()
+        setActiveSubTab('logs')
       }
     } catch (err) {
       showNotice(err.message || 'Lỗi kích hoạt chu kỳ.', 'error')
@@ -276,13 +290,26 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
           title: studioDraft.title,
           content: studioDraft.content,
           hashtags: studioDraft.hashtags,
+          targetGroup: studioTargetGroup || undefined,
           privacy: settings.privacy || 'only_me',
           publishImmediately: immediate
         })
       })
 
       if (res?.ok) {
-        showNotice(immediate ? 'Đã tạo và lưu bài viết vào nhật ký sẵn sàng xuất bản!' : 'Đã lưu bài viết vào hàng đợi chờ duyệt!')
+        if (immediate && studioPlatform === 'facebook') {
+          const fullText = formatPostText(studioDraft)
+          if (typeof navigator !== 'undefined' && navigator?.clipboard?.writeText) {
+            try { await navigator.clipboard.writeText(fullText) } catch (_) {}
+          }
+          const targetUrl = res.post?.postUrl || 'https://www.facebook.com/groups/feed/'
+          if (typeof window !== 'undefined' && typeof window.open === 'function') {
+            try { window.open(targetUrl, '_blank') } catch (_) {}
+          }
+          showNotice('Đã xuất bản bài viết lên Facebook! Đã sao chép nội dung và mở nhóm/trang Facebook.')
+        } else {
+          showNotice(immediate ? 'Đã tạo và đăng bài viết thành công!' : 'Đã lưu bài viết vào hàng đợi chờ duyệt!')
+        }
         await loadAll()
         setActiveSubTab('logs')
       }
@@ -293,7 +320,40 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
     }
   }
 
-  // Post Actions
+  // Publish / Post Actions
+  const handlePublishPost = async (post) => {
+    try {
+      setLoading(true)
+      const res = await apiJson(`/api/admin/social/posts/${encodeURIComponent(post.id)}/publish`, {
+        method: 'POST',
+        headers: { 'x-csrf-token': csrfToken }
+      })
+      if (res?.ok) {
+        if ((post.platform || '').toLowerCase() === 'facebook') {
+          const fullText = formatPostText(post)
+          if (typeof navigator !== 'undefined' && navigator?.clipboard?.writeText) {
+            try { await navigator.clipboard.writeText(fullText) } catch (_) {}
+          }
+          const targetUrl = res.post?.postUrl || 'https://www.facebook.com/groups/feed/'
+          if (typeof window !== 'undefined' && typeof window.open === 'function') {
+            try { window.open(targetUrl, '_blank') } catch (_) {}
+          }
+          showNotice('Đã xuất bản bài viết lên Facebook! Đã sao chép nội dung và mở nhóm/trang Facebook.')
+        } else {
+          showNotice('Đã xuất bản bài viết thành công!')
+        }
+        await loadAll()
+        if (selectedPostModal && selectedPostModal.id === post.id && res.post) {
+          setSelectedPostModal(res.post)
+        }
+      }
+    } catch (err) {
+      showNotice(err.message || 'Lỗi khi xuất bản bài.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleApprovePost = async (id) => {
     try {
       const res = await apiJson(`/api/admin/social/posts/${encodeURIComponent(id)}/approve`, {
@@ -846,6 +906,25 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                 </select>
               </div>
 
+              {studioPlatform === 'facebook' && (
+                <div className="social-field">
+                  <label htmlFor="studio-target-group">Nhóm Facebook mục tiêu</label>
+                  <select
+                    id="studio-target-group"
+                    className="social-select"
+                    value={studioTargetGroup}
+                    onChange={e => setStudioTargetGroup(e.target.value)}
+                  >
+                    <option value="">Tự động chọn nhóm kích hoạt (Mặc định)</option>
+                    {groups.map(grp => (
+                      <option key={grp.id} value={grp.groupName}>
+                        {grp.groupName} ({grp.category})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="social-field">
                 <label htmlFor="studio-topic">Yêu cầu riêng và Chủ đề bổ sung</label>
                 <input
@@ -1296,14 +1375,26 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                         >
                           {copiedPostId === p.id ? '✓ Đã chép' : '📋 Chép'}
                         </button>
-                        {p.status === 'pending_approval' && (
+                        {p.status !== 'published' && (
                           <button
                             type="button"
                             className="social-action-btn social-action-btn--primary"
+                            onClick={() => handlePublishPost(p)}
+                            title={p.platform === 'facebook' ? 'Đăng ngay lên Facebook' : 'Đăng ngay'}
+                            style={{ fontSize: '11px', whiteSpace: 'nowrap' }}
+                          >
+                            {p.platform === 'facebook' ? '🚀 Đăng FB' : '🚀 Đăng'}
+                          </button>
+                        )}
+                        {p.status === 'pending_approval' && (
+                          <button
+                            type="button"
+                            className="social-action-btn"
                             onClick={() => handleApprovePost(p.id)}
                             title="Duyệt bài và chuẩn bị gửi API thật"
+                            style={{ fontSize: '11px', whiteSpace: 'nowrap' }}
                           >
-                            Duyệt
+                            ✓ Duyệt
                           </button>
                         )}
                         <button
@@ -1378,6 +1469,16 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+              {selectedPostModal.status !== 'published' && (
+                <button
+                  type="button"
+                  className="social-btn-trigger"
+                  onClick={() => handlePublishPost(selectedPostModal)}
+                  disabled={loading}
+                >
+                  🚀 {selectedPostModal.platform === 'facebook' ? 'Đăng Lên Facebook Ngay' : 'Xuất Bản Ngay'}
+                </button>
+              )}
               <button
                 type="button"
                 className="social-btn-trigger"

@@ -37,6 +37,13 @@ const adminSession = { authenticated: true, role: 'admin', username: 'admin', cs
 
 async function renderAdmin(mockFetch, run) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost/admin' })
+  dom.window.open = () => {}
+  if (!dom.window.navigator.clipboard) {
+    Object.defineProperty(dom.window.navigator, 'clipboard', {
+      value: { writeText: async () => {} },
+      configurable: true
+    })
+  }
   const changes = {
     window: dom.window,
     document: dom.window.document,

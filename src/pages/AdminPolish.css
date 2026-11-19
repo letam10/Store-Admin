@@ -1,8 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Bộ quy tắc giao diện cao cấp (Ultra-Polish) cho hệ thống Store Admin (bảng biểu, cuộn nội bộ max-height, sticky th, form, dark mode).
+  - Mục đích: Bộ quy tắc giao diện cao cấp (Ultra-Polish) cho hệ thống Store Admin (bảng biểu, cuộn nội bộ max-height, sticky th, form, dark mode, z-index ô tìm kiếm toàn cục và vị trí hiển thị header).
   - Liên kết trực tiếp: Store-Admin/src/pages/Admin.jsx, Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/src/pages/AdminModules.jsx
-  - Vùng ảnh hưởng khi sửa: Toàn bộ bảng dữ liệu, cuộn nội bộ bảng, sticky header và giao diện quản trị.
+  - Vùng ảnh hưởng khi sửa: Toàn bộ bảng dữ liệu, cuộn nội bộ bảng, vị trí hiển thị header, ô tìm kiếm admin và z-index dropdown tìm kiếm.
 */
 
 :root {
@@ -320,6 +320,7 @@
    ========================================================================== */
 .admin-workspace-card .admin-header {
   position: relative !important;
+  z-index: 100 !important;
   display: flex !important;
   align-items: center !important;
   justify-content: flex-end !important;
@@ -389,6 +390,7 @@
   max-width: 340px !important;
   min-width: 180px !important;
   position: relative !important;
+  z-index: 50 !important;
   margin: 0 !important;
   box-sizing: border-box !important;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
@@ -398,6 +400,7 @@
   box-shadow: 0 3px 12px rgba(18, 50, 35, 0.06) !important;
 }
 .admin-global-search:focus-within {
+  z-index: 100 !important;
   border-color: #256b47 !important;
   background: #ffffff !important;
   box-shadow: 0 0 0 3px rgba(37, 107, 71, 0.16), 0 6px 18px rgba(18, 50, 35, 0.08) !important;
@@ -443,7 +446,7 @@
   top: calc(100% + 6px) !important;
   left: 0 !important;
   right: 0 !important;
-  z-index: 45 !important;
+  z-index: 1000 !important;
   display: grid !important;
   padding: 6px !important;
   border: 1px solid #c2e2cc !important;
@@ -477,6 +480,8 @@
   display: flex !important;
   align-items: center !important;
   gap: 8px !important;
+  position: relative !important;
+  z-index: 20 !important;
 }
 
 .admin-header__actions .admin-live-dot {
@@ -561,6 +566,7 @@
   border: 1px solid #286343 !important;
   background: #184431 !important;
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4) !important;
+  z-index: 1000 !important;
 }
 .admin-header__actions .admin-dropdown-menu__option {
   min-height: 34px !important;
@@ -1725,7 +1731,19 @@ html {
 /* ==========================================================================
    9. RESPONSIVE BREAKPOINTS (TABLET & MOBILE)
    ========================================================================== */
-@media (max-width: 1150px) {
+@media (max-width: 1300px) {
+  .admin-header__actions {
+    order: 2 !important;
+  }
+  .admin-global-search {
+    order: 3 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 1 1 100% !important;
+  }
+}
+
+@media (max-width: 1080px) {
   .admin-workspace-card {
     grid-template-columns: 84px minmax(0, 1fr) !important;
   }

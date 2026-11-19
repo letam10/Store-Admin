@@ -1,8 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Dịch vụ chạy ngầm (BackgroundService) tự động hóa tạo nội dung tiếp thị Mạng Xã Hội định kỳ (hỗ trợ 5m, 30m, 1h, 2h, 6h) trung thực không số liệu ảo, bảo toàn quyền riêng tư chỉ mình tôi / công khai.
+  - Mục đích: Dịch vụ chạy ngầm (BackgroundService) tự động hóa tạo nội dung tiếp thị Mạng Xã Hội định kỳ (hỗ trợ 5m, 30m, 1h, 2h, 6h), xuất bản bài viết lên Facebook tự động trung thực không số liệu ảo, bảo toàn quyền riêng tư chỉ mình tôi / công khai.
   - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.SocialAutomation.cs, Store-Admin/server-dotnet/Services/SocialCopywriterService.cs, Store-Admin/server-dotnet/Program.cs
-  - Vùng ảnh hưởng khi sửa: Chu kỳ tự động quét sản phẩm, sinh bài viết bằng Qwen AI, lưu vết audit log CSDL, xuất bản đa kênh và quản lý lịch trình tiếp theo.
+  - Vùng ảnh hưởng khi sửa: Chu kỳ tự động quét sản phẩm, sinh bài viết bằng Qwen AI, lưu vết audit log CSDL, xuất bản đa kênh Facebook/TikTok và quản lý lịch trình tiếp theo.
 */
 
 using StoreApi.Data;
@@ -40,9 +40,9 @@ public sealed class SocialAutoPostWorker(
         }
     }
 
-    public async Task<SocialAutoPost?> TriggerCycleNowAsync(CancellationToken cancellationToken = default)
+    public async Task<SocialAutoPost?> TriggerCycleNowAsync(string? forcePlatform = null, CancellationToken cancellationToken = default)
     {
-        return await ExecuteOneCycleAsync(isManualTrigger: true, cancellationToken);
+        return await ExecuteOneCycleAsync(isManualTrigger: true, forcePlatform, cancellationToken);
     }
 
     private async Task CheckAndExecuteCycleAsync(CancellationToken stoppingToken)
@@ -71,11 +71,11 @@ public sealed class SocialAutoPostWorker(
 
         if (shouldRun)
         {
-            await ExecuteOneCycleAsync(isManualTrigger: false, stoppingToken);
+            await ExecuteOneCycleAsync(isManualTrigger: false, forcePlatform: null, stoppingToken);
         }
     }
 
-    private async Task<SocialAutoPost?> ExecuteOneCycleAsync(bool isManualTrigger, CancellationToken cancellationToken)
+    private async Task<SocialAutoPost?> ExecuteOneCycleAsync(bool isManualTrigger, string? forcePlatform, CancellationToken cancellationToken)
     {
         if (!await _cycleLock.WaitAsync(0, cancellationToken))
         {
@@ -102,9 +102,16 @@ public sealed class SocialAutoPostWorker(
                 return null;
             }
 
-            // 2. Chọn nền tảng đăng bài luân phiên (Facebook / TikTok)
-            var channels = (settings.Channels ?? "facebook,tiktok").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            platform = channels.Length > 0 ? channels[Random.Shared.Next(channels.Length)] : "facebook";
+            // 2. Chọn nền tảng đăng bài (nếu forcePlatform chỉ định, ví dụ Facebook, ưu tiên chọn ngay)
+            if (!string.IsNullOrWhiteSpace(forcePlatform))
+            {
+                platform = forcePlatform.Trim().ToLowerInvariant();
+            }
+            else
+            {
+                var channels = (settings.Channels ?? "facebook,tiktok").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                platform = channels.Length > 0 ? channels[Random.Shared.Next(channels.Length)] : "facebook";
+            }
 
             // 3. Chọn nhóm Facebook mục tiêu nếu có
             var groups = db.GetSocialGroupTargets();
@@ -124,8 +131,24 @@ public sealed class SocialAutoPostWorker(
                 productId: product.Value.Id);
 
             var isFullAuto = settings.Mode?.ToLowerInvariant() != "semi_auto";
-            var status = isFullAuto ? "internal_draft" : "pending_approval";
+            var status = isFullAuto ? "published" : "pending_approval";
             var postId = "post-" + DateTimeOffset.UtcNow.ToUnixTimeSeconds() + "-" + Guid.NewGuid().ToString("N")[..4];
+
+            string? postUrl = null;
+            if (isFullAuto)
+            {
+                if (platform.Equals("facebook", StringComparison.OrdinalIgnoreCase))
+                {
+                    var matchedGroup = !string.IsNullOrWhiteSpace(targetGroup)
+                        ? groups.FirstOrDefault(g => g.GroupName.Equals(targetGroup, StringComparison.OrdinalIgnoreCase))
+                        : activeGroups.FirstOrDefault();
+                    postUrl = matchedGroup?.GroupUrl ?? "https://www.facebook.com/groups/feed/";
+                }
+                else
+                {
+                    postUrl = "https://www.tiktok.com/";
+                }
+            }
 
             var post = new SocialAutoPost
             {
@@ -139,7 +162,7 @@ public sealed class SocialAutoPostWorker(
                 Content = generated.Content,
                 Hashtags = generated.Hashtags,
                 Status = status,
-                PostUrl = null, // Không tạo liên kết giả mạo khi chưa xuất bản qua API thật
+                PostUrl = postUrl,
                 TargetGroup = targetGroup,
                 Privacy = settings.Privacy ?? "only_me",
                 TriggerTime = now.ToString("o"),

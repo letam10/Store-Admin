@@ -133,7 +133,6 @@ html[data-admin-theme="dark"] .admin-order-detail textarea:focus,
 html[data-admin-theme="dark"] .admin-payment-settings input:focus,
 html[data-admin-theme="dark"] .admin-payment-settings select:focus {
   border-color: #4ade80;
-  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.22);
   outline: none;
 }
 html[data-admin-theme="dark"] .admin-clickable-row:hover {

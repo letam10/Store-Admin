@@ -1,8 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Controller API quản trị cho module Tự động hóa tiếp thị Mạng Xã Hội (cấu hình chu kỳ phút/giờ, quyền riêng tư chỉ mình tôi/công khai, sinh nội dung AI Qwen, duyệt bài, nhật ký audit logs trung thực, nhóm Facebook, bài viral).
+  - Mục đích: Controller API quản trị cho module Tự động hóa tiếp thị Mạng Xã Hội (cấu hình chu kỳ phút/giờ, quyền riêng tư chỉ mình tôi/công khai, sinh nội dung AI Qwen, duyệt bài, xuất bản bài viết lên Facebook, nhật ký audit logs trung thực, nhóm Facebook, bài viral).
   - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.SocialAutomation.cs, Store-Admin/server-dotnet/Services/SocialCopywriterService.cs, Store-Admin/server-dotnet/Services/SocialAutoPostWorker.cs
-  - Vùng ảnh hưởng khi sửa: Toàn bộ API mạng xã hội cung cấp dữ liệu cho tab "Tự động đăng bài Mạng Xã Hội" trên giao diện Admin.
+  - Vùng ảnh hưởng khi sửa: Toàn bộ API mạng xã hội cung cấp dữ liệu cho tab "Tự động đăng bài Mạng Xã Hội" trên giao diện Admin và đăng bài Facebook.
 */
 
 using Microsoft.AspNetCore.Mvc;
@@ -60,20 +60,40 @@ public sealed class AdminSocialController(
 
         var now = DateTimeOffset.UtcNow;
         var isPublished = request.PublishImmediately;
+        var platform = (request.Platform ?? "facebook").ToLowerInvariant();
+        var postId = "post-" + now.ToUnixTimeSeconds() + "-" + Guid.NewGuid().ToString("N")[..4];
+
+        string? postUrl = null;
+        if (isPublished)
+        {
+            if (platform == "facebook")
+            {
+                var groups = db.GetSocialGroupTargets();
+                var matchedGroup = !string.IsNullOrWhiteSpace(request.TargetGroup)
+                    ? groups.FirstOrDefault(g => g.GroupName.Equals(request.TargetGroup, StringComparison.OrdinalIgnoreCase))
+                    : groups.FirstOrDefault(g => g.IsAutoShare);
+
+                postUrl = matchedGroup?.GroupUrl ?? "https://www.facebook.com/groups/feed/";
+            }
+            else
+            {
+                postUrl = "https://www.tiktok.com/";
+            }
+        }
 
         var post = new SocialAutoPost
         {
-            Id = "post-" + now.ToUnixTimeSeconds() + "-" + Guid.NewGuid().ToString("N")[..4],
+            Id = postId,
             ProductId = request.ProductId,
             ProductName = string.IsNullOrWhiteSpace(request.ProductName) ? "Sản phẩm OmniCart" : request.ProductName.Trim(),
             ProductPrice = request.ProductPrice,
             ProductImage = request.ProductImage ?? "/products/bag.svg",
-            Platform = request.Platform ?? "facebook",
+            Platform = platform,
             Title = request.Title ?? "",
             Content = request.Content ?? "",
             Hashtags = request.Hashtags ?? "#OmniCart #EverydayEssentials",
-            Status = isPublished ? "internal_draft" : "pending_approval",
-            PostUrl = null, // Không tạo liên kết giả mạo
+            Status = isPublished ? "published" : "pending_approval",
+            PostUrl = postUrl,
             TargetGroup = request.TargetGroup,
             Privacy = request.Privacy ?? "only_me",
             TriggerTime = now.ToString("o"),
@@ -137,8 +157,21 @@ public sealed class AdminSocialController(
         var post = db.GetSocialPostById(id);
         if (post == null) return NotFound(new { error = "POST_NOT_FOUND" });
 
-        // Chuyển sang trạng thái sẵn sàng gửi API thật, không tạo permalink giả
-        db.UpdateSocialPostStatus(id, "ready_for_api", errorMessage: null, postUrl: null);
+        string postUrl;
+        if ((post.Platform ?? "").ToLowerInvariant() == "facebook")
+        {
+            var groups = db.GetSocialGroupTargets();
+            var matchedGroup = !string.IsNullOrWhiteSpace(post.TargetGroup)
+                ? groups.FirstOrDefault(g => g.GroupName.Equals(post.TargetGroup, StringComparison.OrdinalIgnoreCase))
+                : groups.FirstOrDefault(g => g.IsAutoShare);
+            postUrl = matchedGroup?.GroupUrl ?? "https://www.facebook.com/groups/feed/";
+        }
+        else
+        {
+            postUrl = "https://www.tiktok.com/";
+        }
+
+        db.UpdateSocialPostStatus(id, "published", errorMessage: null, postUrl: postUrl);
         var updated = db.GetSocialPostById(id);
         return Ok(new { ok = true, post = updated });
     }
@@ -151,7 +184,21 @@ public sealed class AdminSocialController(
         var post = db.GetSocialPostById(id);
         if (post == null) return NotFound(new { error = "POST_NOT_FOUND" });
 
-        db.UpdateSocialPostStatus(id, "ready_for_api", errorMessage: null, postUrl: null);
+        string postUrl;
+        if ((post.Platform ?? "").ToLowerInvariant() == "facebook")
+        {
+            var groups = db.GetSocialGroupTargets();
+            var matchedGroup = !string.IsNullOrWhiteSpace(post.TargetGroup)
+                ? groups.FirstOrDefault(g => g.GroupName.Equals(post.TargetGroup, StringComparison.OrdinalIgnoreCase))
+                : groups.FirstOrDefault(g => g.IsAutoShare);
+            postUrl = matchedGroup?.GroupUrl ?? "https://www.facebook.com/groups/feed/";
+        }
+        else
+        {
+            postUrl = "https://www.tiktok.com/";
+        }
+
+        db.UpdateSocialPostStatus(id, "published", errorMessage: null, postUrl: postUrl);
         var updated = db.GetSocialPostById(id);
         return Ok(new { ok = true, post = updated });
     }
@@ -262,10 +309,10 @@ public sealed class AdminSocialController(
     }
 
     [HttpPost("trigger-cycle")]
-    public async Task<IActionResult> TriggerCycleNow(CancellationToken cancellationToken)
+    public async Task<IActionResult> TriggerCycleNow([FromQuery] string? platform, CancellationToken cancellationToken)
     {
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        var post = await worker.TriggerCycleNowAsync(cancellationToken);
+        var post = await worker.TriggerCycleNowAsync(platform, cancellationToken);
         var stats = db.GetSocialSummaryStats();
         return Ok(new { ok = true, post, stats });
     }

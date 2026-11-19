@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Quản lý layout khung làm việc Store Admin, phân chia header, sidebar và vùng nội dung workspace với z-index xếp lớp an toàn.
+  - Liên kết trực tiếp: Store-Admin/src/pages/Admin.jsx, Store-Admin/src/pages/AdminPolish.css
+  - Vùng ảnh hưởng khi sửa: Vị trí hiển thị header, z-index xếp lớp nội dung workspace và cuộn nội dung admin.
+*/
 /* Grid co được theo vùng nội dung, không để bảng hoặc nút đẩy lệch cột. */
 /* Chỉ nội dung cuộn; tiêu đề ở ngoài vùng cuộn để không lộ hàng phía trên. */
 .admin-workspace-card .admin-main {
@@ -14,6 +20,7 @@
 }
 .admin-workspace-card .admin-header {
   position: relative;
+  z-index: 100;
   flex: 0 0 auto;
   margin-bottom: 18px;
   padding: 0 0 6px;
