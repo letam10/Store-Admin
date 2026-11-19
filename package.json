@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "test": "node --test --test-concurrency=1 test/*.test.js",
     "preview": "vite preview",
+    "predev:api": "node -e \"try { if (process.platform === 'win32') require('child_process').execSync('taskkill /F /IM server-dotnet.exe 2>nul || exit 0'); else require('child_process').execSync('pkill -f server-dotnet || true'); } catch(e) {}\"",
     "dev:api": "dotnet watch --project server-dotnet run -- --no-menu --urls http://127.0.0.1:5000",
     "build:api": "dotnet build server-dotnet/server-dotnet.csproj"
   },
