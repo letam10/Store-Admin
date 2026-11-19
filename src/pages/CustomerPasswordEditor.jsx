@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Form đổi mật khẩu khách hàng dành cho quản trị viên trong tab Khách hàng.
+  - Liên kết trực tiếp: Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/server-dotnet/Controllers/AdminAccountsController.cs
+  - Vùng ảnh hưởng khi sửa: Chức năng đổi mật khẩu khách hàng trong panel chi tiết khách hàng.
+*/
 import { useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
 

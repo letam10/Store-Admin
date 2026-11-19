@@ -1,10 +1,76 @@
+/*
+  FILE NOTE
+  - Mục đích: Định kiểu giao diện quản lý đơn hàng, khách hàng, voucher và sau bán hàng (bảng cuộn nội bộ, sticky th, form).
+  - Liên kết trực tiếp: Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/src/pages/AdminOrderWorkflow.jsx, Store-Admin/src/pages/AdminAfterSales.jsx
+  - Vùng ảnh hưởng khi sửa: Bảng khách hàng, đơn hàng, đổi trả và các form thao tác quản trị.
+*/
+.admin-table-wrap,
+.admin-product-table-wrap,
+.admin-customer-table-wrap,
+.admin-table-scroll {
+  max-height: 70vh !important;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+  position: relative !important;
+}
+
+.admin-table-wrap table,
+.admin-product-table-wrap table,
+.admin-customer-table-wrap table,
+.admin-order-table {
+  width: 100% !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+}
+
+.admin-table-wrap thead,
+.admin-product-table-wrap thead,
+.admin-customer-table-wrap thead,
+.admin-order-table thead,
+.admin-table-scroll thead,
+.admin-table-wrap th,
+.admin-product-table-wrap th,
+.admin-customer-table-wrap th,
+.admin-order-table th,
+.admin-table-scroll th {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 20 !important;
+  background: #eaf3ed !important;
+  box-shadow: 0 2px 4px rgba(18, 50, 35, 0.08) !important;
+}
+
+html[data-admin-theme="dark"] .admin-table-wrap thead,
+html[data-admin-theme="dark"] .admin-product-table-wrap thead,
+html[data-admin-theme="dark"] .admin-customer-table-wrap thead,
+html[data-admin-theme="dark"] .admin-order-table thead,
+html[data-admin-theme="dark"] .admin-table-scroll thead,
+html[data-admin-theme="dark"] .admin-table-wrap th,
+html[data-admin-theme="dark"] .admin-product-table-wrap th,
+html[data-admin-theme="dark"] .admin-customer-table-wrap th,
+html[data-admin-theme="dark"] .admin-order-table th,
+html[data-admin-theme="dark"] .admin-table-scroll th {
+  background: #152d21 !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.45) !important;
+}
+
+select,
+select option,
+.admin-dropdown-menu,
+.admin-dropdown-menu__trigger,
+.admin-dropdown-menu__value,
+.admin-dropdown-menu__panel,
+.admin-dropdown-menu__option {
+  text-align: left !important;
+}
+
 .admin-commerce-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
 .admin-after-sales .admin-commerce-list article { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; align-items: center; }
 .admin-after-sales .admin-commerce-list small { display: block; margin-top: 6px; }
 .admin-after-sales .admin-commerce-list p { overflow-wrap: anywhere; margin-bottom: 0; }
 .admin-after-sales .admin-fee-list { grid-template-columns: 1fr; }
 .admin-after-sales .admin-fee-list dt { font-size: 13px; }
-.admin-after-sales .admin-fee-list dd { font-size: 14px; text-align: right; }
+.admin-after-sales .admin-fee-list dd { font-size: 14px; text-align: left; }
 .admin-after-actions fieldset { margin: 0; padding: 16px; min-width: 0; border: 1px solid #94b59d; border-radius: 10px; }
 .admin-after-actions legend { padding: 0 6px; font-weight: 700; }
 .admin-after-history { margin-top: 20px; }

@@ -1,10 +1,8 @@
 /*
-  FILE NOTE:
-  - Tệp: src/pages/AdminPolish.css
-  - Mục đích: Bộ quy tắc giao diện cao cấp (Ultra-Polish) cho hệ thống Store Admin:
-    thiên hướng xanh lá cây (Emerald & Forest Green), typography hiện đại (Plus Jakarta Sans),
-    card mềm mại bo góc 20-24px, đổ bóng đa tầng tinh tế, bảng biểu sắc nét, thanh điều hướng sang trọng.
-  - Phù hợp 100% với cả Light Mode & Dark Mode, bảo toàn toàn bộ chức năng và DOM contract.
+  FILE NOTE
+  - Mục đích: Bộ quy tắc giao diện cao cấp (Ultra-Polish) cho hệ thống Store Admin (bảng biểu, cuộn nội bộ max-height, sticky th, form, dark mode).
+  - Liên kết trực tiếp: Store-Admin/src/pages/Admin.jsx, Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/src/pages/AdminModules.jsx
+  - Vùng ảnh hưởng khi sửa: Toàn bộ bảng dữ liệu, cuộn nội bộ bảng, sticky header và giao diện quản trị.
 */
 
 :root {
@@ -778,6 +776,17 @@
   font-size: 12px !important;
   cursor: pointer !important;
   transition: all 0.2s ease !important;
+  text-align: left !important;
+}
+
+select,
+select option,
+.admin-dropdown-menu,
+.admin-dropdown-menu__trigger,
+.admin-dropdown-menu__value,
+.admin-dropdown-menu__panel,
+.admin-dropdown-menu__option {
+  text-align: left !important;
 }
 .admin-dashboard-chart__tools select:hover,
 .admin-dashboard-chart__tools select:focus {
@@ -819,7 +828,7 @@
   font-weight: 800 !important;
   color: #174b30 !important;
   font-variant-numeric: tabular-nums !important;
-  text-align: right !important;
+  text-align: left !important;
 }
 
 /* Dải thông báo sự kiện Realtime */
@@ -838,31 +847,52 @@
 /* ==========================================================================
    6. BẢNG DỮ LIỆU & NÚT THAO TÁC (TABLES & ACTIONS)
    ========================================================================== */
-.admin-table-wrap {
+.admin-table-wrap,
+.admin-product-table-wrap,
+.admin-customer-table-wrap,
+.admin-table-scroll {
   border: 1px solid #dce8df !important;
   border-radius: 16px !important;
   background: #ffffff !important;
-  overflow: auto !important;
+  max-height: 70vh !important;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+  position: relative !important;
   box-shadow: 0 4px 16px rgba(18, 50, 35, 0.03) !important;
 }
 
 .admin-table-wrap table,
+.admin-product-table-wrap table,
+.admin-customer-table-wrap table,
 .admin-order-table {
   width: 100% !important;
-  border-collapse: collapse !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
 }
 
+.admin-table-wrap thead,
+.admin-product-table-wrap thead,
+.admin-customer-table-wrap thead,
+.admin-order-table thead,
+.admin-table-scroll thead,
 .admin-table-wrap th,
-.admin-order-table th {
+.admin-product-table-wrap th,
+.admin-customer-table-wrap th,
+.admin-order-table th,
+.admin-table-scroll th {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 20 !important;
   padding: 14px 18px !important;
-  background: #f4faf6 !important;
-  color: #38634a !important;
+  background: #eaf3ed !important;
+  color: #2b563c !important;
   font-weight: 800 !important;
   font-size: 11px !important;
   text-transform: uppercase !important;
   letter-spacing: 0.9px !important;
-  border-bottom: 2px solid #d6e8dc !important;
+  border-bottom: 2px solid #cce1d2 !important;
   text-align: left !important;
+  box-shadow: 0 2px 4px rgba(18, 50, 35, 0.06) !important;
 }
 
 .admin-table-wrap td,
@@ -1366,15 +1396,30 @@ html[data-admin-theme="dark"] .admin-realtime-bar span:nth-child(2) {
   color: #e5f4ea !important;
 }
 
-html[data-admin-theme="dark"] .admin-table-wrap {
+html[data-admin-theme="dark"] .admin-table-wrap,
+html[data-admin-theme="dark"] .admin-product-table-wrap,
+html[data-admin-theme="dark"] .admin-customer-table-wrap,
+html[data-admin-theme="dark"] .admin-table-scroll {
   background: #12251c !important;
   border-color: #284c37 !important;
 }
+html[data-admin-theme="dark"] .admin-table-wrap thead,
+html[data-admin-theme="dark"] .admin-product-table-wrap thead,
+html[data-admin-theme="dark"] .admin-customer-table-wrap thead,
+html[data-admin-theme="dark"] .admin-order-table thead,
+html[data-admin-theme="dark"] .admin-table-scroll thead,
 html[data-admin-theme="dark"] .admin-table-wrap th,
-html[data-admin-theme="dark"] .admin-order-table th {
+html[data-admin-theme="dark"] .admin-product-table-wrap th,
+html[data-admin-theme="dark"] .admin-customer-table-wrap th,
+html[data-admin-theme="dark"] .admin-order-table th,
+html[data-admin-theme="dark"] .admin-table-scroll th {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 20 !important;
   background: #152d21 !important;
   color: #9bd6b0 !important;
   border-bottom-color: #2c563e !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.45) !important;
 }
 html[data-admin-theme="dark"] .admin-table-wrap td,
 html[data-admin-theme="dark"] .admin-order-table td {

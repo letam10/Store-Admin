@@ -1,11 +1,9 @@
-/**
- * @codex-vn-doc
- * Tệp: src/pages/AdminCommerce.jsx
- * Mục đích: Giao diện quản lý sản phẩm, voucher, đơn hàng, khách hàng và dữ liệu thương mại.
- * Thành phần chính: AdminCustomers, AdminVouchers, AdminFavorites, AdminReviews, AdminOrders.
- * Liên kết trực tiếp: react, ../api/chat.
- * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
- */
+/*
+  FILE NOTE
+  - Mục đích: Giao diện quản lý thương mại quản trị (Khách hàng, Voucher, Mục yêu thích, Đánh giá sản phẩm, Đơn hàng).
+  - Liên kết trực tiếp: Store-Admin/src/pages/AdminOrderWorkflow.jsx, Store-Admin/src/pages/CustomerPasswordEditor.jsx, Store-Admin/src/pages/AdminCommerce.css
+  - Vùng ảnh hưởng khi sửa: Bảng và form quản lý khách hàng, sửa xóa tài khoản, cuộn nội bộ bảng thương mại.
+*/
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
 import { AdminOrders as OrderManager } from './AdminOrderWorkflow'
@@ -41,7 +39,6 @@ function useReport(path) {
 // Chức năng AdminCustomers: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function AdminCustomers({ csrfToken, readOnly = false }) {
   const { data, error, reload } = useReport('/api/admin/customers')
-  // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
   const [query, setQuery] = useState('')
   const [minPoints, setMinPoints] = useState(0)
   const [selected, setSelected] = useState(null)
@@ -49,29 +46,223 @@ export function AdminCustomers({ csrfToken, readOnly = false }) {
   const [editForm, setEditForm] = useState(null)
   const [editError, setEditError] = useState('')
   const [editBusy, setEditBusy] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState(null)
+
   const rows = useMemo(() => (data?.customers || []).filter((item) =>
-    // Lệnh tích hợp: gọi mạng hoặc dữ liệu bên ngoài; cần xử lý timeout, lỗi và dữ liệu rỗng.
-    item.points >= Number(minPoints || 0) && (item.username.toLowerCase().includes(query.toLowerCase()) || item.email.toLowerCase().includes(query.toLowerCase()))),
+    item.points >= Number(minPoints || 0) && (
+      item.username.toLowerCase().includes(query.toLowerCase()) ||
+      item.email.toLowerCase().includes(query.toLowerCase()) ||
+      (item.phone || '').includes(query)
+    )),
   [data, minPoints, query])
+
   const customers = data?.customers || []
   const totalPoints = customers.reduce((sum, item) => sum + Number(item.points || 0), 0)
   const topCustomer = [...customers].sort((a, b) => Number(b.points || 0) - Number(a.points || 0))[0]
   const activeSpinCredits = customers.reduce((sum, item) => sum + Number(item.spinCredits || 0), 0)
-  async function saveCustomer(event) {
-    event.preventDefault(); setEditBusy(true); setEditError('')
-    try { await apiJson('/api/admin/customers/' + editing.id, { method: 'PATCH', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ ...editForm, points: Number(editForm.points), spinCredits: Number(editForm.spinCredits) }) }); setSelected(null); setEditing(null); setEditForm(null); await reload() }
-    catch (failure) { setEditError(adminErrorMessage(failure, 'Không lưu được thông tin khách hàng.')) }
-    finally { setEditBusy(false) }
-  }
-  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">KHÁCH HÀNG THỰC</p><h2>Điểm và hạng thành viên</h2><p>Sắp xếp theo điểm giảm dần. Điểm chỉ cộng khi đơn được ghi nhận thanh toán.</p></div><span className="admin-preview-badge">{data?.customers?.length || 0} khách</span></div>
-    <div className="admin-commerce-summary"><div><small>Tổng khách</small><b>{customers.length}</b><span>Đang theo dõi</span></div><div><small>Tổng điểm</small><b>{totalPoints.toLocaleString('vi-VN')}</b><span>Điểm tích lũy</span></div><div><small>Người dẫn đầu</small><b>{topCustomer?.username || '—'}</b><span>{topCustomer ? topCustomer.points.toLocaleString('vi-VN') + ' điểm' : 'Chưa có dữ liệu'}</span></div><div><small>Lượt quay còn lại</small><b>{activeSpinCredits}</b><span>Toàn hệ thống</span></div></div>
 
-    <div className="admin-module-toolbar"><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm tên hoặc thư điện tử" /><label>Điểm tối thiểu <input type="number" min="0" value={minPoints} onChange={(event) => setMinPoints(event.target.value)} /></label></div>
-    {error && <p role="alert">{error}</p>}{!data && !error && <p>Đang tải…</p>}
-     {data && <div className="admin-table-wrap"><table><thead><tr><th>Khách</th><th>Điểm</th><th>Hạng</th><th>Tiền hàng đã thanh toán</th><th>Lượt quay</th></tr></thead><tbody>{rows.map((item) => <tr key={item.id} className="admin-clickable-row" onClick={() => setSelected(item)}><td><button className="admin-link-button" type="button" onClick={() => setSelected(item)}>{item.username}</button><small>{item.email}</small></td><td><b>{item.points.toLocaleString('vi-VN')}</b></td><td>{tierLabel(item.tier)}</td><td>{money.format(item.paidGoodsTotal)}</td><td>{item.spinCredits}</td></tr>)}</tbody></table></div>}
-     {selected && <section className="admin-detail-panel"><div><p className="admin-eyebrow">HỒ SƠ TÀI KHOẢN</p><h3>{selected.username}</h3></div><button type="button" onClick={() => setSelected(null)}>Đóng</button><dl><div><dt>Mã</dt><dd>{selected.id}</dd></div><div><dt>Thư điện tử đăng ký</dt><dd>{selected.email}</dd></div><div><dt>Tài khoản đăng nhập</dt><dd>{selected.username} hoặc {selected.email}</dd></div><div><dt>Ngày đăng ký</dt><dd>{selected.createdAt ? new Date(selected.createdAt).toLocaleString('vi-VN') : '—'}</dd></div><div><dt>Mật khẩu</dt><dd>Không hiển thị · máy chủ lưu dạng băm</dd></div><div><dt>Hạng / điểm</dt><dd>{tierLabel(selected.tier)} · {selected.points.toLocaleString('vi-VN')} điểm</dd></div><div><dt>Trạng thái</dt><dd>Đang hoạt động</dd></div></dl>{!readOnly && <button type="button" onClick={() => { setEditing(selected); setEditForm({ username: selected.username, email: selected.email, points: selected.points, spinCredits: selected.spinCredits }); setEditError('') }}>Sửa thông tin</button>}</section>}
-     {selected && !readOnly && <CustomerPasswordEditor key={selected.id} customer={selected} csrfToken={csrfToken} />}
-     {editing && <form className="admin-detail-panel admin-commerce-form" onSubmit={saveCustomer}><h3>Sửa khách hàng #{editing.id}</h3><label>Tên đăng nhập<input required minLength="3" value={editForm.username} onChange={(event) => setEditForm({ ...editForm, username: event.target.value })} /></label><label>Thư điện tử<input required type="email" value={editForm.email} onChange={(event) => setEditForm({ ...editForm, email: event.target.value })} /></label><label>Điểm<input type="number" min="0" value={editForm.points} onChange={(event) => setEditForm({ ...editForm, points: event.target.value })} /></label><label>Lượt quay<input type="number" min="0" value={editForm.spinCredits} onChange={(event) => setEditForm({ ...editForm, spinCredits: event.target.value })} /></label>{editError && <p role="alert">{editError}</p>}<div className="voucher-editor-actions"><button type="submit" disabled={editBusy}>{editBusy ? 'Đang lưu…' : 'Lưu thông tin'}</button><button type="button" onClick={() => setEditing(null)}>Hủy</button></div></form>}
+  async function saveCustomer(event) {
+    event.preventDefault()
+    setEditBusy(true)
+    setEditError('')
+    try {
+      const payload = {
+        username: editForm.username.trim(),
+        email: editForm.email.trim(),
+        phone: editForm.phone ? editForm.phone.trim() : null,
+        points: Number(editForm.points),
+        spinCredits: Number(editForm.spinCredits)
+      }
+      if (editForm.password && editForm.password.trim()) {
+        payload.password = editForm.password.trim()
+      }
+      await apiJson('/api/admin/customers/' + editing.id, {
+        method: 'PATCH',
+        headers: { 'x-csrf-token': csrfToken },
+        body: JSON.stringify(payload)
+      })
+      setSelected(null)
+      setEditing(null)
+      setEditForm(null)
+      await reload()
+    } catch (failure) {
+      setEditError(adminErrorMessage(failure, 'Không lưu được thông tin khách hàng.'))
+    } finally {
+      setEditBusy(false)
+    }
+  }
+
+  async function deleteCustomer(id) {
+    setEditBusy(true)
+    setEditError('')
+    try {
+      await apiJson('/api/admin/customers/' + id, {
+        method: 'DELETE',
+        headers: { 'x-csrf-token': csrfToken }
+      })
+      setSelected(null)
+      setEditing(null)
+      setPendingDelete(null)
+      await reload()
+    } catch (failure) {
+      setEditError(adminErrorMessage(failure, 'Không xóa được khách hàng.'))
+    } finally {
+      setEditBusy(false)
+    }
+  }
+
+  function startEdit(item) {
+    setEditing(item)
+    setPendingDelete(null)
+    setEditForm({
+      username: item.username,
+      email: item.email,
+      phone: item.phone || '',
+      password: '',
+      points: item.points,
+      spinCredits: item.spinCredits
+    })
+    setEditError('')
+  }
+
+  return <section className="admin-module-card">
+    <div className="admin-module-head">
+      <div>
+        <p className="admin-eyebrow">KHÁCH HÀNG THỰC</p>
+        <h2>Điểm và hạng thành viên</h2>
+        <p>Sắp xếp theo điểm giảm dần. Điểm chỉ cộng khi đơn được ghi nhận thanh toán.</p>
+      </div>
+      <span className="admin-preview-badge">{data?.customers?.length || 0} khách</span>
+    </div>
+    <div className="admin-commerce-summary">
+      <div><small>Tổng khách</small><b>{customers.length}</b><span>Đang theo dõi</span></div>
+      <div><small>Tổng điểm</small><b>{totalPoints.toLocaleString('vi-VN')}</b><span>Điểm tích lũy</span></div>
+      <div><small>Người dẫn đầu</small><b>{topCustomer?.username || '—'}</b><span>{topCustomer ? topCustomer.points.toLocaleString('vi-VN') + ' điểm' : 'Chưa có dữ liệu'}</span></div>
+      <div><small>Lượt quay còn lại</small><b>{activeSpinCredits}</b><span>Toàn hệ thống</span></div>
+    </div>
+
+    <div className="admin-module-toolbar">
+      <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm tên, email hoặc số điện thoại…" />
+      <label>Điểm tối thiểu <input type="number" min="0" value={minPoints} onChange={(event) => setMinPoints(event.target.value)} /></label>
+    </div>
+
+    {error && <p role="alert" className="admin-error">{error}</p>}
+    {!data && !error && <p>Đang tải…</p>}
+
+    {/* Section chi tiết hoặc sửa thông tin khách hàng đặt trên đầu bảng danh sách */}
+    {pendingDelete && (
+      <section className="admin-detail-panel" role="group" aria-label="Xác nhận xóa khách hàng">
+        <p>Bạn có chắc muốn xóa khách hàng <b>{pendingDelete.username}</b> ({pendingDelete.email})? Mọi dữ liệu tài khoản, giỏ hàng, mục yêu thích và voucher của khách sẽ bị xóa.</p>
+        <div className="voucher-editor-actions">
+          <button type="button" className="table-action table-action--danger" disabled={editBusy} onClick={() => deleteCustomer(pendingDelete.id)}>
+            {editBusy ? 'Đang xóa…' : 'Xác nhận xóa khách hàng'}
+          </button>
+          <button type="button" disabled={editBusy} onClick={() => setPendingDelete(null)}>Giữ tài khoản</button>
+        </div>
+      </section>
+    )}
+
+    {editing && (
+      <section className="admin-detail-panel admin-customer-detail">
+        <form className="admin-commerce-form" onSubmit={saveCustomer}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '10px' }}>
+            <h3>Sửa thông tin khách hàng #{editing.id} ({editing.username})</h3>
+            <button type="button" onClick={() => setEditing(null)}>Đóng</button>
+          </div>
+          <label>Tên đăng nhập
+            <input required minLength="3" value={editForm.username} onChange={(event) => setEditForm({ ...editForm, username: event.target.value })} />
+          </label>
+          <label>Thư điện tử
+            <input required type="email" value={editForm.email} onChange={(event) => setEditForm({ ...editForm, email: event.target.value })} />
+          </label>
+          <label>Số điện thoại
+            <input type="tel" placeholder="09xxxxxxxx" value={editForm.phone} onChange={(event) => setEditForm({ ...editForm, phone: event.target.value })} />
+          </label>
+          <label>Mật khẩu mới (để trống nếu không đổi)
+            <input type="password" minLength="4" placeholder="Nhập mật khẩu mới…" value={editForm.password} onChange={(event) => setEditForm({ ...editForm, password: event.target.value })} />
+          </label>
+          <label>Điểm tích lũy
+            <input type="number" min="0" value={editForm.points} onChange={(event) => setEditForm({ ...editForm, points: event.target.value })} />
+          </label>
+          <label>Lượt quay thưởng
+            <input type="number" min="0" value={editForm.spinCredits} onChange={(event) => setEditForm({ ...editForm, spinCredits: event.target.value })} />
+          </label>
+          {editError && <p role="alert" className="admin-error" style={{ width: '100%' }}>{editError}</p>}
+          <div className="voucher-editor-actions" style={{ width: '100%', marginTop: '10px' }}>
+            <button type="submit" disabled={editBusy}>{editBusy ? 'Đang lưu…' : 'Lưu thay đổi'}</button>
+            <button type="button" onClick={() => setEditing(null)}>Hủy</button>
+          </div>
+        </form>
+      </section>
+    )}
+
+    {selected && !editing && !pendingDelete && (
+      <section className="admin-detail-panel">
+        <div><p className="admin-eyebrow">HỒ SƠ TÀI KHOẢN</p><h3>{selected.username}</h3></div>
+        <button type="button" onClick={() => setSelected(null)}>Đóng</button>
+        <dl>
+          <div><dt>Mã ID</dt><dd>#{selected.id}</dd></div>
+          <div><dt>Thư điện tử</dt><dd>{selected.email}</dd></div>
+          <div><dt>Số điện thoại</dt><dd>{selected.phone || 'Chưa cập nhật'}</dd></div>
+          <div><dt>Tài khoản đăng nhập</dt><dd>{selected.username} hoặc {selected.email}</dd></div>
+          <div><dt>Ngày đăng ký</dt><dd>{selected.createdAt ? new Date(selected.createdAt).toLocaleString('vi-VN') : '—'}</dd></div>
+          <div><dt>Mật khẩu</dt><dd>Bảo mật · Mã băm SHA-256 an toàn</dd></div>
+          <div><dt>Hạng / điểm</dt><dd>{tierLabel(selected.tier)} · {selected.points.toLocaleString('vi-VN')} điểm</dd></div>
+          <div><dt>Tổng tiền đã mua</dt><dd>{money.format(selected.paidGoodsTotal)}</dd></div>
+        </dl>
+        {!readOnly && (
+          <div className="voucher-editor-actions" style={{ marginTop: '14px' }}>
+            <button type="button" onClick={() => startEdit(selected)}>Sửa thông tin</button>
+            <button type="button" className="table-action table-action--danger" onClick={() => setPendingDelete(selected)}>Xóa khách hàng</button>
+          </div>
+        )}
+      </section>
+    )}
+
+    {selected && !editing && !pendingDelete && !readOnly && (
+      <CustomerPasswordEditor key={selected.id} customer={selected} csrfToken={csrfToken} />
+    )}
+
+    {data && (
+      <div className="admin-table-wrap admin-customer-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Khách</th>
+              <th>Điện thoại</th>
+              <th>Điểm</th>
+              <th>Hạng</th>
+              <th>Tiền hàng đã thanh toán</th>
+              <th>Lượt quay</th>
+              <th>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((item) => (
+              <tr key={item.id} className="admin-clickable-row">
+                <td>
+                  <button className="admin-link-button" type="button" onClick={() => { setSelected(item); setEditing(null); setPendingDelete(null) }}>
+                    {item.username}
+                  </button>
+                  <small>{item.email}</small>
+                </td>
+                <td>{item.phone || '—'}</td>
+                <td><b>{item.points.toLocaleString('vi-VN')}</b></td>
+                <td>{tierLabel(item.tier)}</td>
+                <td>{money.format(item.paidGoodsTotal)}</td>
+                <td>{item.spinCredits}</td>
+                <td>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {!readOnly && <button type="button" className="table-action" onClick={(e) => { e.stopPropagation(); startEdit(item) }}>Sửa</button>}
+                    {!readOnly && <button type="button" className="table-action table-action--danger" onClick={(e) => { e.stopPropagation(); setPendingDelete(item) }}>Xóa</button>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
   </section>
 }
 

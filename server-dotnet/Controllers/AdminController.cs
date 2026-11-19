@@ -1,4 +1,10 @@
 /*
+  FILE NOTE
+  - Mục đích: Bộ điều khiển API quản trị hệ thống (đăng nhập, khách hàng, đơn hàng, cấu hình, chat admin).
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.cs, Store-Admin/server-dotnet/Models/ApiModels.cs, Store-Admin/server-dotnet/Security/Tokens.cs
+  - Vùng ảnh hưởng khi sửa: Các chức năng quản trị đơn hàng, quản lý và xóa khách hàng, cập nhật thông tin khách hàng.
+*/
+/*
  * @codex-vn-doc
  * Tệp: server-dotnet/Controllers/AdminController.cs
  * Mục đích: Endpoint quản trị và kiểm tra quyền admin của API C#.
@@ -293,10 +299,25 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Cha
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
         try
         {
-            var customer = db.UpdateAdminCustomer(id, request.Username, request.Email, request.Points, request.SpinCredits);
+            var customer = db.UpdateAdminCustomer(id, request.Username, request.Email, request.Points, request.SpinCredits, request.Phone, request.Password);
             return customer is null ? NotFound(new { error = "CUSTOMER_NOT_FOUND" }) : Ok(new { customer });
         }
         catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+    }
+
+    [HttpDelete("customers/{id:long}")]
+    public IActionResult DeleteCustomer(long id)
+    {
+        if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
+        if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        try
+        {
+            return db.DeleteCustomer(id) ? Ok(new { ok = true, id }) : NotFound(new { error = "CUSTOMER_NOT_FOUND" });
+        }
+        catch (Exception ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
     }
 
     [HttpGet("favorites")]

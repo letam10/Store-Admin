@@ -98,6 +98,7 @@ public sealed partial class StoreDb
             EnsureUnmatchedPaymentTables();
             EnsureSePayTables();
             EnsureAdminEventTable();
+            EnsureSocialAutomationTables();
             return TryCheckHealth();
         }
         catch (Exception ex)
@@ -212,6 +213,8 @@ public sealed partial class StoreDb
                   paid_goods_total BIGINT NOT NULL DEFAULT 0, spin_credits INT NOT NULL DEFAULT 0,
                   created_at NVARCHAR(100) NOT NULL
                 );
+                IF COL_LENGTH('customers', 'phone') IS NULL
+                  ALTER TABLE customers ADD phone NVARCHAR(50) NOT NULL DEFAULT '';
 
                 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'customer_sessions')
                 CREATE TABLE customer_sessions (
@@ -1994,7 +1997,7 @@ public sealed partial class StoreDb
     {
         using var db = Open();
         using var cmd = db.CreateCommand();
-        cmd.CommandText = "SELECT id, username, email, points, paid_goods_total, spin_credits, created_at FROM customers ORDER BY points DESC, id ASC";
+        cmd.CommandText = "SELECT id, username, email, points, paid_goods_total, spin_credits, created_at, ISNULL(phone, '') FROM customers ORDER BY points DESC, id ASC";
         using var reader = cmd.ExecuteReader();
         var list = new List<object>();
         while (reader.Read())
@@ -2009,42 +2012,97 @@ public sealed partial class StoreDb
                 paidGoodsTotal = Convert.ToInt64(reader.GetValue(4)),
                 spinCredits = Convert.ToInt32(reader.GetValue(5)),
                 createdAt = reader.GetString(6),
+                phone = reader.GetString(7),
                 tier = pts >= 10000 ? "diamond" : pts >= 1000 ? "gold" : pts >= 100 ? "silver" : "bronze"
             });
         }
         return list;
     }
 
-    public object? UpdateAdminCustomer(long id, string? username, string? email, int? points, int? spinCredits)
+    public object? UpdateAdminCustomer(long id, string? username, string? email, int? points, int? spinCredits, string? phone = null, string? password = null)
     {
         var current = FindCustomerFull(id);
         if (current is null) return null;
         var nextUsername = string.IsNullOrWhiteSpace(username) ? current.Value.Username : username.Trim();
         var nextEmail = string.IsNullOrWhiteSpace(email) ? current.Value.Email : email.Trim().ToLowerInvariant();
+        var nextPhone = phone?.Trim();
         if (nextUsername.Length is < 3 or > 255 || nextEmail.Length > 255 || !System.Net.Mail.MailAddress.TryCreate(nextEmail, out _)
             || points < 0 || spinCredits < 0) throw new InvalidOperationException("INVALID_CUSTOMER");
+        string? salt = null;
+        string? hash = null;
+        if (!string.IsNullOrWhiteSpace(password))
+        {
+            var p = password.Trim();
+            if (p.Length < 4) throw new InvalidOperationException("INVALID_PASSWORD");
+            var res = StoreApi.Security.Tokens.HashPassword(p);
+            salt = res.Salt;
+            hash = res.Hash;
+        }
+
         using var connection = Open();
         using var command = connection.CreateCommand();
         // PATCH chỉ đổi trường đã gửi; không làm mất điểm hoặc lượt quay khi sửa email.
         command.CommandText = """
-            UPDATE customers SET username=@username,email=@email,
-                points=COALESCE(@points,points),spin_credits=COALESCE(@credits,spin_credits)
-            OUTPUT inserted.username,inserted.email,inserted.points,inserted.spin_credits
-            WHERE id=@id
+            UPDATE customers SET username=@username,email=@email,phone=COALESCE(@phone,phone),
+                points=COALESCE(@points,points),spin_credits=COALESCE(@credits,spin_credits),
+                password_salt=COALESCE(@salt,password_salt),
+                password_hash=COALESCE(@hash,password_hash)
+            OUTPUT inserted.username,inserted.email,inserted.points,inserted.spin_credits,ISNULL(inserted.phone,'')
+            WHERE id=@id;
+            IF @hash IS NOT NULL
+                DELETE FROM customer_sessions WHERE customer_id=@id;
             """;
         command.Parameters.AddWithValue("@id", id);
         command.Parameters.AddWithValue("@username", nextUsername);
         command.Parameters.AddWithValue("@email", nextEmail);
+        command.Parameters.AddWithValue("@phone", (object?)nextPhone ?? DBNull.Value);
         command.Parameters.AddWithValue("@points", (object?)points ?? DBNull.Value);
         command.Parameters.AddWithValue("@credits", (object?)spinCredits ?? DBNull.Value);
+        command.Parameters.AddWithValue("@salt", (object?)salt ?? DBNull.Value);
+        command.Parameters.AddWithValue("@hash", (object?)hash ?? DBNull.Value);
         try
         {
             using var reader = command.ExecuteReader();
-            return reader.Read() ? new { id, username = reader.GetString(0), email = reader.GetString(1), points = reader.GetInt32(2), spinCredits = reader.GetInt32(3) } : null;
+            return reader.Read() ? new { id, username = reader.GetString(0), email = reader.GetString(1), points = reader.GetInt32(2), spinCredits = reader.GetInt32(3), phone = reader.GetString(4) } : null;
         }
         catch (SqlException ex) when (ex.Number is 2601 or 2627)
         {
             throw new InvalidOperationException("CUSTOMER_EXISTS", ex);
+        }
+    }
+
+    public bool DeleteCustomer(long id)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.Transaction = transaction;
+            cmd.CommandText = """
+                DELETE FROM checkout_voucher_holds WHERE code IN (SELECT code FROM customer_vouchers WHERE customer_id=@id) OR order_id IN (SELECT id FROM customer_orders WHERE customer_id=@id);
+                DELETE FROM checkout_unmatched_payments WHERE order_id IN (SELECT id FROM customer_orders WHERE customer_id=@id);
+                DELETE FROM checkout_intents WHERE customer_id=@id OR order_id IN (SELECT id FROM customer_orders WHERE customer_id=@id);
+                DELETE FROM bank_payment_receipts WHERE order_id IN (SELECT id FROM customer_orders WHERE customer_id=@id);
+                DELETE FROM customer_orders WHERE customer_id=@id;
+                DELETE FROM customer_vouchers WHERE customer_id=@id;
+                DELETE FROM customer_favorites WHERE customer_id=@id;
+                DELETE FROM customer_sessions WHERE customer_id=@id;
+                DELETE FROM customer_totp_backups WHERE customer_id=@id;
+                DELETE FROM password_resets WHERE customer_id=@id;
+                DELETE FROM login_challenges WHERE customer_id=@id;
+                DELETE FROM product_reviews WHERE customer_id=@id;
+                DELETE FROM customers WHERE id=@id;
+                """;
+            cmd.Parameters.AddWithValue("@id", id);
+            var affected = cmd.ExecuteNonQuery();
+            transaction.Commit();
+            return affected > 0;
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
         }
     }
 

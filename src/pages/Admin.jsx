@@ -1,17 +1,9 @@
 /*
   FILE NOTE
-  - Mục đích: Màn hình điều phối admin, session, module, dashboard và cài đặt AI context size.
-  - Liên kết trực tiếp: ../api/chat.js, ./AdminModules.jsx, ../services/adminState.js
-  - Vùng ảnh hưởng khi sửa: Giao diện quản trị, cài đặt ngữ cảnh AI, session và chat hỗ trợ admin.
+  - Mục đích: Màn hình điều phối admin, session, module, dashboard, cài đặt AI context size và chuyển đổi Tự động hóa đăng bài Mạng Xã Hội.
+  - Liên kết trực tiếp: ../api/chat.js, ./AdminModules.jsx, ./AdminSocialAutomation.jsx, ../services/adminState.js
+  - Vùng ảnh hưởng khi sửa: Giao diện quản trị, cài đặt ngữ cảnh AI, session, chat hỗ trợ admin và tab đăng bài mạng xã hội.
 */
-/**
- * @codex-vn-doc
- * Tệp: src/pages/Admin.jsx
- * Mục đích: Màn hình điều phối admin, session, module, dashboard và chat hỗ trợ.
- * Thành phần chính: Admin.
- * Liên kết trực tiếp: react, ../api/chat, ../api/requestGate, ./adminState, ../components/ui/customerSupportState, ./AdminModules, ./adminModuleData, ../storefront/state.
- * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
- */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { canOpenModule, landingModule } from '../services/adminAccess'
 import { apiJson, streamChat } from '../api/chat'
@@ -19,6 +11,7 @@ import { createRequestGate } from '../api/requestGate'
 import { adminConversationKey } from '../services/adminState'
 import { hideSourceDisclosure, mapServerMessages } from '../services/customerSupportState'
 import AdminModule from './AdminModules'
+import AdminSocialAutomation from './AdminSocialAutomation'
 import { adminModules } from '../data/adminModuleData'
 import { compactLabel, thinkingLabel } from '../services/vietnameseLabels'
 import { listenAdminNotifications } from '../services/adminNotifications'
@@ -31,6 +24,7 @@ import './Admin.css'
 import './AdminPolish.css'
 import './AdminTheme.css'
 import './AdminLayout.css'
+import './AdminSocialAutomation.css'
 
 const moduleGroups = [
   { title: 'Tổng quan', ids: ['dashboard', 'customer-orders', 'statistics', 'ai-local'] },
@@ -82,6 +76,7 @@ export default function Admin() {
   const [report, setReport] = useState(null)
   const [range, setRange] = useState({ from: today.slice(0, 8) + '01', to: today })
   const [selectedModule, setActiveModule] = useState('dashboard')
+  const [aiWorkspaceTab, setAiWorkspaceTab] = useState('chat')
   const activeModule = landingModule(session?.role, selectedModule)
   const [adminSearch, setAdminSearch] = useState('')
   const [realtimeEvents, setRealtimeEvents] = useState([])
@@ -421,6 +416,21 @@ export default function Admin() {
   if (session === null) return <main className="admin-shell admin-shell--login"><div className="admin-login-card admin-loading-state"><div className="admin-login-card__preferences"><ThemeLanguageControls /></div><p>Đang kiểm tra phiên quản trị…</p></div></main>
   if (!session?.authenticated) return (
     <main className="admin-shell admin-shell--login"><div className="admin-login-card"><div className="admin-login-card__preferences"><ThemeLanguageControls /></div><form className="admin-login" onSubmit={login}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+        <svg viewBox="0 0 36 36" width="36" height="36" fill="none" aria-hidden="true">
+          <rect x="1" y="1" width="34" height="34" rx="10" fill="url(#login-brand-bg)" stroke="#52aa7a" strokeWidth="1.2"/>
+          <circle cx="16" cy="16" r="6.2" stroke="#fff" strokeWidth="3.6" fill="none" strokeLinecap="round"/>
+          <circle cx="24.5" cy="24.5" r="4.2" fill="#5fe39d" stroke="#fff" strokeWidth="1.2"/>
+          <defs>
+            <linearGradient id="login-brand-bg" x1="0" y1="0" x2="36" y2="36">
+              <stop stopColor="#143d2c"/>
+              <stop offset="0.55" stopColor="#226344"/>
+              <stop offset="1" stopColor="#358b5e"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        <span style={{ fontSize: '24px', fontWeight: 900, color: '#163f2d', letterSpacing: '-1px' }}>OmniCart<span style={{ color: '#2e8658' }}>.</span></span>
+      </div>
       <p className="admin-eyebrow">QUẢN TRỊ STORE</p><h1>{copy.login}</h1><p>{copy.adminOnly}</p>
       <label>{copy.account}<input autoComplete="username" value={credentials.username} onChange={(event) => setCredentials((current) => ({ ...current, username: event.target.value }))} /></label>
       <label>{copy.password}<input type="password" autoComplete="current-password" value={credentials.password} onChange={(event) => setCredentials((current) => ({ ...current, password: event.target.value }))} /></label>
@@ -437,7 +447,21 @@ export default function Admin() {
     <main className="admin-shell admin-shell--workspace">
       <div className="admin-workspace-card">
       <aside className="admin-sidebar">
-        <a className="admin-brand" href="/admin">store<span>.</span><small>{language === 'en' ? 'ADMIN' : 'QUẢN TRỊ'}</small></a>
+        <a className="admin-brand" href="/admin">
+          <svg viewBox="0 0 36 36" width="30" height="30" fill="none" aria-hidden="true" style={{ display: 'inline-block', flexShrink: 0, marginRight: '4px' }}>
+            <rect x="1" y="1" width="34" height="34" rx="10" fill="url(#admin-brand-bg)" stroke="#52aa7a" strokeWidth="1.2"/>
+            <circle cx="16" cy="16" r="6.2" stroke="#fff" strokeWidth="3.6" fill="none" strokeLinecap="round"/>
+            <circle cx="24.5" cy="24.5" r="4.2" fill="#5fe39d" stroke="#fff" strokeWidth="1.2"/>
+            <defs>
+              <linearGradient id="admin-brand-bg" x1="0" y1="0" x2="36" y2="36">
+                <stop stopColor="#143d2c"/>
+                <stop offset="0.55" stopColor="#226344"/>
+                <stop offset="1" stopColor="#358b5e"/>
+              </linearGradient>
+            </defs>
+          </svg>
+          OmniCart<span>.</span><small>{language === 'en' ? 'ADMIN' : 'QUẢN TRỊ'}</small>
+        </a>
         <div className="admin-sidebar__profile"><span>{String(session.username || 'A').slice(0, 1).toUpperCase()}</span><div><b>{session.username}</b><small>{session.role === 'staff' ? 'Nhân viên' : 'Quản trị viên'}</small></div></div>
         <nav aria-label="Điều hướng quản trị">
           {visibleGroups.map((group) => <div className="admin-nav-group" key={group.title}><p>{group.title}</p>{group.ids.map((id) => {
@@ -472,35 +496,66 @@ export default function Admin() {
         <OperationalExportButton module={activeModule} role={session.role} />
         {activeModule !== 'ai-local' && <AdminModule role={session.role} module={activeModule} csrfToken={session.csrfToken} onNavigate={setActiveModule} language={language} />}
         {activeModule === 'ai-local' && <>
-          <section className="admin-meta" aria-label="Cấu hình AI">
-            <div><small>Mô hình</small><strong>{settings?.model || 'qwen3.5:4b'}</strong></div>
-            <div><small>Suy luận</small><strong>{thinkingEnabled ? 'Bật · ' + thinkingLabel(thinkingMode) : 'Tắt · phản hồi trực tiếp'}</strong></div>
-            <div><small>Rút gọn</small><strong>{compactLabel(compactStatus)}</strong></div>
-            <div className="admin-context"><label>Ngữ cảnh<DropdownMenu value={contextSize} options={(settings?.allowedContextSizes || [8192, 16384, 32768, 65536]).map((size) => [size, size === 65536 ? '64K · thử nghiệm' : (size / 1024) + 'K'])} onChange={(value) => setContextSize(Number(value))} ariaLabel="Kích thước ngữ cảnh" /></label><button type="button" onClick={saveContext}>Lưu</button></div>
-          </section>
-          <p className="admin-warning">Ngữ cảnh lớn cần nhiều bộ nhớ hơn. Máy thành viên có thể cần mức 8.192 hoặc 16.384 tùy phần cứng; mức 65.536 chỉ dành cho thử nghiệm.</p>
-          <div className="admin-grid">
-            <section className="admin-panel"><div className="admin-panel__heading"><div><p className="admin-eyebrow">SỐ LIỆU GỐC</p><h2>Doanh thu máy chủ</h2></div><span>Giờ Việt Nam</span></div>
-              <form className="admin-range" onSubmit={loadStats}><label>Từ<input type="date" value={range.from} onChange={(event) => setRange((current) => ({ ...current, from: event.target.value }))} /></label><label>Đến<input type="date" value={range.to} onChange={(event) => setRange((current) => ({ ...current, to: event.target.value }))} /></label><button type="submit">Tải số liệu</button></form>
-              {report ? <dl className="admin-stats"><div><dt>Doanh thu gộp</dt><dd>{formatMoney(report.grossRevenue)}</dd></div><div><dt>Hoàn tiền đã trừ</dt><dd>{formatMoney(report.refunds)}</dd></div><div><dt>Doanh thu ròng</dt><dd>{formatMoney(report.netRevenue)}</dd></div><div><dt>Đơn được tính</dt><dd>{report.includedOrders}</dd></div></dl> : <p className="admin-muted">Chọn khoảng thời gian để lấy số liệu máy chủ.</p>}
-              {report && <p className="admin-source">Dữ liệu cửa hàng · {report.from} → {report.to} · dữ liệu: {{ real: 'thực tế', none: 'chưa có giao dịch' }[report.dataMode] || 'chưa xác định'}</p>}
-            </section>
-            <section className="admin-panel admin-chat"><div className="admin-panel__heading"><div><p className="admin-eyebrow">AI NHẬN XÉT</p><h2>Trò chuyện quản trị</h2></div><span>Suy luận: {thinkingEnabled ? thinkingLabel(thinkingMode) : 'Tắt'}</span></div>
-              <div ref={logRef} className="admin-chat__log" role="log" aria-live="polite">
-                {messages.length === 0 && <p className="admin-muted">Số liệu và nội dung nghiệp vụ được máy chủ kiểm soát; chưa có phân tích tự do đã xác minh.</p>}
-                {messages.map((message) => <div key={message.id} className={'admin-chat__message admin-chat__message--' + message.role}>
-                  <small>{message.role === 'user' ? 'Quản trị' : 'AI cục bộ'}</small>
-                  <p>{hideSourceDisclosure(message.content) || (busy && message.role === 'assistant' ? '…' : '')}</p>
-                  {message.verified?.text && <p>{message.verified.text}</p>}
-                  {message.report && <p>Báo cáo: {message.report.from} → {message.report.to} · Doanh thu ròng: {formatMoney(message.report.netRevenue)}</p>}
-                  {['incomplete', 'error', 'stopped', 'pending'].includes(message.status) && <small>Chưa hoàn tất. {message.error}</small>}
-                  {['incomplete', 'error', 'stopped'].includes(message.status) && message.requestId && <button type="button" disabled={busy} onClick={(event) => sendMessage(event, message)}>Thử lại</button>}
-                </div>)}
-                {busy && <p className="admin-thinking">{activity || 'Đang phân tích'}</p>}
-              </div>
-              <form className="admin-chat__form" onSubmit={sendMessage}><textarea ref={chatInputRef} maxLength={2000} rows="3" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Ví dụ: Phân tích doanh thu tháng này…" aria-busy={busy} />{busy ? <button type="button" onClick={stopStream}>Dừng</button> : <button type="submit" disabled={!draft.trim()}>Gửi</button>}</form>
-            </section>
+          <div className="admin-ai-tab-switch" role="tablist" aria-label="Chế độ AI">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={aiWorkspaceTab === 'chat'}
+              className={'admin-ai-tab-btn' + (aiWorkspaceTab === 'chat' ? ' is-active' : '')}
+              onClick={() => setAiWorkspaceTab('chat')}
+            >
+              <span aria-hidden="true">💬</span> {language === 'en' ? 'AI Chat & Analytics' : 'Trò chuyện & Phân tích AI'}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={aiWorkspaceTab === 'social'}
+              className={'admin-ai-tab-btn' + (aiWorkspaceTab === 'social' ? ' is-active' : '')}
+              onClick={() => setAiWorkspaceTab('social')}
+            >
+              <span aria-hidden="true">🚀</span> {language === 'en' ? 'Social Marketing Automation' : 'Tự động đăng bài Mạng Xã Hội'}
+            </button>
           </div>
+
+          {aiWorkspaceTab === 'social' && (
+            <div className="admin-social-posting" data-testid="social-posting-workspace">
+              <AdminSocialAutomation csrfToken={session.csrfToken} language={language} />
+            </div>
+          )}
+
+          {aiWorkspaceTab === 'chat' && (
+            <div className="admin-workspace-chat">
+              <section className="admin-meta" aria-label="Cấu hình AI">
+                <div><small>Mô hình</small><strong>{settings?.model || 'qwen3.5:4b'}</strong></div>
+                <div><small>Suy luận</small><strong>{thinkingEnabled ? 'Bật · ' + thinkingLabel(thinkingMode) : 'Tắt · phản hồi trực tiếp'}</strong></div>
+                <div><small>Rút gọn</small><strong>{compactLabel(compactStatus)}</strong></div>
+                <div className="admin-context"><label>Ngữ cảnh<DropdownMenu value={contextSize} options={(settings?.allowedContextSizes || [8192, 16384, 32768, 65536]).map((size) => [size, size === 65536 ? '64K · thử nghiệm' : (size / 1024) + 'K'])} onChange={(value) => setContextSize(Number(value))} ariaLabel="Kích thước ngữ cảnh" /></label><button type="button" onClick={saveContext}>Lưu</button></div>
+              </section>
+              <p className="admin-warning">Ngữ cảnh lớn cần nhiều bộ nhớ hơn. Máy thành viên có thể cần mức 8.192 hoặc 16.384 tùy phần cứng; mức 65.536 chỉ dành cho thử nghiệm.</p>
+              <div className="admin-grid">
+                <section className="admin-panel"><div className="admin-panel__heading"><div><p className="admin-eyebrow">SỐ LIỆU GỐC</p><h2>Doanh thu máy chủ</h2></div><span>Giờ Việt Nam</span></div>
+                  <form className="admin-range" onSubmit={loadStats}><label>Từ<input type="date" value={range.from} onChange={(event) => setRange((current) => ({ ...current, from: event.target.value }))} /></label><label>Đến<input type="date" value={range.to} onChange={(event) => setRange((current) => ({ ...current, to: event.target.value }))} /></label><button type="submit">Tải số liệu</button></form>
+                  {report ? <dl className="admin-stats"><div><dt>Doanh thu gộp</dt><dd>{formatMoney(report.grossRevenue)}</dd></div><div><dt>Hoàn tiền đã trừ</dt><dd>{formatMoney(report.refunds)}</dd></div><div><dt>Doanh thu ròng</dt><dd>{formatMoney(report.netRevenue)}</dd></div><div><dt>Đơn được tính</dt><dd>{report.includedOrders}</dd></div></dl> : <p className="admin-muted">Chọn khoảng thời gian để lấy số liệu máy chủ.</p>}
+                  {report && <p className="admin-source">Dữ liệu cửa hàng · {report.from} → {report.to} · dữ liệu: {{ real: 'thực tế', none: 'chưa có giao dịch' }[report.dataMode] || 'chưa xác định'}</p>}
+                </section>
+                <section className="admin-panel admin-chat"><div className="admin-panel__heading"><div><p className="admin-eyebrow">AI NHẬN XÉT</p><h2>Trò chuyện quản trị</h2></div><span>Suy luận: {thinkingEnabled ? thinkingLabel(thinkingMode) : 'Tắt'}</span></div>
+                  <div ref={logRef} className="admin-chat__log" role="log" aria-live="polite">
+                    {messages.length === 0 && <p className="admin-muted">Số liệu và nội dung nghiệp vụ được máy chủ kiểm soát; chưa có phân tích tự do đã xác minh.</p>}
+                    {messages.map((message) => <div key={message.id} className={'admin-chat__message admin-chat__message--' + message.role}>
+                      <small>{message.role === 'user' ? 'Quản trị' : 'AI cục bộ'}</small>
+                      <p>{hideSourceDisclosure(message.content) || (busy && message.role === 'assistant' ? '…' : '')}</p>
+                      {message.verified?.text && <p>{message.verified.text}</p>}
+                      {message.report && <p>Báo cáo: {message.report.from} → {message.report.to} · Doanh thu ròng: {formatMoney(message.report.netRevenue)}</p>}
+                      {['incomplete', 'error', 'stopped', 'pending'].includes(message.status) && <small>Chưa hoàn tất. {message.error}</small>}
+                      {['incomplete', 'error', 'stopped'].includes(message.status) && message.requestId && <button type="button" disabled={busy} onClick={(event) => sendMessage(event, message)}>Thử lại</button>}
+                    </div>)}
+                    {busy && <p className="admin-thinking">{activity || 'Đang phân tích'}</p>}
+                  </div>
+                  <form className="admin-chat__form" onSubmit={sendMessage}><textarea ref={chatInputRef} maxLength={2000} rows="3" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Ví dụ: Phân tích doanh thu tháng này…" aria-busy={busy} />{busy ? <button type="button" onClick={stopStream}>Dừng</button> : <button type="submit" disabled={!draft.trim()}>Gửi</button>}</form>
+                </section>
+              </div>
+            </div>
+          )}
         </>}
         </div>
         </div>

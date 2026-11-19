@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Component DropdownMenu tùy biến cho trang quản trị Admin, căn lề trái các lựa chọn.
+  - Liên kết trực tiếp: Store-Admin/src/components/ui/DropdownMenu.css, Store-Admin/src/pages/AdminCommerce.jsx
+  - Vùng ảnh hưởng khi sửa: Menu lựa chọn, panel danh sách khách hàng và các dropdown trên trang Admin.
+*/
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import './DropdownMenu.css'
 

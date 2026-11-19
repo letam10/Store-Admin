@@ -1,7 +1,9 @@
 /*
- * Tệp: server-dotnet/Program.cs
- * Mục đích: Điểm khởi động ASP.NET Core C# và đăng ký DI, EF Core SQL Server, CORS, Swagger, controllers và Menu quản lý.
- */
+  FILE NOTE
+  - Mục đích: Điểm khởi động ASP.NET Core C# và đăng ký DI, EF Core SQL Server, CORS, Swagger, controllers, Worker tự động hóa MXH và Menu quản lý.
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/AppDbContext.cs, Store-Admin/server-dotnet/Data/StoreDb.cs, Store-Admin/server-dotnet/Services/*
+  - Vùng ảnh hưởng khi sửa: Khởi tạo toàn bộ backend server-dotnet, middleware, cổng nghe, DI container và API endpoints.
+*/
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
@@ -190,6 +192,7 @@ builder.Services.AddSwaggerGen(options =>
                 "AdminSePay" => "6. Admin - SePay",
                 "AdminUnmatchedPayments" => "6. Admin - Đối soát thanh toán",
                 "AdminVouchers" => "6. Admin - Khuyến mãi & Voucher",
+                "AdminSocial" => "6. Admin - Tự động hóa Mạng Xã Hội",
                 _ => controllerName ?? "General"
             }
         };
@@ -207,6 +210,9 @@ builder.Services.AddSingleton<StoreApi.Services.AiChatService>();
 builder.Services.AddSingleton<StoreApi.Services.OllamaChatClient>();
 builder.Services.AddSingleton<StoreApi.Services.OllamaRuntime>();
 builder.Services.AddSingleton<StoreApi.Services.ChatStreamService>();
+builder.Services.AddSingleton<StoreApi.Services.SocialCopywriterService>();
+builder.Services.AddSingleton<StoreApi.Services.SocialAutoPostWorker>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<StoreApi.Services.SocialAutoPostWorker>());
 
 builder.Services.AddHttpContextAccessor();
 

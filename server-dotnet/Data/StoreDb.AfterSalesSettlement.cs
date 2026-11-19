@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Xử lý quyết toán tài chính và cấp voucher hoàn trả hàng sau mua trong StoreDb.
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.AfterSalesActions.cs, Store-Admin/server-dotnet/Controllers/AdminController.cs
+  - Vùng ảnh hưởng khi sửa: Quyết toán sau bán hàng, hoàn tiền đơn hàng và tự động cấp voucher giảm giá hàng hóa cho khách.
+*/
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using StoreApi.Models;
@@ -96,6 +102,24 @@ public sealed partial class StoreDb
             using var update = CheckoutCommand(connection, transaction,
                 "UPDATE customer_orders SET refund_amount=refund_amount+@amount WHERE id=@id", ("@amount", amount), ("@id", item.OrderId));
             update.ExecuteNonQuery();
+
+            // Tự động cấp voucher thanh toán hàng hóa tương đương số tiền hoàn trả cho khách hàng
+            var voucherCode = "HT" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+            var voucherExpires = DateTimeOffset.UtcNow.AddDays(90).ToString("O");
+            using var vCmd = CheckoutCommand(connection, transaction, """
+                IF NOT EXISTS (SELECT 1 FROM voucher_codes WHERE code = @vcode)
+                    INSERT INTO voucher_codes(code, created_at) VALUES(@vcode, @vnow);
+                INSERT INTO customer_vouchers(code, customer_id, label, type, value, scope, expires_at, source, created_at)
+                VALUES(@vcode, @vcid, @vlabel, 'amount', @vval, 'goods', @vexp, 'refund', @vnow);
+                """,
+                ("@vcode", voucherCode),
+                ("@vcid", item.CustomerId),
+                ("@vlabel", "Hoàn trả đơn hàng " + item.OrderId),
+                ("@vval", amount),
+                ("@vexp", voucherExpires),
+                ("@vnow", DateTimeOffset.UtcNow.ToString("O")));
+            vCmd.ExecuteNonQuery();
+
             item.RefundReference = reference;
             item.RefundedAt = refunded;
         }

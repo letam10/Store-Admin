@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Bộ lọc phân quyền truy cập endpoint quản trị hệ thống theo vai trò admin/staff.
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Controllers/*.cs, Store-Admin/server-dotnet/Data/StoreDb.cs
+  - Vùng ảnh hưởng khi sửa: Quyền hạn gọi API của các tài khoản quản trị viên và nhân viên.
+*/
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -41,7 +47,7 @@ public sealed class AdminAccessFilter(StoreDb db) : IAsyncActionFilter
 
     public static bool StaffAllowed(string action, string? module, string? afterSalesAction) => action switch
     {
-        "Session" or "Logout" or "Presence" or "EventsStream" or "Products" or "Customers" or "AfterSales" or "Reviews" or "ReplyReview" => true,
+        "Session" or "Logout" or "Presence" or "EventsStream" or "Products" or "Customers" or "AfterSales" or "Reviews" or "ReplyReview" or "GetSettings" or "GetPosts" or "GetGroups" or "GetViralPosts" or "GetStats" => true,
         "CreateProduct" or "UpdateProduct" or "DeleteProduct" or "Offer" => true,
         "Orders" or "OrderPaid" or "OrderFulfillment" or "OrderCancel" or "OrderReceipt" => true,
         "ListUnmatchedPayments" or "RecordUnmatchedPayment" or "RefundUnmatchedPayment" => true,

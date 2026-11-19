@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Quản lý yêu cầu đổi trả hàng, hủy đơn sau bán hàng và tự động quyết toán / cấp voucher hoàn tiền.
+  - Liên kết trực tiếp: Store-Admin/src/pages/AdminOrderWorkflow.jsx, Store-Admin/src/pages/AdminCommerce.css, Store-Admin/server-dotnet/Data/StoreDb.AfterSalesSettlement.cs
+  - Vùng ảnh hưởng khi sửa: Giao diện duyệt đổi trả, xác nhận nhận hàng, đối soát bù phí và hoàn tiền bằng voucher hàng hóa.
+*/
 import { useEffect, useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
 import './AdminCommerce.css'
@@ -12,25 +18,36 @@ const statuses = {
 }
 const closed = ['resolved', 'rejected', 'cancelled']
 
+function nowLocal() {
+  const d = new Date()
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19)
+}
+
 function CaseActions({ request, role, busy, onAction }) {
-  const [note, setNote] = useState('')
-  const [reference, setReference] = useState('')
-  const [amount, setAmount] = useState(String(request.status === 'awaiting_payment' ? request.quote.additionalDue : request.quote.refundAmount))
-  const [occurredAt, setOccurredAt] = useState('')
-  const [confirmed, setConfirmed] = useState(false)
-  const [restock, setRestock] = useState(false)
-  const [acceptLatePayment, setAcceptLatePayment] = useState(false)
-  const canProcess = role === 'admin' || role === 'staff'
   const state = request.status
   const refund = state === 'awaiting_refund'
   const financial = refund || state === 'awaiting_payment'
-  const requiresMoney = financial && (refund ? request.quote.refundAmount : request.quote.additionalDue) > 0
+  const refundProposal = request.quote?.refundAmount || 0
+  const additionalProposal = request.quote?.additionalDue || 0
+  const defaultAmount = String(refund ? refundProposal : additionalProposal)
+  const defaultReference = refund ? ('VCR-' + (request.orderId || request.id || 'HT').toString().replace(/[^a-zA-Z0-9]/g, '').slice(-8).toUpperCase()) : ''
+
+  const [note, setNote] = useState('')
+  const [reference, setReference] = useState(defaultReference)
+  const [amount, setAmount] = useState(defaultAmount)
+  const [occurredAt, setOccurredAt] = useState(nowLocal())
+  const [confirmed, setConfirmed] = useState(refund ? true : false)
+  const [restock, setRestock] = useState(false)
+  const [acceptLatePayment, setAcceptLatePayment] = useState(false)
+  const [refundMethod, setRefundMethod] = useState('voucher')
+  const canProcess = role === 'admin' || role === 'staff'
+  const requiresMoney = financial && (refund ? refundProposal : additionalProposal) > 0
   const receiving = state === 'awaiting_return'
   const shipping = state === 'awaiting_exchange' && request.fulfillment === 'delivery'
   const completing = state === 'exchange_shipped' || (state === 'awaiting_exchange' && request.fulfillment === 'pickup')
   const action = state === 'pending' ? 'approve' : receiving ? 'receive_return' : refund ? 'complete_refund'
     : state === 'awaiting_payment' ? 'fee_paid' : shipping ? 'ship_exchange' : 'complete_exchange'
-  const label = state === 'pending' ? 'Duyệt yêu cầu' : receiving ? 'Xác nhận đã nhận hàng trả' : refund ? 'Xác nhận hoàn tiền'
+  const label = state === 'pending' ? 'Duyệt yêu cầu' : receiving ? 'Xác nhận đã nhận hàng trả' : refund ? 'Chấp nhận hoàn tiền'
     : state === 'awaiting_payment' ? 'Xác nhận đã thu khoản bù' : shipping ? 'Xác nhận gửi hàng đổi' : 'Xác nhận khách nhận hàng đổi'
   if (request.legacyReviewRequired) return <p role="alert">Yêu cầu cũ cần kiểm tra riêng bảng phí và chứng từ trước khi xử lý.</p>
   if (closed.includes(state) || state === 'awaiting_confirmation') return null
@@ -46,17 +63,26 @@ function CaseActions({ request, role, busy, onAction }) {
   return <form className="admin-after-actions" onSubmit={submit}>
     <fieldset disabled={busy}>
       <legend>{label}</legend>
+      {refund && (
+        <div className="admin-after-refund-choice" style={{ margin: '10px 0', padding: '12px 14px', borderRadius: '10px', background: '#eaf4ee', border: '1px solid #c2dec9' }}>
+          <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#1a4f31' }}>Hình thức hoàn tiền:</p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: '#163826', cursor: 'pointer' }}>
+            <input type="radio" name="refundMethod" value="voucher" checked={refundMethod === 'voucher'} onChange={() => setRefundMethod('voucher')} />
+            Tự động chọn voucher thanh toán hàng hóa tương đương {money(Number(amount) || refundProposal)} (HSD 90 ngày)
+          </label>
+        </div>
+      )}
       {requiresMoney && <>
-        <label>{refund ? 'Số tiền đã hoàn thực tế (đ)' : 'Số tiền thực nhận (đ)'}<input required type="number" min="1" step="1" value={amount} onChange={event => setAmount(event.target.value)} /></label>
-        <label>{refund ? 'Mã giao dịch / phiếu hoàn tiền' : 'Mã giao dịch / phiếu thu'}<input required minLength="3" maxLength="100" value={reference} onChange={event => setReference(event.target.value)} /></label>
+        <label>{refund ? 'Số tiền hoàn thực tế theo đề xuất (đ)' : 'Số tiền thực nhận (đ)'}<input required type="number" min="1" step="1" value={amount} onChange={event => setAmount(event.target.value)} /></label>
+        <label>{refund ? 'Mã chứng từ / tham chiếu voucher hoàn tiền' : 'Mã giao dịch / phiếu thu'}<input required minLength="3" maxLength="100" value={reference} onChange={event => setReference(event.target.value)} /></label>
         <label>{refund ? 'Thời điểm hoàn tiền' : 'Thời điểm nhận tiền'}<input required type="datetime-local" step="1" value={occurredAt} onChange={event => setOccurredAt(event.target.value)} /></label>
         {request.feePaymentExpiresAt && !refund && <p>Hạn QR thu khoản bù: {date(request.feePaymentExpiresAt)}.</p>}
       </>}
       {shipping && <label>Mã vận đơn hàng đổi<input required minLength="3" maxLength="100" value={reference} onChange={event => setReference(event.target.value)} /></label>}
       {requiresMoney && !refund && request.paymentMethod === 'bank_transfer' && <label className="admin-confirm-check"><input type="checkbox" checked={acceptLatePayment} onChange={event => setAcceptLatePayment(event.target.checked)} />Đã đối soát khoản vào ngoài hạn QR và đồng ý tiếp tục đổi hàng (cần ghi rõ lý do).</label>}
-      <label>Ghi chú xử lý<textarea value={note} required={acceptLatePayment} minLength={acceptLatePayment ? 5 : undefined} maxLength="1000" onChange={event => setNote(event.target.value)} /></label>
+      <label>Ghi chú xử lý (tùy chọn)<textarea value={note} placeholder={refund ? 'Nhập ghi chú thêm nếu muốn rồi bấm chấp nhận…' : ''} required={acceptLatePayment} minLength={acceptLatePayment ? 5 : undefined} maxLength="1000" onChange={event => setNote(event.target.value)} /></label>
       {(requiresMoney || receiving || completing) && <label className="admin-confirm-check"><input type="checkbox" required checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />
-        {receiving ? 'Đã nhận và kiểm tra đủ hàng khách trả.' : completing ? 'Khách đã nhận đủ hàng thay thế.' : refund ? 'Đã hoàn tiền thực tế và kiểm tra chứng từ.' : 'Đã nhận tiền thực tế và kiểm tra chứng từ.'}
+        {receiving ? 'Đã nhận và kiểm tra đủ hàng khách trả.' : completing ? 'Khách đã nhận đủ hàng thay thế.' : refund ? 'Xác nhận hoàn tiền bằng voucher hàng hóa tương đương ' + money(Number(amount) || refundProposal) + ' cho khách.' : 'Đã nhận tiền thực tế và kiểm tra chứng từ.'}
       </label>}
       {receiving && canProcess && <label className="admin-confirm-check"><input type="checkbox" checked={restock} onChange={event => setRestock(event.target.checked)} />Hàng trả đủ điều kiện bán lại, nhập lại tồn kho.</label>}
       <div className="admin-order-actions"><button type="submit">{busy ? 'Đang xử lý…' : label}</button>
@@ -101,12 +127,6 @@ export default function AdminAfterSales({ csrfToken, role = 'admin' }) {
     {error && <p className="admin-error" role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     {data && <p className="admin-policy">Hủy trước giao: {data.policy.cancellationPercent}% tiền hàng, tối thiểu {money(data.policy.cancellationMinimum)}, khấu trừ vào tiền hoàn. Trả / đổi trong {data.policy.returnDays} ngày sau nhận hàng. Lịch mới tối đa {data.policy.rescheduleDays} ngày từ lịch cũ.</p>}
     {!data && !error && <p role="status">Đang tải yêu cầu…</p>}
-    <div className="admin-commerce-list">{data?.requests.map(item => <article key={item.id} data-case-id={item.id}>
-      <div><b>{kinds[item.kind]} · {item.orderId}</b><small>{item.username} · {statuses[item.status] || item.status}</small><p>{item.reason}</p></div>
-      <span>Cần bù: {money(item.quote.additionalDue)} · Hoàn: {money(item.quote.refundAmount)}</span>
-      <button type="button" disabled={busy} onClick={() => { setSelected(item.id); setError(''); setMessage('') }}>Chi tiết</button>
-    </article>)}</div>
-    {data && !data.requests.length && <p className="admin-empty">Chưa có yêu cầu sau mua.</p>}
     {request && <section className="admin-detail-panel admin-order-detail" aria-label="Chi tiết yêu cầu sau mua">
       <header><h3>{kinds[request.kind]} · {request.id}</h3><button type="button" disabled={busy} onClick={() => setSelected(null)}>Đóng</button></header>
       <p>{request.reason}</p><p>{statuses[request.status] || request.status}{request.scheduledAt && <> · Lịch mới: {date(request.scheduledAt)}</>}</p>
@@ -122,5 +142,11 @@ export default function AdminAfterSales({ csrfToken, role = 'admin' }) {
       <CaseActions key={request.id + ':' + request.status} request={request} role={role} busy={busy} onAction={run} />
       <details className="admin-after-history"><summary>Lịch sử xử lý</summary>{request.events.map((event, index) => <p key={index}><small>{date(event.createdAt)} · {event.actor}</small><br />{event.message}</p>)}</details>
     </section>}
+    <div className="admin-commerce-list">{data?.requests.map(item => <article key={item.id} data-case-id={item.id}>
+      <div><b>{kinds[item.kind]} · {item.orderId}</b><small>{item.username} · {statuses[item.status] || item.status}</small><p>{item.reason}</p></div>
+      <span>Cần bù: {money(item.quote.additionalDue)} · Hoàn: {money(item.quote.refundAmount)}</span>
+      <button type="button" disabled={busy} onClick={() => { setSelected(item.id); setError(''); setMessage('') }}>Chi tiết</button>
+    </article>)}</div>
+    {data && !data.requests.length && <p className="admin-empty">Chưa có yêu cầu sau mua.</p>}
   </section>
 }

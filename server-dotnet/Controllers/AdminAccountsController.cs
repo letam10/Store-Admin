@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Bộ điều khiển API quản lý tài khoản nhân viên (staff) và cập nhật mật khẩu khách hàng.
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.Accounts.cs, Store-Admin/src/pages/CustomerPasswordEditor.jsx
+  - Vùng ảnh hưởng khi sửa: Quản lý tài khoản nhân viên và đổi mật khẩu khách hàng từ trang quản trị.
+*/
 using System.Net.Mail;
 using Microsoft.AspNetCore.Mvc;
 using StoreApi.Data;

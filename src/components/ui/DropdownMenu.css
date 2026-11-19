@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Định kiểu giao diện dropdown select tùy chỉnh trong trang quản trị Admin, đảm bảo căn trái/giữa.
+  - Liên kết trực tiếp: Store-Admin/src/components/ui/DropdownMenu.jsx, Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/src/pages/AdminModules.jsx
+  - Vùng ảnh hưởng khi sửa: Toàn bộ dropdown select và ô chọn tùy biến trên giao diện quản trị Admin.
+*/
 .admin-dropdown-menu {
   position: relative;
   width: 100%;
@@ -5,6 +11,7 @@
   color: var(--admin-text, #183227);
   --admin-dropdown-radius: 11px;
   --admin-dropdown-max-height: min(320px, 45vh);
+  text-align: left !important;
 }
 
 .admin-dropdown-menu__trigger {
@@ -23,7 +30,7 @@
   font: inherit;
   font-size: 13px;
   font-weight: 600;
-  text-align: left;
+  text-align: left !important;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   box-sizing: border-box;
@@ -52,6 +59,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left !important;
 }
 
 .admin-dropdown-menu__caret {
@@ -117,6 +125,7 @@
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
+  text-align: left !important;
   white-space: nowrap;
   transition: all 0.15s ease;
 }
@@ -134,7 +143,7 @@
   background: #e2f4e8;
 }
 
-.admin-dropdown-menu__option span:last-child {
+.admin-dropdown-menu__option span[aria-hidden="true"] {
   font-size: 13px;
   font-weight: 800;
   color: #2b8454;

@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Xử lý dữ liệu tài khoản quản trị, nhân viên và cập nhật mật khẩu khách hàng trong StoreDb.
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Controllers/AdminAccountsController.cs, Store-Admin/server-dotnet/Data/StoreDb.cs
+  - Vùng ảnh hưởng khi sửa: Quyền truy cập quản trị, phiên đăng nhập và đổi mật khẩu khách hàng.
+*/
 using Microsoft.Data.SqlClient;
 using StoreApi.Security;
 

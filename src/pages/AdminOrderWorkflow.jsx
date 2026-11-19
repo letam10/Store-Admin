@@ -1,3 +1,9 @@
+/*
+  FILE NOTE
+  - Mục đích: Quản lý quy trình xử lý đơn hàng, đối soát thanh toán chuyển khoản và cập nhật trạng thái giao nhận.
+  - Liên kết trực tiếp: Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/src/pages/AdminCommerce.css, Store-Admin/src/pages/AdminUnmatchedPayments.jsx
+  - Vùng ảnh hưởng khi sửa: Bảng danh sách đơn hàng, form chi tiết đơn hàng admin và các thao tác cập nhật đơn.
+*/
 import { useEffect, useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
 import './AdminCommerce.css'
@@ -67,8 +73,6 @@ export function AdminOrders({ csrfToken, role = 'admin' }) {
   return <section className="admin-module-card"><div className="admin-commerce-head"><div><p className="admin-eyebrow">Bán hàng & thanh toán</p><h2>Đơn hàng khách hàng</h2><p>Đối soát tiền thực nhận và theo dõi lịch giao / nhận.</p></div><button type="button" disabled={busy} onClick={() => reload().catch(failure => setProblem(failure.message))}>Làm mới</button></div>
     {(error || problem) && <p className="admin-error" role="alert">{problem || error}</p>}{message && <p role="status">{message}</p>}
     {!data && !error && <p role="status">Đang tải đơn…</p>}
-    <div className="admin-table-scroll"><table className="admin-order-table"><thead><tr><th>Đơn / khách</th><th>Giá trị</th><th>Thanh toán</th><th>Giao / nhận</th><th>Lịch hẹn</th><th>Thao tác</th></tr></thead><tbody>{data?.orders.map(item => <tr key={item.id}><td><b>{item.id}</b><small>{item.username} · {item.recipient}</small></td><td>{money(item.total)}</td><td>{item.status === 'refunded' ? statuses.refunded : statuses[item.paymentState] || statuses[item.status]}<small>{item.paymentMethod === 'voucher' ? 'Mã giảm giá đủ giá trị (0đ)' : item.paymentMethod === 'bank_transfer' ? 'Chuyển khoản' : item.paymentMethod === 'cash' ? 'Thu tại quầy' : 'Thu khi giao'}</small></td><td>{delivery[item.deliveryStatus] || item.deliveryStatus}</td><td>{date(item.scheduledAt)}</td><td><button type="button" onClick={() => select(item)} aria-pressed={selected === item.id}>Xử lý</button></td></tr>)}</tbody></table></div>
-    {data && !data.orders.length && <p className="admin-empty">Chưa có đơn hàng.</p>}
     {order && <section className="admin-detail-panel admin-order-detail"><header><div><p className="admin-eyebrow">Chi tiết đơn</p><h3>{order.id}</h3></div><button type="button" onClick={() => setSelected(null)}>Đóng</button></header>
       <p>{order.recipient} · {order.phone}<br />{order.address || 'Nhận tại cửa hàng'}<br />Lịch hẹn: <b>{date(order.scheduledAt)}</b></p>
       <p>Thư điện tử biên nhận khách: {mailStates[order.invoiceEmailStatus] || 'Chưa gửi'} · Thông báo quản trị: {mailStates[order.adminEmailStatus] || 'Chưa gửi'}</p>
@@ -85,6 +89,8 @@ export function AdminOrders({ csrfToken, role = 'admin' }) {
       <AdminUnmatchedPayments key={order.id} order={order} csrfToken={csrfToken} onChanged={reload} />
       {['pending','paid'].includes(order.status) && <div className="admin-order-actions">{nextDelivery.map(key => <button type="button" key={key} disabled={busy} onClick={() => act('/fulfillment', { status: key }, 'PATCH')}>{delivery[key]}</button>)}</div>}
     </section>}
+    <div className="admin-table-scroll"><table className="admin-order-table"><thead><tr><th>Đơn / khách</th><th>Giá trị</th><th>Thanh toán</th><th>Giao / nhận</th><th>Lịch hẹn</th><th>Thao tác</th></tr></thead><tbody>{data?.orders.map(item => <tr key={item.id}><td><b>{item.id}</b><small>{item.username} · {item.recipient}</small></td><td>{money(item.total)}</td><td>{item.status === 'refunded' ? statuses.refunded : statuses[item.paymentState] || statuses[item.status]}<small>{item.paymentMethod === 'voucher' ? 'Mã giảm giá đủ giá trị (0đ)' : item.paymentMethod === 'bank_transfer' ? 'Chuyển khoản' : item.paymentMethod === 'cash' ? 'Thu tại quầy' : 'Thu khi giao'}</small></td><td>{delivery[item.deliveryStatus] || item.deliveryStatus}</td><td>{date(item.scheduledAt)}</td><td><button type="button" onClick={() => select(item)} aria-pressed={selected === item.id}>Xử lý</button></td></tr>)}</tbody></table></div>
+    {data && !data.orders.length && <p className="admin-empty">Chưa có đơn hàng.</p>}
     {role === 'admin' && <><AdminSePay onSelectPayment={selectTransfer} /><details className="admin-module-card"><summary>Cấu hình ngân hàng nhận tiền</summary><AdminPaymentSettings csrfToken={csrfToken} /></details></>}
   </section>
 }

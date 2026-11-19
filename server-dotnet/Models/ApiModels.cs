@@ -1,11 +1,9 @@
 /*
- * @codex-vn-doc
- * Tệp: server-dotnet/Models/ApiModels.cs
- * Mục đích: DTO/model request-response dùng chung cho controller C#.
- * Thành phần chính: CatalogProduct, CustomerAccount, RegisterRequest, LoginRequest, OfferRequest, RecordRequest.
- * Liên kết trực tiếp: không có import/using trực tiếp được phát hiện.
- * Cẩn trọng: khi sửa hàm, route, state, schema hoặc export phải kiểm tra các tệp gọi nó; các nhánh lỗi, dữ liệu rỗng, hủy request và dữ liệu không hợp lệ phải giữ đúng hợp đồng hiện tại.
- */
+  FILE NOTE
+  - Mục đích: DTO/model request-response dùng chung cho controller API quản trị và khách hàng.
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Controllers/AdminController.cs, Store-Admin/server-dotnet/Data/StoreDb.cs
+  - Vùng ảnh hưởng khi sửa: Các endpoint cập nhật tài khoản khách hàng, đơn hàng và sản phẩm.
+*/
 namespace StoreApi.Models;
 
 // Vai trò kiểu CatalogProduct: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
@@ -72,7 +70,7 @@ public sealed record AdminVoucherRequest(
     string? Scope, string? ExpiresAt, bool? Active);
 
 public sealed record AdminCustomerUpdateRequest(
-    string? Username, string? Email, int? Points, int? SpinCredits);
+    string? Username, string? Email, int? Points, int? SpinCredits, string? Phone = null, string? Password = null);
 
 public sealed record ReviewReplyRequest(string? Reply);
 
