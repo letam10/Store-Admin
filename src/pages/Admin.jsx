@@ -448,19 +448,6 @@ export default function Admin() {
       <div className="admin-workspace-card">
       <aside className="admin-sidebar">
         <a className="admin-brand" href="/admin">
-          <svg viewBox="0 0 36 36" width="30" height="30" fill="none" aria-hidden="true" style={{ display: 'inline-block', flexShrink: 0, marginRight: '4px' }}>
-            <rect x="1" y="1" width="34" height="34" rx="10" fill="url(#admin-brand-bg)" stroke="#52aa7a" strokeWidth="1.2"/>
-            <circle cx="16" cy="16" r="6.2" stroke="#fff" strokeWidth="3.6" fill="none" strokeLinecap="round"/>
-            <circle cx="24.5" cy="24.5" r="4.2" fill="#5fe39d" stroke="#fff" strokeWidth="1.2"/>
-            <defs>
-              <linearGradient id="admin-brand-bg" x1="0" y1="0" x2="36" y2="36">
-                <stop stopColor="#143d2c"/>
-                <stop offset="0.55" stopColor="#226344"/>
-                <stop offset="1" stopColor="#358b5e"/>
-              </linearGradient>
-            </defs>
-          </svg>
-          OmniCart<span>.</span><small>{language === 'en' ? 'ADMIN' : 'QUẢN TRỊ'}</small>
         </a>
         <div className="admin-sidebar__profile"><span>{String(session.username || 'A').slice(0, 1).toUpperCase()}</span><div><b>{session.username}</b><small>{session.role === 'staff' ? 'Nhân viên' : 'Quản trị viên'}</small></div></div>
         <nav aria-label="Điều hướng quản trị">
