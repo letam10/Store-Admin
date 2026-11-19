@@ -7,8 +7,9 @@
 
 const FB_PROFILE_URL = 'https://www.facebook.com/profile.php?id=61580644871703'
 const TIKTOK_PROFILE_URL = 'https://www.tiktok.com/@harutv666'
-const TIKTOK_UPLOAD_URL = 'https://www.tiktok.com/creator-center/upload'
+const TIKTOK_UPLOAD_URL = 'https://www.tiktok.com/tiktokstudio/upload'
 const ADMIN_BASE_URL = 'http://localhost:5174'
+const MAX_PRODUCT_IMAGE_BYTES = 12 * 1024 * 1024
 
 // Helper tìm hoặc mở tab an toàn trong trình duyệt
 async function findOrCreateTab(urlPattern, defaultUrl) {
@@ -30,6 +31,7 @@ async function waitForTabComplete(tabId, timeoutMs = 8000) {
     } catch (_) {}
     await new Promise(r => setTimeout(r, 400))
   }
+  throw new Error('TAB_LOAD_TIMEOUT')
 }
 
 // Helper gửi message với retry và fallback injection bằng chrome.scripting
@@ -38,20 +40,114 @@ async function sendTabMessageWithRetry(tabId, message, scriptFile) {
   try {
     const res = await chrome.tabs.sendMessage(tabId, message)
     if (res) return res
+    throw new Error('NO_CONTENT_SCRIPT_RESPONSE')
   } catch (err) {
-    if (scriptFile && chrome.scripting) {
+    const receiverMissing = /receiving end does not exist|could not establish connection|no content script response/i.test(err.message || '')
+    if (receiverMissing && scriptFile && chrome.scripting) {
       try {
         await chrome.scripting.executeScript({
           target: { tabId },
-          files: [scriptFile]
+          files: Array.isArray(scriptFile) ? scriptFile : [scriptFile]
         })
-        await new Promise(r => setTimeout(r, 600))
+        await new Promise(r => setTimeout(r, 800))
         const retryRes = await chrome.tabs.sendMessage(tabId, message)
         if (retryRes) return retryRes
-      } catch (_) {}
+        throw new Error('NO_CONTENT_SCRIPT_RESPONSE')
+      } catch (injectionError) {
+        throw new Error(injectionError.message || err.message)
+      }
     }
     throw err
   }
+}
+
+function isLocalProductImageUrl(value) {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)
+  } catch (_) {
+    return false
+  }
+}
+
+async function loadProductImageDataUrl(imageUrl) {
+  if (!isLocalProductImageUrl(imageUrl)) throw new Error('PRODUCT_IMAGE_URL_NOT_ALLOWED')
+
+  const response = await fetch(imageUrl, { credentials: 'omit' })
+  if (!response.ok) throw new Error(`PRODUCT_IMAGE_HTTP_${response.status}`)
+
+  const contentType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+  if (!contentType.startsWith('image/')) throw new Error('PRODUCT_IMAGE_TYPE_INVALID')
+
+  const blob = await response.blob()
+  if (!blob.size || blob.size > MAX_PRODUCT_IMAGE_BYTES) throw new Error('PRODUCT_IMAGE_SIZE_INVALID')
+
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
+  }
+
+  return `data:${contentType};base64,${btoa(binary)}`
+}
+
+async function preparePostPayload(postData) {
+  if (!postData || typeof postData !== 'object') throw new Error('POST_DATA_REQUIRED')
+  if (postData.privacy !== 'only_me') throw new Error('ONLY_ME_PRIVACY_REQUIRED')
+  if (!postData.imageUrl) throw new Error('PRODUCT_IMAGE_REQUIRED')
+
+  return {
+    ...postData,
+    imageDataUrl: await loadProductImageDataUrl(postData.imageUrl)
+  }
+}
+
+async function findOrCreateFacebookProfileTab() {
+  const tabs = await chrome.tabs.query({})
+  const matchingTab = tabs.find((tab) => {
+    try {
+      const url = new URL(tab.url || '')
+      return /(^|\.)facebook\.com$/i.test(url.hostname) && url.href.includes('61580644871703')
+    } catch (_) {
+      return false
+    }
+  })
+
+  return matchingTab || chrome.tabs.create({ url: FB_PROFILE_URL, active: false })
+}
+
+async function findOrCreateTikTokUploadTab() {
+  const tabs = await chrome.tabs.query({})
+  const uploadPaths = ['/upload', '/creator-center/upload', '/tiktokstudio/upload']
+  const matchingTab = tabs.find((tab) => {
+    try {
+      const url = new URL(tab.url || '')
+      return /(^|\.)tiktok\.com$/i.test(url.hostname) && uploadPaths.some((path) => url.pathname.startsWith(path))
+    } catch (_) {
+      return false
+    }
+  })
+
+  return matchingTab || chrome.tabs.create({ url: TIKTOK_UPLOAD_URL, active: false })
+}
+
+function isConfirmedPostResponse(response, platform) {
+  if (response?.ok !== true || response.platform !== platform || response.privacy !== 'only_me') return false
+  if (typeof response.postUrl !== 'string' || !response.realPostId) return false
+
+  try {
+    const url = new URL(response.postUrl)
+    if (platform === 'facebook') {
+      return /(^|\.)facebook\.com$/i.test(url.hostname) &&
+        (/\/posts\//i.test(url.pathname) || /\/share\/p\//i.test(url.pathname) || /story_fbid=/i.test(url.search))
+    }
+    if (platform === 'tiktok') {
+      return /(^|\.)tiktok\.com$/i.test(url.hostname) && /\/@harutv666\/(?:video|photo)\/[0-9a-z]+/i.test(url.pathname)
+    }
+  } catch (_) {}
+
+  return false
 }
 
 // Lắng nghe thông điệp từ content-admin-bridge hoặc extension popup
@@ -115,18 +211,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Thực hiện tự động điền và đăng bài lên Facebook mà không chiếm quyền chuột/bàn phím
 async function executeFacebookPost(postData) {
   try {
-    const fbTab = await findOrCreateTab('facebook.com', FB_PROFILE_URL)
+    const preparedPost = await preparePostPayload(postData)
+    const fbTab = await findOrCreateFacebookProfileTab()
     const response = await sendTabMessageWithRetry(fbTab.id, {
       type: 'FB_EXECUTE_POST',
-      payload: postData
-    }, 'content-facebook.js')
+      payload: preparedPost
+    }, ['content-media.js', 'content-facebook.js'])
 
-    return response || {
-      ok: true,
-      postUrl: FB_PROFILE_URL,
-      platform: 'facebook',
-      message: 'Đã gửi nội dung lên tab Facebook cá nhân John Harper thành công.'
+    if (!isConfirmedPostResponse(response, 'facebook')) {
+      return { ok: false, error: response?.error || 'FACEBOOK_POST_NOT_VERIFIED' }
     }
+    return response
   } catch (err) {
     return {
       ok: false,
@@ -138,18 +233,17 @@ async function executeFacebookPost(postData) {
 // Thực hiện tự động điền và tạo bản nháp/bài đăng lên TikTok
 async function executeTikTokPost(postData) {
   try {
-    const ttTab = await findOrCreateTab('tiktok.com', TIKTOK_UPLOAD_URL)
+    const preparedPost = await preparePostPayload(postData)
+    const ttTab = await findOrCreateTikTokUploadTab()
     const response = await sendTabMessageWithRetry(ttTab.id, {
       type: 'TIKTOK_EXECUTE_POST',
-      payload: postData
-    }, 'content-tiktok.js')
+      payload: preparedPost
+    }, ['content-media.js', 'content-tiktok.js'])
 
-    return response || {
-      ok: true,
-      postUrl: TIKTOK_PROFILE_URL,
-      platform: 'tiktok',
-      message: 'Đã đưa nội dung kịch bản và hashtag lên tab TikTok @harutv666 thành công.'
+    if (!isConfirmedPostResponse(response, 'tiktok')) {
+      return { ok: false, error: response?.error || 'TIKTOK_POST_NOT_VERIFIED' }
     }
+    return response
   } catch (err) {
     return {
       ok: false,

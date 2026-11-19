@@ -206,6 +206,8 @@ test('module Tự động hóa MXH cấu hình đầy đủ tự động, nhóm 
 
 test('AI Copywriting Studio sinh bài bằng Qwen và bảo toàn productId chính xác khi đăng', async () => {
   let createdPayload = null
+  let extensionPostPayload = null
+  let publishRealPayload = null
   const mockFetch = async (url, opts) => {
     const u = String(url)
     if (u.includes('/api/admin/session')) return json(adminSession)
@@ -217,6 +219,10 @@ test('AI Copywriting Studio sinh bài bằng Qwen và bảo toàn productId chí
     if (u.includes('/api/admin/social/posts/create')) {
       createdPayload = JSON.parse(opts.body)
       return json({ ok: true, post: { id: 'new-p1', ...createdPayload } })
+    }
+    if (u.includes('/api/admin/social/posts/new-p1/publish-real')) {
+      publishRealPayload = JSON.parse(opts.body)
+      return json({ ok: true, post: { id: 'new-p1', status: 'published', postUrl: publishRealPayload.postUrl } })
     }
     if (u.includes('/api/admin/social/generate')) {
       return json({
@@ -232,6 +238,24 @@ test('AI Copywriting Studio sinh bài bằng Qwen và bảo toàn productId chí
   }
 
   await renderAdmin(mockFetch, async (doc) => {
+    doc.defaultView.addEventListener('message', (event) => {
+      if (event.data?.source !== 'OMNICART_ADMIN_REQUEST' || event.data.action !== 'AUTO_POST') return
+      extensionPostPayload = event.data.payload.post
+      doc.defaultView.postMessage({
+        source: 'OMNICART_EXTENSION_RESPONSE',
+        requestId: event.data.requestId,
+        ok: true,
+        data: {
+          ok: true,
+          platform: 'facebook',
+          privacy: 'only_me',
+          postUrl: 'https://www.facebook.com/profile.php?id=61580644871703&story_fbid=99112233',
+          realPostId: '99112233',
+          publishedTime: '2026-11-19T14:00:00.000Z'
+        }
+      }, '*')
+    })
+
     // 1. Chuyển sang AI cục bộ
     const aiNavBtn = Array.from(doc.querySelectorAll('.admin-sidebar nav button')).find(b => b.textContent.includes('AI cục bộ') || b.textContent.includes('Local AI'))
     await act(async () => {
@@ -258,17 +282,217 @@ test('AI Copywriting Studio sinh bài bằng Qwen và bảo toàn productId chí
       generateBtn.click()
     })
 
-    // 5. Bấm nút đăng ngay
+    // 5. Bấm đăng ngay; mô phỏng phản hồi Extension xác nhận permalink thật
     const publishBtn = Array.from(doc.querySelectorAll('button')).find(b => b.textContent.includes('Đăng Ngay Lên Mạng Xã Hội'))
     assert.ok(publishBtn, 'Phải có nút Đăng Ngay Lên Mạng Xã Hội')
     await act(async () => {
       publishBtn.click()
+      await new Promise((resolve) => setTimeout(resolve, 100))
     })
 
     // Kiểm tra payload gửi lên API posts/create đã bảo toàn đúng productId của sản phẩm
     assert.ok(createdPayload, 'Phải gọi API tạo bài viết')
     assert.strictEqual(createdPayload.productId, 'prod-canvas-99', 'Mã sản phẩm productId phải được giữ nguyên khi đăng bài')
     assert.strictEqual(createdPayload.productName, 'Túi Vải Canvas Siêu Bền')
+    assert.strictEqual(createdPayload.publishImmediately, false, 'Bản ghi chỉ được lưu nháp trước khi Extension đăng thật')
+    assert.strictEqual(createdPayload.privacy, 'only_me', 'Bản nháp phải giữ quyền riêng tư Chỉ mình tôi')
+    assert.ok(extensionPostPayload?.imageUrl.endsWith('/products/bag.svg'), 'Extension phải nhận ảnh sản phẩm đã chọn')
+    assert.ok(extensionPostPayload?.content.includes('Túi canvas xinh xắn'), 'Extension phải nhận nội dung AI Local đã tạo')
+    assert.strictEqual(extensionPostPayload?.privacy, 'only_me')
+    assert.strictEqual(publishRealPayload?.realPostId, '99112233', 'Lịch sử phải lưu mã bài thật do Extension xác nhận')
+  })
+})
+
+test('Full-Auto tự gửi bài mới trong phiên qua Extension và không dùng trạng thái đăng giả', async () => {
+  const automaticPost = {
+    id: 'scheduled-post-1',
+    productId: 'product-scheduled',
+    productName: 'Bình giữ nhiệt',
+    productPrice: 250000,
+    productImage: '/products/bottle.jpg',
+    platform: 'facebook',
+    title: 'Tiêu đề AI đã tạo',
+    content: 'Mô tả AI đã tạo',
+    hashtags: '#OmniCart',
+    status: 'ready_for_publish',
+    privacy: 'only_me',
+    triggerTime: new Date(Date.now() + 10000).toISOString()
+  }
+  const extensionRequests = []
+  const extensionResponses = []
+  let publishRealCalls = 0
+  let savedPostUrl = ''
+  const mockFetch = async (url, options = {}) => {
+    const requestUrl = String(url)
+    if (requestUrl.includes('/api/admin/session')) return json(adminSession)
+    if (requestUrl.includes('/api/admin/presence')) return json({ online: true })
+    if (requestUrl.includes('/api/admin/settings')) return json({ model: 'qwen3.5:4b', contextSize: 16384, allowedContextSizes: [8192, 16384] })
+    if (requestUrl.includes('/api/admin/stats')) return json({ grossRevenue: 1000000, refunds: 0, netRevenue: 1000000, includedOrders: 2, from: '2026-11-01', to: '2026-11-19', dataMode: 'real' })
+    if (requestUrl.includes('/api/admin/social/stats')) return json({ stats: { totalPostsToday: 0, publishedCount: 0, pendingCount: 1, failedCount: 0, totalLikes: 0, totalShares: 0, totalComments: 0, lastRunAt: null, nextRunAt: null, isActive: true, intervalHours: 2, mode: 'full_auto' } })
+    if (requestUrl.includes('/api/admin/social/settings')) return json({ settings: { id: 1, isActive: true, mode: 'full_auto', intervalHours: 2, channels: 'facebook,tiktok', preferredCategory: 'all', toneStyle: 'viral_engaging', privacy: 'only_me', includeHashtags: true, includeEmojis: true, includeCta: true, includeHotline: true, contactHotline: '0901.234.567', orderLinkTemplate: 'https://omnicart.vn/products/{id}' } })
+    if (requestUrl.includes('/publish-real')) {
+      publishRealCalls += 1
+      const payload = JSON.parse(options.body)
+      savedPostUrl = payload.postUrl
+      return json({ ok: true, post: { id: automaticPost.id, status: 'published', postUrl: payload.postUrl } })
+    }
+    if (requestUrl.includes('/api/admin/social/posts')) return json({ posts: [automaticPost] })
+    if (requestUrl.includes('/api/admin/social/groups')) return json({ groups: [] })
+    if (requestUrl.includes('/api/admin/social/viral')) return json({ posts: [] })
+    return json({})
+  }
+
+  await renderAdmin(mockFetch, async (doc) => {
+    doc.defaultView.addEventListener('message', event => {
+      if (event.data?.source === 'OMNICART_EXTENSION_RESPONSE') extensionResponses.push(event.data)
+    })
+    doc.defaultView.addEventListener('message', (event) => {
+      const request = event.data
+      if (request?.source !== 'OMNICART_ADMIN_REQUEST' || request.action !== 'AUTO_POST') return
+
+      extensionRequests.push(request.payload)
+      doc.defaultView.dispatchEvent(new doc.defaultView.MessageEvent('message', {
+        data: {
+          source: 'OMNICART_EXTENSION_RESPONSE',
+          requestId: request.requestId,
+          ok: true,
+          data: {
+            ok: true,
+            platform: 'facebook',
+            privacy: 'only_me',
+            postUrl: 'https://www.facebook.com/profile.php?id=61580644871703&story_fbid=99112235',
+            realPostId: '99112235',
+            publishedTime: '2026-11-19T14:00:00.000Z'
+          }
+        },
+        origin: doc.defaultView.location.origin
+      }))
+    })
+
+    const aiNavBtn = Array.from(doc.querySelectorAll('.admin-sidebar nav button')).find(button => button.textContent.includes('AI cục bộ') || button.textContent.includes('Local AI'))
+    await act(async () => aiNavBtn.click())
+    const socialTab = Array.from(doc.querySelectorAll('.admin-ai-tab-btn'))[1]
+    await act(async () => socialTab.click())
+
+    await act(async () => {
+      doc.defaultView.dispatchEvent(new doc.defaultView.CustomEvent('omnicart-extension-ready'))
+      const deadline = Date.now() + 2000
+      while (!savedPostUrl && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+    })
+
+    assert.strictEqual(extensionRequests.length, 1, 'Bài mới trong phiên phải được gửi đúng một lần')
+    assert.strictEqual(extensionRequests[0].platform, 'facebook')
+    assert.strictEqual(extensionRequests[0].post.privacy, 'only_me')
+    assert.ok(extensionRequests[0].post.imageUrl.endsWith('/products/bottle.jpg'))
+    assert.ok(extensionRequests[0].post.content.includes('Mô tả AI đã tạo'))
+    assert.strictEqual(
+      savedPostUrl,
+      'https://www.facebook.com/profile.php?id=61580644871703&story_fbid=99112235',
+      'Lịch sử chưa nhận permalink thật. Thông báo: ' + (doc.querySelector('.social-alert')?.textContent || 'chưa có') +
+        '; phản hồi Extension: ' + JSON.stringify(extensionResponses) + '; lệnh lưu: ' + publishRealCalls
+    )
+  })
+})
+
+test('Đăng thử tạo nội dung AI và đăng lần lượt một bài Facebook, một bài TikTok bằng ảnh sản phẩm', async () => {
+  const cyclePlatforms = []
+  const extensionRequests = []
+  const publishedPayloads = []
+  const mockFetch = async (url, options = {}) => {
+    const requestUrl = String(url)
+    if (requestUrl.includes('/api/admin/session')) return json(adminSession)
+    if (requestUrl.includes('/api/admin/presence')) return json({ online: true })
+    if (requestUrl.includes('/api/admin/settings')) return json({ model: 'qwen3.5:4b', contextSize: 16384, allowedContextSizes: [8192, 16384] })
+    if (requestUrl.includes('/api/admin/stats')) return json({ grossRevenue: 1000000, refunds: 0, netRevenue: 1000000, includedOrders: 2, from: '2026-11-01', to: '2026-11-19', dataMode: 'real' })
+    if (requestUrl.includes('/api/admin/social/stats')) return json({ stats: { totalPostsToday: 0, publishedCount: 0, pendingCount: 0, failedCount: 0, totalLikes: 0, totalShares: 0, totalComments: 0, lastRunAt: null, nextRunAt: null, isActive: true, intervalHours: 2, mode: 'full_auto' } })
+    if (requestUrl.includes('/api/admin/social/settings')) return json({ settings: { id: 1, isActive: true, mode: 'full_auto', intervalHours: 2, channels: 'facebook,tiktok', preferredCategory: 'all', toneStyle: 'viral_engaging', privacy: 'only_me', includeHashtags: true, includeEmojis: true, includeCta: true, includeHotline: true, contactHotline: '0901.234.567', orderLinkTemplate: 'https://omnicart.vn/products/{id}' } })
+    if (requestUrl.includes('/api/admin/social/trigger-cycle?platform=')) {
+      const platform = requestUrl.split('platform=')[1]
+      cyclePlatforms.push(platform)
+      return json({
+        ok: true,
+        post: {
+          id: 'batch-' + platform,
+          productId: 'product-' + platform,
+          productName: 'Sản phẩm ' + platform,
+          productPrice: 10000,
+          productImage: '/products/' + platform + '.jpg',
+          platform,
+          title: 'Tiêu đề AI ' + platform,
+          content: 'Mô tả AI ' + platform,
+          hashtags: '#OmniCart',
+          privacy: 'only_me'
+        }
+      })
+    }
+    if (requestUrl.includes('/publish-real')) {
+      const payload = JSON.parse(options.body)
+      publishedPayloads.push(payload)
+      return json({ ok: true, post: { id: 'saved-' + payload.platform, status: 'published', postUrl: payload.postUrl } })
+    }
+    if (requestUrl.includes('/api/admin/social/posts')) return json({ posts: [] })
+    if (requestUrl.includes('/api/admin/social/groups')) return json({ groups: [] })
+    if (requestUrl.includes('/api/admin/social/viral')) return json({ posts: [] })
+    return json({})
+  }
+
+  await renderAdmin(mockFetch, async (doc) => {
+    doc.defaultView.addEventListener('message', (event) => {
+      const request = event.data
+      if (request?.source !== 'OMNICART_ADMIN_REQUEST') return
+
+      let data
+      if (request.action === 'CHECK_STATUS') {
+        data = { ok: true, tabs: { admin: true, facebook: true, tiktok: true } }
+      } else if (request.action === 'AUTO_POST') {
+        const { platform, post } = request.payload
+        extensionRequests.push({ platform, post })
+        data = {
+          ok: true,
+          platform,
+          privacy: 'only_me',
+          postUrl: platform === 'facebook'
+            ? 'https://www.facebook.com/profile.php?id=61580644871703&story_fbid=99112233'
+            : 'https://www.tiktok.com/@harutv666/photo/99112234',
+          realPostId: platform === 'facebook' ? '99112233' : '99112234',
+          publishedTime: '2026-11-19T14:00:00.000Z'
+        }
+      } else {
+        return
+      }
+
+      doc.defaultView.postMessage({
+        source: 'OMNICART_EXTENSION_RESPONSE',
+        requestId: request.requestId,
+        ok: true,
+        data
+      }, '*')
+    })
+
+    const aiNavBtn = Array.from(doc.querySelectorAll('.admin-sidebar nav button')).find(button => button.textContent.includes('AI cục bộ') || button.textContent.includes('Local AI'))
+    await act(async () => aiNavBtn.click())
+    const socialTab = Array.from(doc.querySelectorAll('.admin-ai-tab-btn'))[1]
+    await act(async () => socialTab.click())
+
+    const postBatchButton = Array.from(doc.querySelectorAll('button')).find(button => button.textContent.includes('Đăng Thật 2 Bài'))
+    assert.ok(postBatchButton, 'Phải có nút đăng thật hai bài trên cả hai nền tảng')
+    await act(async () => {
+      postBatchButton.click()
+      await new Promise(resolve => setTimeout(resolve, 3300))
+    })
+
+    assert.deepStrictEqual(cyclePlatforms, ['facebook', 'tiktok'])
+    assert.deepStrictEqual(extensionRequests.map(request => request.platform), ['facebook', 'tiktok'])
+    assert.strictEqual(extensionRequests[0].post.privacy, 'only_me')
+    assert.strictEqual(extensionRequests[1].post.privacy, 'only_me')
+    assert.ok(extensionRequests[0].post.imageUrl.endsWith('/products/facebook.jpg'))
+    assert.ok(extensionRequests[1].post.imageUrl.endsWith('/products/tiktok.jpg'))
+    assert.ok(extensionRequests[0].post.content.includes('Mô tả AI facebook'))
+    assert.ok(extensionRequests[1].post.content.includes('Mô tả AI tiktok'))
+    assert.deepStrictEqual(publishedPayloads.map(payload => payload.realPostId), ['99112233', '99112234'])
+    assert.ok(doc.body.textContent.includes('Đã xác minh 2/2 bài đăng'))
   })
 })
 
@@ -388,7 +612,7 @@ test('Bảng social-table-shell có cấu hình cuộn độc lập (max-height,
   assert.ok(css.includes('top: 0'), '.social-table th phải có top: 0 để ghim tiêu đề')
 })
 
-test('Cơ chế Bridge đăng bài Facebook cá nhân John Harper và nút lấy thêm 5 bài viral thực tế', async () => {
+test('Bridge chỉ ghi nhận bài Facebook sau khi Extension xác nhận permalink thật', async () => {
   let fetchMoreViralCalled = false
   let publishPostCalled = false
   let lastCopiedText = null
@@ -470,6 +694,17 @@ test('Cơ chế Bridge đăng bài Facebook cá nhân John Harper và nút lấy
   }
 
   await renderAdmin(mockFetch, async (doc) => {
+    doc.defaultView.addEventListener('message', (event) => {
+      if (event.data?.source !== 'OMNICART_ADMIN_REQUEST' || event.data.action !== 'AUTO_POST') return
+      doc.defaultView.postMessage({
+        source: 'OMNICART_EXTENSION_RESPONSE',
+        requestId: event.data.requestId,
+        ok: false,
+        data: { ok: false, error: 'FACEBOOK_POST_NOT_VERIFIED' },
+        error: 'FACEBOOK_POST_NOT_VERIFIED'
+      }, '*')
+    })
+
     // Override window.open & navigator.clipboard để spy
     doc.defaultView.open = (url) => { lastOpenedUrl = url }
     if (doc.defaultView.navigator.clipboard) {
@@ -517,11 +752,12 @@ test('Cơ chế Bridge đăng bài Facebook cá nhân John Harper và nút lấy
     assert.ok(publishBtn, 'Phải có nút 🚀 Đăng FB')
     await act(async () => {
       publishBtn.click()
+      await new Promise((resolve) => setTimeout(resolve, 50))
     })
 
-    assert.strictEqual(publishPostCalled, true, 'Phải gọi API publish post')
-    assert.ok(lastOpenedUrl && lastOpenedUrl.includes('61580644871703'), 'Phải mở trực tiếp trang cá nhân Facebook John Harper khi đăng bài')
-    assert.ok(lastCopiedText && lastCopiedText.includes('Tai nghe OmiPro'), 'Phải tự động sao chép nội dung bài viết vào clipboard')
+    assert.strictEqual(publishPostCalled, false, 'Không được dùng API giả để đánh dấu bài là đã đăng')
+    assert.strictEqual(lastOpenedUrl, null, 'Luồng tự động không được mở trang cá nhân thay cho đăng bài')
+    assert.strictEqual(lastCopiedText, null, 'Luồng tự động không được coi sao chép clipboard là đăng thành công')
 
     // 6. Kiểm tra nút Duyệt & Đăng cho bài chờ duyệt
     const approveBtn = Array.from(doc.querySelectorAll('button')).find(b => b.textContent.includes('Duyệt & Đăng'))
@@ -530,8 +766,10 @@ test('Cơ chế Bridge đăng bài Facebook cá nhân John Harper và nút lấy
     lastCopiedText = null
     await act(async () => {
       approveBtn.click()
+      await new Promise((resolve) => setTimeout(resolve, 50))
     })
-    assert.ok(lastOpenedUrl && lastOpenedUrl.includes('61580644871703'), 'Khi duyệt bài Facebook phải tự động mở trang cá nhân John Harper')
-    assert.ok(lastCopiedText && lastCopiedText.includes('Tai nghe OmiPro'), 'Khi duyệt bài Facebook phải tự động sao chép nội dung vào clipboard')
+    assert.strictEqual(publishPostCalled, false, 'Duyệt bài phải qua Extension thay vì tự ghi trạng thái đã đăng')
+    assert.strictEqual(lastOpenedUrl, null)
+    assert.strictEqual(lastCopiedText, null)
   })
 })

@@ -6,7 +6,7 @@
 */
 
 const HARUTV_PROFILE_URL = 'https://www.tiktok.com/@harutv666'
-const TIKTOK_UPLOAD_URL = 'https://www.tiktok.com/creator-center/upload'
+const TIKTOK_UPLOAD_URL = 'https://www.tiktok.com/tiktokstudio/upload'
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'TIKTOK_EXECUTE_POST') {
@@ -25,46 +25,191 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 })
 
 async function executeTikTokPost(payload) {
+  if (!/^www\.tiktok\.com$|^tiktok\.com$/i.test(location.hostname)) {
+    return { ok: false, error: 'TIKTOK_HOST_INVALID' }
+  }
+
+  if (!/^\/(?:tiktokstudio\/upload|creator-center\/upload|upload)\/?$/i.test(location.pathname)) {
+    return { ok: false, error: 'TIKTOK_UPLOAD_PAGE_REQUIRED' }
+  }
+
+  if (payload?.privacy !== 'only_me') return { ok: false, error: 'ONLY_ME_PRIVACY_REQUIRED' }
+  if (!payload?.imageDataUrl) return { ok: false, error: 'PRODUCT_IMAGE_REQUIRED' }
+
   const caption = [
     payload.title ? `${payload.title}\n` : '',
     payload.content || '',
     payload.hashtags ? `\n${payload.hashtags}` : ''
   ].join('').trim()
+  if (!caption) return { ok: false, error: 'POST_TEXT_REQUIRED' }
 
-  // Luôn sao chép sẵn vào Clipboard để người dùng dán nhanh nếu giao diện TikTok thay đổi
-  if (navigator.clipboard) {
-    try {
-      await navigator.clipboard.writeText(caption)
-    } catch (_) {}
+  const accountReady = await OmniCartMedia.waitFor(isHarutvAccountVisible, 10000)
+  if (!accountReady) return { ok: false, error: 'TIKTOK_ACCOUNT_MISMATCH' }
+
+  const existingPermalinks = new Set(collectTikTokPostPermalinks())
+  let imageInput = await OmniCartMedia.findImageInput(document, 1000, false)
+  if (!imageInput) {
+    const uploadButton = findUploadPhotoButton()
+    if (uploadButton) uploadButton.click()
+    imageInput = await OmniCartMedia.findImageInput(document, 8000, false)
+  }
+  if (!imageInput) return { ok: false, error: 'TIKTOK_PHOTO_UPLOAD_UNAVAILABLE' }
+
+  const imageFile = await OmniCartMedia.createProductImageFile(payload.imageDataUrl)
+  if (!OmniCartMedia.attachFile(imageInput, imageFile)) {
+    return { ok: false, error: 'TIKTOK_IMAGE_NOT_ATTACHED' }
   }
 
-  // Tìm ô nhập Caption trên trang Upload TikTok Studio / Creator Center
-  const captionEditor = document.querySelector('.DraftEditor-root div[contenteditable="true"]') ||
-                        document.querySelector('div[contenteditable="true"][role="combobox"]') ||
-                        document.querySelector('div[contenteditable="true"]') ||
-                        document.querySelector('div.notranslate[contenteditable="true"]') ||
-                        document.querySelector('textarea')
+  const imagePreviewReady = await OmniCartMedia.waitFor(hasImagePreview, 15000)
+  if (!imagePreviewReady) return { ok: false, error: 'TIKTOK_IMAGE_PREVIEW_NOT_CONFIRMED' }
 
-  if (captionEditor) {
-    captionEditor.focus()
-    try {
-      document.execCommand('selectAll', false, null)
-      document.execCommand('insertText', false, caption)
-    } catch (e) {
-      captionEditor.textContent = caption
-    }
-    captionEditor.dispatchEvent(new Event('input', { bubbles: true }))
-    captionEditor.dispatchEvent(new Event('change', { bubbles: true }))
+  const captionEditor = findCaptionEditor()
+  if (!captionEditor) return { ok: false, error: 'TIKTOK_CAPTION_EDITOR_NOT_FOUND' }
+  insertCaption(captionEditor, caption)
+  const captionReady = await OmniCartMedia.waitFor(
+    () => readCaption(captionEditor).includes(caption),
+    5000
+  )
+  if (!captionReady) return { ok: false, error: 'TIKTOK_CAPTION_NOT_CONFIRMED' }
+
+  const privacyReady = await setPrivacyOnlyMe()
+  if (!privacyReady) return { ok: false, error: 'TIKTOK_ONLY_ME_NOT_CONFIRMED' }
+
+  const publishButton = findPublishButton()
+  if (!publishButton || publishButton.disabled || publishButton.getAttribute('aria-disabled') === 'true') {
+    return { ok: false, error: 'TIKTOK_PUBLISH_BUTTON_NOT_READY' }
   }
+
+  publishButton.click()
+  const postedUrl = await waitForPublishedPost(caption, existingPermalinks)
+  const realPostId = extractTikTokPostId(postedUrl)
+  if (!postedUrl || !realPostId) return { ok: false, error: 'TIKTOK_POST_NOT_VERIFIED' }
 
   return {
     ok: true,
-    postUrl: HARUTV_PROFILE_URL,
+    postUrl: postedUrl,
+    realPostId,
     platform: 'tiktok',
     account: '@harutv666',
+    privacy: 'only_me',
     publishedTime: new Date().toISOString(),
-    message: 'Đã nhập kịch bản và hashtag cho tài khoản @harutv666 trên tab TikTok an toàn.'
+    message: 'TikTok hiển thị bài mới kèm ảnh và caption; liên kết bài viết đã được xác nhận.'
   }
+}
+
+function isHarutvAccountVisible() {
+  return Array.from(document.querySelectorAll('a[href*="/@harutv666"]'))
+    .some((link) => {
+      try {
+        const url = new URL(link.href)
+        return url.pathname.replace(/\/$/, '').toLowerCase() === '/@harutv666' && link.getClientRects().length > 0
+      } catch (_) {
+        return false
+      }
+    }) || Array.from(document.querySelectorAll('[data-e2e], [aria-label]'))
+      .some((element) => /@harutv666/i.test(`${element.textContent || ''} ${element.getAttribute('aria-label') || ''}`) && element.getClientRects().length > 0)
+}
+
+function findUploadPhotoButton() {
+  return Array.from(document.querySelectorAll('button, [role="button"]'))
+    .find((button) => /upload|tải lên|select photo/i.test(
+      `${button.textContent || ''} ${button.getAttribute('aria-label') || ''}`
+    ) && button.getClientRects().length > 0) || null
+}
+
+function hasImagePreview() {
+  return Array.from(document.querySelectorAll('img'))
+    .some((image) => {
+      const source = image.getAttribute('src') || ''
+      return (source.startsWith('blob:') || source.startsWith('data:')) && image.getClientRects().length > 0
+    })
+}
+
+function findCaptionEditor() {
+  const editors = Array.from(document.querySelectorAll(
+    'textarea, [contenteditable="true"], [role="textbox"]'
+  ))
+  return editors.find((editor) => {
+    const label = `${editor.getAttribute('placeholder') || ''} ${editor.getAttribute('aria-label') || ''} ${editor.getAttribute('data-placeholder') || ''}`
+    return /caption|description|mô tả|chú thích/i.test(label) || editor.tagName === 'TEXTAREA'
+  }) || null
+}
+
+function insertCaption(editor, text) {
+  editor.focus()
+  if (editor instanceof HTMLTextAreaElement || editor instanceof HTMLInputElement) {
+    const prototype = editor instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+    const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
+    if (setter) setter.call(editor, text)
+  } else {
+    editor.textContent = text
+  }
+  editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }))
+  editor.dispatchEvent(new Event('change', { bubbles: true }))
+}
+
+function readCaption(editor) {
+  return 'value' in editor ? editor.value || '' : editor.innerText || editor.textContent || ''
+}
+
+function findPrivacyButton() {
+  return Array.from(document.querySelectorAll('button, [role="button"]'))
+    .find((button) => /who can|privacy|visibility|everyone|friends|only you|chỉ mình tôi|ai có thể xem/i.test(
+      `${button.textContent || ''} ${button.getAttribute('aria-label') || ''}`
+    ) && button.getClientRects().length > 0) || null
+}
+
+async function setPrivacyOnlyMe() {
+  let privacyButton = findPrivacyButton()
+  if (!privacyButton) return false
+  if (/only you|chỉ mình tôi/i.test(`${privacyButton.textContent || ''} ${privacyButton.getAttribute('aria-label') || ''}`)) return true
+
+  privacyButton.click()
+  const optionReady = await OmniCartMedia.waitFor(() => {
+    return Array.from(document.querySelectorAll('[role="option"], [role="menuitem"], [role="radio"], button'))
+      .some((option) => /only you|chỉ mình tôi/i.test(option.textContent || '') && option.getClientRects().length > 0)
+  }, 4000)
+  if (!optionReady) return false
+
+  const onlyMeOption = Array.from(document.querySelectorAll('[role="option"], [role="menuitem"], [role="radio"], button'))
+    .find((option) => /only you|chỉ mình tôi/i.test(option.textContent || '') && option.getClientRects().length > 0)
+  if (!onlyMeOption) return false
+  onlyMeOption.click()
+
+  return OmniCartMedia.waitFor(() => {
+    privacyButton = findPrivacyButton()
+    return !!privacyButton && /only you|chỉ mình tôi/i.test(
+      `${privacyButton.textContent || ''} ${privacyButton.getAttribute('aria-label') || ''}`
+    )
+  }, 4000)
+}
+
+function findPublishButton() {
+  return Array.from(document.querySelectorAll('button, [role="button"]'))
+    .find((button) => /^(post|đăng)$/i.test((button.textContent || '').trim()) && button.getClientRects().length > 0) || null
+}
+
+function collectTikTokPostPermalinks() {
+  return Array.from(document.querySelectorAll('a[href*="/@harutv666/video/"], a[href*="/@harutv666/photo/"]'))
+    .map((link) => link.href)
+}
+
+async function waitForPublishedPost(caption, existingPermalinks) {
+  let newUrl = null
+  const posted = await OmniCartMedia.waitFor(() => {
+    const candidates = collectTikTokPostPermalinks()
+    newUrl = candidates.find((url) => !existingPermalinks.has(url)) || null
+    const textVisible = Array.from(document.querySelectorAll('article, [data-e2e*="video"]'))
+      .some((element) => (element.innerText || element.textContent || '').includes(caption.slice(0, Math.min(48, caption.length))))
+    return !!newUrl && textVisible
+  }, 25000)
+
+  return posted ? newUrl : null
+}
+
+function extractTikTokPostId(postUrl) {
+  const match = postUrl?.match(/\/@harutv666\/(?:video|photo)\/([0-9]+)/i)
+  return match?.[1] || null
 }
 
 async function scrapeTikTokTrending() {

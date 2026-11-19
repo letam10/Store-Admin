@@ -388,6 +388,10 @@ public sealed partial class StoreDb
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
+            var platformName = reader.GetString(5);
+            var storedStatus = reader.GetString(9);
+            var storedPostUrl = reader.IsDBNull(11) ? null : reader.GetString(11);
+            var publishedWithoutPermalink = storedStatus == "published" && !IsRealSocialPostPermalink(platformName, storedPostUrl);
             string privacy = "only_me";
             try
             {
@@ -402,25 +406,54 @@ public sealed partial class StoreDb
                 ProductName = reader.GetString(2),
                 ProductPrice = reader.GetDecimal(3),
                 ProductImage = reader.IsDBNull(4) ? null : reader.GetString(4),
-                Platform = reader.GetString(5),
+                Platform = platformName,
                 Title = reader.GetString(6),
                 Content = reader.GetString(7),
                 Hashtags = reader.GetString(8),
-                Status = reader.GetString(9),
-                ErrorMessage = reader.IsDBNull(10) ? null : reader.GetString(10),
-                PostUrl = reader.IsDBNull(11) ? null : reader.GetString(11),
+                Status = publishedWithoutPermalink ? "unverified" : storedStatus,
+                ErrorMessage = publishedWithoutPermalink
+                    ? "Chưa xác minh được liên kết bài đăng thật; không tính vào số bài đã đăng hoặc tương tác."
+                    : reader.IsDBNull(10) ? null : reader.GetString(10),
+                PostUrl = publishedWithoutPermalink ? null : storedPostUrl,
                 TargetGroup = reader.IsDBNull(12) ? null : reader.GetString(12),
                 TriggerTime = reader.GetString(13),
-                PublishedTime = reader.IsDBNull(14) ? null : reader.GetString(14),
-                LikesCount = reader.GetInt32(15),
-                SharesCount = reader.GetInt32(16),
-                CommentsCount = reader.GetInt32(17),
-                ViewsCount = reader.GetInt32(18),
+                PublishedTime = publishedWithoutPermalink || reader.IsDBNull(14) ? null : reader.GetString(14),
+                LikesCount = publishedWithoutPermalink ? 0 : reader.GetInt32(15),
+                SharesCount = publishedWithoutPermalink ? 0 : reader.GetInt32(16),
+                CommentsCount = publishedWithoutPermalink ? 0 : reader.GetInt32(17),
+                ViewsCount = publishedWithoutPermalink ? 0 : reader.GetInt32(18),
                 CreatedAt = reader.GetString(19),
                 Privacy = privacy
             });
         }
         return list;
+    }
+
+    private static bool IsRealSocialPostPermalink(string platform, string? postUrl)
+    {
+        if (!Uri.TryCreate(postUrl, UriKind.Absolute, out var uri)) return false;
+
+        var host = uri.Host.ToLowerInvariant();
+        if (platform.Equals("facebook", StringComparison.OrdinalIgnoreCase))
+        {
+            if (host != "facebook.com" && !host.EndsWith(".facebook.com", StringComparison.Ordinal)) return false;
+            var path = uri.AbsolutePath.ToLowerInvariant();
+            return path.Contains("/posts/") || path.Contains("/share/p/") ||
+                   (path.Contains("permalink.php") && uri.Query.Contains("story_fbid=", StringComparison.OrdinalIgnoreCase)) ||
+                   uri.Query.Contains("story_fbid=", StringComparison.OrdinalIgnoreCase) ||
+                   uri.Query.Contains("fbid=", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (platform.Equals("tiktok", StringComparison.OrdinalIgnoreCase))
+        {
+            if (host != "tiktok.com" && !host.EndsWith(".tiktok.com", StringComparison.Ordinal)) return false;
+            return System.Text.RegularExpressions.Regex.IsMatch(
+                uri.AbsolutePath,
+                @"^/@harutv666/(?:video|photo)/[0-9]+/?$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
+        return false;
     }
 
     public SocialAutoPost? GetSocialPostById(string id)
@@ -699,7 +732,7 @@ public sealed partial class StoreDb
         return viral;
     }
 
-    public bool PublishRealSocialPost(string postId, string postUrl, string? publishedTime, string? platform, string? realPostId, int likes = 0, int shares = 0, int comments = 0)
+    public bool PublishRealSocialPost(string postId, string postUrl, string? publishedTime, string? platform, string privacy, int likes = 0, int shares = 0, int comments = 0)
     {
         using var db = Open();
         using var command = db.CreateCommand();
@@ -710,6 +743,7 @@ public sealed partial class StoreDb
                 post_url = @post_url,
                 published_time = @published_time,
                 platform = COALESCE(@platform, platform),
+                privacy = @privacy,
                 likes_count = @likes_count,
                 shares_count = @shares_count,
                 comments_count = @comments_count,
@@ -720,6 +754,7 @@ public sealed partial class StoreDb
         command.Parameters.Add(new SqlParameter("@post_url", SqlDbType.NVarChar, 500) { Value = postUrl });
         command.Parameters.Add(new SqlParameter("@published_time", SqlDbType.NVarChar, 100) { Value = now });
         command.Parameters.Add(new SqlParameter("@platform", SqlDbType.NVarChar, 50) { Value = (object?)platform ?? DBNull.Value });
+        command.Parameters.Add(new SqlParameter("@privacy", SqlDbType.NVarChar, 50) { Value = privacy });
         command.Parameters.Add(new SqlParameter("@likes_count", SqlDbType.Int) { Value = likes });
         command.Parameters.Add(new SqlParameter("@shares_count", SqlDbType.Int) { Value = shares });
         command.Parameters.Add(new SqlParameter("@comments_count", SqlDbType.Int) { Value = comments });
@@ -869,16 +904,32 @@ public sealed partial class StoreDb
         using var db = Open();
         using var command = db.CreateCommand();
         command.CommandText = """
-            SELECT 
+            WITH social_posts AS (
+                SELECT *, CASE
+                    WHEN status = 'published' AND platform = 'facebook' AND (
+                        post_url LIKE '%facebook.com%/posts/%' OR
+                        post_url LIKE '%facebook.com%/share/p/%' OR
+                        post_url LIKE '%facebook.com%story_fbid=%' OR
+                        post_url LIKE '%facebook.com%fbid=%'
+                    ) THEN 1
+                    WHEN status = 'published' AND platform = 'tiktok' AND (
+                        post_url LIKE '%tiktok.com/@harutv666/video/%' OR
+                        post_url LIKE '%tiktok.com/@harutv666/photo/%'
+                    ) THEN 1
+                    ELSE 0
+                END AS is_verified_published
+                FROM social_auto_posts
+            )
+            SELECT
                 COUNT(*) as total_posts,
-                SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) as published_count,
+                SUM(is_verified_published) as published_count,
                 SUM(CASE WHEN status IN ('pending_approval', 'ready_for_publish', 'ready_for_api') THEN 1 ELSE 0 END) as pending_count,
                 SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_count,
-                COALESCE(SUM(likes_count), 0) as total_likes,
-                COALESCE(SUM(shares_count), 0) as total_shares,
-                COALESCE(SUM(comments_count), 0) as total_comments,
+                COALESCE(SUM(CASE WHEN is_verified_published = 1 THEN likes_count ELSE 0 END), 0) as total_likes,
+                COALESCE(SUM(CASE WHEN is_verified_published = 1 THEN shares_count ELSE 0 END), 0) as total_shares,
+                COALESCE(SUM(CASE WHEN is_verified_published = 1 THEN comments_count ELSE 0 END), 0) as total_comments,
                 SUM(CASE WHEN status = 'internal_draft' THEN 1 ELSE 0 END) as draft_count
-            FROM social_auto_posts;
+            FROM social_posts;
             """;
         using var reader = command.ExecuteReader();
         var stats = new SocialSummaryStats

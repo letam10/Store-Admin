@@ -5,6 +5,8 @@
   - Vùng ảnh hưởng khi sửa: Tương tác người dùng khi bấm các nút trên popup của extension.
 */
 
+const ADMIN_BASE_URL = 'http://127.0.0.1:5174'
+
 document.addEventListener('DOMContentLoaded', async () => {
   const tabsStatusEl = document.getElementById('tabs-status')
   const logEl = document.getElementById('log-output')
@@ -17,6 +19,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (logEl) {
       logEl.textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n` + logEl.textContent
     }
+  }
+
+  async function openAdminForPosting() {
+    const tabs = await chrome.tabs.query({})
+    const adminTab = tabs.find((tab) => tab.url && /^(http:\/\/localhost:5174|http:\/\/127\.0\.0\.1:5174)\//i.test(tab.url))
+    if (adminTab) {
+      await chrome.tabs.update(adminTab.id, { active: true })
+    } else {
+      await chrome.tabs.create({ url: ADMIN_BASE_URL + '/', active: true })
+    }
+    log('Mở Admin. Hãy chọn nội dung AI và ảnh sản phẩm; popup không tự tạo bài hoặc báo đã đăng.')
   }
 
   // Kiểm tra trạng thái 3 tab
@@ -42,46 +55,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await checkTabs()
 
-  btnPostFb?.addEventListener('click', async () => {
-    log('Đang gửi lệnh đăng bài thật qua tab Facebook John Harper...')
-    chrome.runtime.sendMessage({
-      type: 'AUTO_POST',
-      platform: 'facebook',
-      post: {
-        title: '🔥 Ưu đãi cực hot hôm nay cùng OmniCart',
-        content: 'Sản phẩm chính hãng với mức giá hấp dẫn nhất, giao hàng nhanh chóng tận tay!',
-        hashtags: '#OmniCart #JohnHarper #Deals',
-        privacy: 'only_me'
-      }
-    }, (res) => {
-      if (res?.ok) {
-        log(`✓ Đã đăng bài thật thành công trên FB John Harper! Link: ${res.postUrl}`)
-      } else {
-        log(`⚠️ ${res?.error || 'Không thể đăng tự động'}`)
-      }
-      checkTabs()
-    })
-  })
-
-  btnPostTikTok?.addEventListener('click', async () => {
-    log('Đang gửi kịch bản/hashtag lên tab TikTok Studio của @harutv666...')
-    chrome.runtime.sendMessage({
-      type: 'AUTO_POST',
-      platform: 'tiktok',
-      post: {
-        title: '✨ Review đồ công nghệ đỉnh chóp tại OmniCart',
-        content: 'Sản phẩm chính hãng, bảo hành 12 tháng, mua ngay kẻo lỡ!',
-        hashtags: '#OmniCart #harutv #viral #technology'
-      }
-    }, (res) => {
-      if (res?.ok) {
-        log(`✓ Đã điền kịch bản và hashtag lên tab TikTok @harutv666 thành công!`)
-      } else {
-        log(`⚠️ ${res?.error || 'Không thể gửi lên TikTok'}`)
-      }
-      checkTabs()
-    })
-  })
+  btnPostFb?.addEventListener('click', openAdminForPosting)
+  btnPostTikTok?.addEventListener('click', openAdminForPosting)
 
   btnScrapeViral?.addEventListener('click', async () => {
     log('Đang quét bài viral thật từ Facebook feed...')
@@ -97,7 +72,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     })
   })
 
-  btnOpenAdmin?.addEventListener('click', () => {
-    chrome.tabs.create({ url: 'http://localhost:5174/admin' })
-  })
+  btnOpenAdmin?.addEventListener('click', openAdminForPosting)
 })

@@ -6,6 +6,7 @@
 */
 
 const JOHN_HARPER_PROFILE_URL = 'https://www.facebook.com/profile.php?id=61580644871703'
+const JOHN_HARPER_PROFILE_ID = '61580644871703'
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'FB_EXECUTE_POST') {
@@ -23,67 +24,84 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 })
 
-// Tự động mở khung soạn thảo, điền nội dung và đăng bài
+// Chỉ xác nhận đăng thành công khi Facebook hiển thị bài mới và permalink riêng.
 async function executeFacebookPost(payload) {
+  if (location.hostname !== 'www.facebook.com' && location.hostname !== 'facebook.com') {
+    return { ok: false, error: 'FACEBOOK_HOST_INVALID' }
+  }
+
+  const currentUrl = new URL(location.href)
+  if (currentUrl.searchParams.get('id') !== JOHN_HARPER_PROFILE_ID) {
+    return { ok: false, error: 'FACEBOOK_ACCOUNT_MISMATCH' }
+  }
+
+  if (payload?.privacy !== 'only_me') return { ok: false, error: 'ONLY_ME_PRIVACY_REQUIRED' }
+  if (!payload?.imageDataUrl) return { ok: false, error: 'PRODUCT_IMAGE_REQUIRED' }
+
   const fullText = [
     payload.title ? `${payload.title}\n\n` : '',
     payload.content || '',
     payload.hashtags ? `\n\n${payload.hashtags}` : ''
   ].join('').trim()
+  if (!fullText) return { ok: false, error: 'POST_TEXT_REQUIRED' }
 
-  // 1. Tìm nút mở hộp thoại soạn bài "Bạn đang nghĩ gì..."
   const composerTrigger = findComposerTrigger()
-  if (!composerTrigger) {
-    // Nếu không tìm thấy trigger do chưa đăng nhập hoặc đang ở trang khác, sao chép vào clipboard và mở profile
-    if (navigator.clipboard) {
-      await navigator.clipboard.writeText(fullText)
-    }
-    return {
-      ok: true,
-      postUrl: JOHN_HARPER_PROFILE_URL,
-      platform: 'facebook',
-      message: 'Đã sẵn sàng nội dung vào khay nhớ tạm và điều hướng tới trang cá nhân John Harper.'
-    }
-  }
+  if (!composerTrigger) return { ok: false, error: 'FACEBOOK_COMPOSER_NOT_FOUND' }
 
-  // Kích hoạt click vào hộp thoại soạn bài
+  const existingPermalinks = new Set(collectPostPermalinks())
   composerTrigger.click()
-  await sleep(1500)
+  const dialogReady = await OmniCartMedia.waitFor(() => findComposerDialog(), 10000)
+  if (!dialogReady) return { ok: false, error: 'FACEBOOK_COMPOSER_DID_NOT_OPEN' }
 
-  // 2. Tìm ô nhập văn bản (contenteditable textbox trong dialog)
-  const editorBox = document.querySelector('div[role="dialog"] div[role="textbox"][contenteditable="true"]') ||
-                    document.querySelector('div[role="textbox"][contenteditable="true"]')
-
-  if (editorBox) {
-    editorBox.focus()
-    // Sử dụng cơ chế chèn text an toàn không chiếm bàn phím
-    insertTextIntoContentEditable(editorBox, fullText)
-    await sleep(1000)
-
-    // 3. Nếu yêu cầu quyền riêng tư "only_me", tìm nút chọn đối tượng
-    if (payload.privacy === 'only_me') {
-      trySetPrivacyOnlyMe()
-    }
-
-    await sleep(800)
-
-    // 4. Tìm và bấm nút "Đăng" / "Post"
-    const submitBtn = findSubmitPostButton()
-    if (submitBtn && !submitBtn.disabled) {
-      submitBtn.click()
-      await sleep(2500)
-    }
+  const dialog = findComposerDialog()
+  const previousImageSources = new Set(Array.from(dialog.querySelectorAll('img')).map((image) => image.getAttribute('src') || ''))
+  const imageFile = await OmniCartMedia.createProductImageFile(payload.imageDataUrl)
+  let imageInput = await OmniCartMedia.findImageInput(dialog, 1500)
+  if (!imageInput) {
+    const uploadButton = findPhotoVideoButton(dialog)
+    if (uploadButton) uploadButton.click()
+    imageInput = await OmniCartMedia.findImageInput(dialog, 8000)
+  }
+  if (!imageInput) return { ok: false, error: 'FACEBOOK_IMAGE_INPUT_NOT_FOUND' }
+  if (!OmniCartMedia.attachFile(imageInput, imageFile)) {
+    return { ok: false, error: 'FACEBOOK_IMAGE_NOT_ATTACHED' }
   }
 
-  // 5. Trích xuất link bài viết thật từ trang cá nhân hoặc feed
-  const realPostUrl = extractLatestPostUrl() || JOHN_HARPER_PROFILE_URL
+  const imagePreviewReady = await OmniCartMedia.waitFor(() => hasImagePreview(dialog, previousImageSources), 15000)
+  if (!imagePreviewReady) return { ok: false, error: 'FACEBOOK_IMAGE_PREVIEW_NOT_CONFIRMED' }
+
+  const editorBox = dialog.querySelector('div[role="textbox"][contenteditable="true"]')
+  if (!editorBox) return { ok: false, error: 'FACEBOOK_EDITOR_NOT_FOUND' }
+  insertTextIntoContentEditable(editorBox, fullText)
+  const textReady = await OmniCartMedia.waitFor(
+    () => (editorBox.innerText || editorBox.textContent || '').includes(fullText),
+    5000
+  )
+  if (!textReady) return { ok: false, error: 'FACEBOOK_TEXT_NOT_CONFIRMED' }
+
+  const privacyReady = await setPrivacyOnlyMe(dialog)
+  if (!privacyReady) return { ok: false, error: 'FACEBOOK_ONLY_ME_NOT_CONFIRMED' }
+
+  const submitBtn = findSubmitPostButton(dialog)
+  if (!submitBtn || submitBtn.disabled || submitBtn.getAttribute('aria-disabled') === 'true') {
+    return { ok: false, error: 'FACEBOOK_SUBMIT_BUTTON_NOT_READY' }
+  }
+
+  submitBtn.click()
+  const confirmedPost = await waitForNewPost(fullText, existingPermalinks)
+  if (!confirmedPost) return { ok: false, error: 'FACEBOOK_POST_NOT_VERIFIED' }
+
+  const postUrl = extractPostPermalink(confirmedPost)
+  const realPostId = extractFacebookPostId(postUrl)
+  if (!postUrl || !realPostId) return { ok: false, error: 'FACEBOOK_PERMALINK_NOT_FOUND' }
 
   return {
     ok: true,
-    postUrl: realPostUrl,
+    postUrl,
+    realPostId,
     platform: 'facebook',
     publishedTime: new Date().toISOString(),
-    privacy: payload.privacy || 'only_me',
+    privacy: 'only_me',
     author: 'John Harper'
   }
 }
@@ -94,13 +112,34 @@ function findComposerTrigger() {
     'div[data-pagelet="ProfileComposer"] div[role="button"]',
     'div[aria-label*="Bạn đang nghĩ gì"]',
     'div[aria-label*="What\'s on your mind"]',
-    'div[role="button"][tabindex="0"] span'
+    'div[role="button"][tabindex="0"][aria-label*="Create"]'
   ]
   for (const s of selectors) {
     const el = document.querySelector(s)
-    if (el) return el
+    if (el && el.getClientRects().length) return el
   }
   return null
+}
+
+function findComposerDialog() {
+  const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]'))
+  return dialogs.find((dialog) => dialog.querySelector('[contenteditable="true"]')) || null
+}
+
+function findPhotoVideoButton(dialog) {
+  const buttons = Array.from(dialog.querySelectorAll('[role="button"], button'))
+  return buttons.find((button) => {
+    const label = `${button.textContent || ''} ${button.getAttribute('aria-label') || ''}`.toLowerCase()
+    return /ảnh\/video|photo\/video|add photo|thêm ảnh|photo/.test(label)
+  }) || null
+}
+
+function hasImagePreview(dialog, previousImageSources) {
+  const images = Array.from(dialog.querySelectorAll('img'))
+  return images.some((image) => {
+    const source = image.getAttribute('src') || ''
+    return !!source && !previousImageSources.has(source) && image.getClientRects().length > 0
+  })
 }
 
 // Chèn chữ vào phần tử contenteditable của Facebook an toàn
@@ -116,25 +155,43 @@ function insertTextIntoContentEditable(element, text) {
   element.dispatchEvent(new Event('change', { bubbles: true }))
 }
 
-// Cố gắng đặt chế độ Chỉ mình tôi nếu có hộp thoại chọn đối tượng
-function trySetPrivacyOnlyMe() {
-  try {
-    const audienceBtn = document.querySelector('div[role="dialog"] div[aria-haspopup="menu"][role="button"]') ||
-                        document.querySelector('div[role="dialog"] [aria-label*="đối tượng"]')
-    if (audienceBtn) {
-      audienceBtn.click()
-      setTimeout(() => {
-        const onlyMeOption = Array.from(document.querySelectorAll('div[role="menuitem"], div[role="radio"]'))
-          .find(el => el.textContent.includes('Chỉ mình tôi') || el.textContent.includes('Only me'))
-        if (onlyMeOption) onlyMeOption.click()
-      }, 500)
-    }
-  } catch (e) {}
+async function setPrivacyOnlyMe(dialog) {
+  let audienceButton = findAudienceButton(dialog)
+  if (!audienceButton) return false
+
+  if (/only me|chỉ mình tôi/i.test(`${audienceButton.textContent || ''} ${audienceButton.getAttribute('aria-label') || ''}`)) {
+    return true
+  }
+
+  audienceButton.click()
+  const optionReady = await OmniCartMedia.waitFor(() => {
+    return Array.from(document.querySelectorAll('[role="menuitem"], [role="radio"], [role="option"]'))
+      .some((option) => /only me|chỉ mình tôi/i.test(option.textContent || ''))
+  }, 4000)
+  if (!optionReady) return false
+
+  const onlyMeOption = Array.from(document.querySelectorAll('[role="menuitem"], [role="radio"], [role="option"]'))
+    .find((option) => /only me|chỉ mình tôi/i.test(option.textContent || ''))
+  if (!onlyMeOption) return false
+  onlyMeOption.click()
+
+  return OmniCartMedia.waitFor(() => {
+    audienceButton = findAudienceButton(dialog)
+    return !!audienceButton && /only me|chỉ mình tôi/i.test(
+      `${audienceButton.textContent || ''} ${audienceButton.getAttribute('aria-label') || ''}`
+    )
+  }, 4000)
 }
 
-// Tìm nút Đăng bài
-function findSubmitPostButton() {
-  const buttons = Array.from(document.querySelectorAll('div[role="dialog"] div[role="button"]'))
+function findAudienceButton(dialog) {
+  return Array.from(dialog.querySelectorAll('[role="button"], button'))
+    .find((button) => /đối tượng|audience|only me|chỉ mình tôi/i.test(
+      `${button.textContent || ''} ${button.getAttribute('aria-label') || ''}`
+    ))
+}
+
+function findSubmitPostButton(dialog) {
+  const buttons = Array.from(dialog.querySelectorAll('[role="button"], button'))
   return buttons.find(b => {
     const txt = (b.textContent || '').trim().toLowerCase()
     const aria = (b.getAttribute('aria-label') || '').toLowerCase()
@@ -142,16 +199,53 @@ function findSubmitPostButton() {
   })
 }
 
-// Tìm URL bài viết mới nhất trên profile
-function extractLatestPostUrl() {
+function collectPostPermalinks() {
+  return Array.from(document.querySelectorAll('a[href*="/posts/"], a[href*="/share/p/"], a[href*="permalink.php"], a[href*="story_fbid"]'))
+    .map((link) => link.href)
+}
+
+async function waitForNewPost(fullText, existingPermalinks) {
+  let foundPost = null
+  const posted = await OmniCartMedia.waitFor(() => {
+    const candidates = Array.from(document.querySelectorAll('[role="article"], article, div[data-pagelet^="FeedUnit"]'))
+    foundPost = candidates.find((article) => {
+      const text = article.innerText || article.textContent || ''
+      if (!text.includes(fullText.slice(0, Math.min(48, fullText.length)))) return false
+      const hrefs = Array.from(article.querySelectorAll('a[href]')).map((link) => link.href)
+      return hrefs.some((href) => !existingPermalinks.has(href) && isFacebookPostPermalink(href))
+    }) || null
+    return !!foundPost
+  }, 20000)
+
+  return posted ? foundPost : null
+}
+
+function isFacebookPostPermalink(value) {
   try {
-    const feedLinks = Array.from(document.querySelectorAll('a[href*="/posts/"], a[href*="permalink.php"], a[href*="story_fbid"]'))
-    if (feedLinks.length > 0) {
-      const href = feedLinks[0].href
-      if (href && !href.includes('/groups/')) return href
-    }
-  } catch (e) {}
-  return null
+    const url = new URL(value)
+    return /(^|\.)facebook\.com$/i.test(url.hostname) &&
+      (/\/posts\//i.test(url.pathname) || /\/share\/p\//i.test(url.pathname) || /story_fbid=/i.test(url.search))
+  } catch (_) {
+    return false
+  }
+}
+
+function extractPostPermalink(article) {
+  return Array.from(article.querySelectorAll('a[href]'))
+    .map((link) => link.href)
+    .find(isFacebookPostPermalink) || null
+}
+
+function extractFacebookPostId(postUrl) {
+  try {
+    const url = new URL(postUrl)
+    const storyId = url.searchParams.get('story_fbid') || url.searchParams.get('fbid')
+    if (storyId) return storyId
+    const pathId = url.pathname.match(/\/(?:posts|share\/p)\/([^/?]+)/i)
+    return pathId?.[1] || null
+  } catch (_) {
+    return null
+  }
 }
 
 // Quét các bài viết có tương tác cao thật từ feed

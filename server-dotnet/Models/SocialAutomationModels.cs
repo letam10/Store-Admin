@@ -159,6 +159,7 @@ public sealed class PublishRealPostRequest
     public string? PublishedTime { get; set; }
     public string? Platform { get; set; }
     public string? RealPostId { get; set; }
+    public string Privacy { get; set; } = "only_me";
     public int LikesCount { get; set; }
     public int SharesCount { get; set; }
     public int CommentsCount { get; set; }

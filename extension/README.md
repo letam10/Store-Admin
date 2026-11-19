@@ -40,11 +40,12 @@ Hệ thống kết nối và kiểm soát duy nhất 3 tab trình duyệt:
   - Kết nối hai chiều với Extension qua `content-admin-bridge.js`.
 - **Tab 2: Facebook cá nhân John Harper** (`https://www.facebook.com/profile.php?id=61580644871703`)
   - Tự động mở hộp thoại soạn thảo ("Bạn đang nghĩ gì, John?").
-  - Điền tiêu đề, nội dung, mã sản phẩm và hashtags.
-  - Tự động chọn quyền riêng tư: **Chỉ mình tôi (only_me)** hoặc **Công khai (public)** theo cấu hình quản trị.
-  - Nhấp nút Đăng bài an toàn và trích xuất đường dẫn bài viết thật về Store-Admin.
-- **Tab 3: TikTok Creator Studio / Upload** (`https://www.tiktok.com/creator-center/upload`)
-  - Tự động nạp caption, kịch bản video và hashtags cho tài khoản `@harutv666`.
+  - Gửi ảnh sản phẩm và caption do AI Local tạo.
+  - Chỉ tiếp tục khi giao diện xác nhận quyền riêng tư **Chỉ mình tôi (only_me)**.
+  - Chỉ lưu là đã đăng khi trang hiển thị bài mới và extension lấy được permalink cụ thể.
+- **Tab 3: TikTok Studio / Upload** (`https://www.tiktok.com/tiktokstudio/upload`)
+  - Gửi ảnh sản phẩm và caption cho tài khoản `@harutv666` nếu trang hiện tại nhận ảnh.
+  - Dừng nếu không có bộ tải ảnh, không xác nhận được quyền riêng tư hoặc không tìm được permalink bài mới.
 
 ---
 
@@ -52,11 +53,12 @@ Hệ thống kết nối và kiểm soát duy nhất 3 tab trình duyệt:
 1. **Kiểm tra kết nối**:
    - Mở tab Quản trị `http://localhost:5174/admin` -> chọn mục **Local AI & MXH** -> **Tự động đăng bài Mạng Xã Hội**.
    - Tại banner trên cùng, bạn sẽ thấy huy hiệu xanh: `🟢 Tiện ích trình duyệt (Chrome Extension) Đã kết nối sẵn sàng`.
-2. **Thử nghiệm Đăng bài thật không chiếm chuột**:
-   - Bấm nút **🚀 Kích hoạt Đăng Thật qua Browser Tab** hoặc vào tab **AI Copywriting Studio** -> chọn sản phẩm -> bấm **Đăng Ngay Lên Mạng Xã Hội**.
-   - Extension sẽ tự động kích hoạt tab Facebook John Harper, điền nội dung và đăng bài thật.
-   - Bạn thử rê chuột hoặc gõ phím ở màn hình khác: chuột và bàn phím máy tính hoàn toàn tự do!
-   - Sau khi hoàn thành, hệ thống ghi nhận link bài viết thật vào tab **Nhật Ký Đăng Bài**. Bấm vào link sẽ dẫn thẳng tới bài viết vừa đăng trên Facebook John Harper.
+2. **Kiểm tra luồng đăng**:
+   - Mở **AI Copywriting Studio**, chọn sản phẩm/ảnh và dùng caption đã được AI Local tạo; quyền riêng tư của lượt đăng được khóa ở **Chỉ mình tôi**.
+   - Bấm **Đăng Ngay Lên Mạng Xã Hội**. Extension mở hoặc dùng tab nền; không dùng chuột/bàn phím hệ thống.
+   - Nhật ký chỉ chuyển sang **Đã đăng** khi có permalink riêng, mã bài, và phản hồi lưu lịch sử thành công. Link trang cá nhân không được tính là permalink.
+   - Nếu Facebook/TikTok không nhận ảnh, không xác nhận được quyền riêng tư, hoặc không tìm thấy bài mới sau khi gửi, giao diện báo lỗi và không ghi là đã đăng.
+   - Các nút đăng trong popup chỉ mở Store-Admin để chọn nội dung AI và ảnh; popup không tự gửi bài mẫu.
 3. **Thử nghiệm Quét bài Viral thật**:
    - Chuyển sang tab **Hội Nhóm & Viral**.
    - Bấm nút **🔥 Cào dữ liệu bài Viral thật từ Facebook & TikTok**.

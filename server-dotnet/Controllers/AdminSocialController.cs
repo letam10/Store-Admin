@@ -33,30 +33,6 @@ public sealed class AdminSocialController(
                value == Tokens.Sha256("csrf:" + raw);
     }
 
-    private string ResolvePlatformUrl(string? platform, string? targetGroup)
-    {
-        var plat = (platform ?? "facebook").ToLowerInvariant();
-        if (plat == "facebook")
-        {
-            if (!string.IsNullOrWhiteSpace(targetGroup))
-            {
-                var groups = db.GetSocialGroupTargets();
-                var matchedGroup = groups.FirstOrDefault(g => g.GroupName.Equals(targetGroup, StringComparison.OrdinalIgnoreCase));
-
-                // Chỉ trả về link nhóm nếu nhóm đó là nhóm thực do quản trị viên cấu hình riêng (không phải nhóm mẫu/link generic)
-                if (matchedGroup != null && !string.IsNullOrWhiteSpace(matchedGroup.GroupUrl)
-                    && !matchedGroup.GroupUrl.Contains("/groups/feed")
-                    && !matchedGroup.GroupUrl.Contains("/groups/discover")
-                    && !matchedGroup.Id.StartsWith("grp-sample-"))
-                {
-                    return matchedGroup.GroupUrl;
-                }
-            }
-            return DefaultFacebookProfileUrl;
-        }
-        return DefaultTikTokProfileUrl;
-    }
-
     [HttpGet("settings")]
     public IActionResult GetSettings()
     {
@@ -85,11 +61,10 @@ public sealed class AdminSocialController(
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
 
         var now = DateTimeOffset.UtcNow;
-        var isPublished = request.PublishImmediately;
         var platform = (request.Platform ?? "facebook").ToLowerInvariant();
+        if (platform is not ("facebook" or "tiktok"))
+            return BadRequest(new { error = "UNSUPPORTED_PLATFORM", message = "Chỉ hỗ trợ Facebook và TikTok." });
         var postId = "post-" + now.ToUnixTimeSeconds() + "-" + Guid.NewGuid().ToString("N")[..4];
-
-        string? postUrl = isPublished ? ResolvePlatformUrl(platform, request.TargetGroup) : null;
 
         var post = new SocialAutoPost
         {
@@ -102,12 +77,12 @@ public sealed class AdminSocialController(
             Title = request.Title ?? "",
             Content = request.Content ?? "",
             Hashtags = request.Hashtags ?? "#OmniCart #EverydayEssentials",
-            Status = isPublished ? "published" : "pending_approval",
-            PostUrl = postUrl,
+            Status = "pending_approval",
+            PostUrl = null,
             TargetGroup = request.TargetGroup,
             Privacy = request.Privacy ?? "only_me",
             TriggerTime = now.ToString("o"),
-            PublishedTime = isPublished ? now.ToString("o") : null,
+            PublishedTime = null,
             LikesCount = 0,
             SharesCount = 0,
             CommentsCount = 0,
@@ -163,45 +138,78 @@ public sealed class AdminSocialController(
     public IActionResult ApprovePost(string id)
     {
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-
-        var post = db.GetSocialPostById(id);
-        if (post == null) return NotFound(new { error = "POST_NOT_FOUND" });
-
-        string postUrl = ResolvePlatformUrl(post.Platform, post.TargetGroup);
-        db.UpdateSocialPostStatus(id, "published", errorMessage: null, postUrl: postUrl);
-        var updated = db.GetSocialPostById(id);
-        return Ok(new { ok = true, post = updated });
+        if (db.GetSocialPostById(id) == null) return NotFound(new { error = "POST_NOT_FOUND" });
+        return Conflict(new { ok = false, error = "PUBLISH_REQUIRES_EXTENSION", message = "Bài chỉ được ghi là đã đăng sau khi Extension xác nhận permalink thật." });
     }
 
     [HttpPost("posts/{id}/publish")]
     public IActionResult RetryPublishPost(string id)
     {
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-
-        var post = db.GetSocialPostById(id);
-        if (post == null) return NotFound(new { error = "POST_NOT_FOUND" });
-
-        string postUrl = ResolvePlatformUrl(post.Platform, post.TargetGroup);
-        db.UpdateSocialPostStatus(id, "published", errorMessage: null, postUrl: postUrl);
-        var updated = db.GetSocialPostById(id);
-        return Ok(new { ok = true, post = updated });
+        if (db.GetSocialPostById(id) == null) return NotFound(new { error = "POST_NOT_FOUND" });
+        return Conflict(new { ok = false, error = "PUBLISH_REQUIRES_EXTENSION", message = "Bài chỉ được ghi là đã đăng sau khi Extension xác nhận permalink thật." });
     }
 
     [HttpPost("posts/{id}/publish-real")]
     public IActionResult PublishRealPost(string id, [FromBody] PublishRealPostRequest request)
     {
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
-        if (string.IsNullOrWhiteSpace(request?.PostUrl))
+        if (string.IsNullOrWhiteSpace(request?.PostUrl) || string.IsNullOrWhiteSpace(request.RealPostId))
         {
-            return BadRequest(new { error = "INVALID_URL", message = "Cần đường dẫn bài viết thật trên Facebook hoặc TikTok." });
+            return BadRequest(new { error = "INVALID_POST_CONFIRMATION", message = "Cần permalink và mã bài viết thật từ Extension." });
         }
 
         var post = db.GetSocialPostById(id);
         if (post == null) return NotFound(new { error = "POST_NOT_FOUND" });
 
-        var success = db.PublishRealSocialPost(id, request.PostUrl, request.PublishedTime, request.Platform ?? post.Platform, request.RealPostId, request.LikesCount, request.SharesCount, request.CommentsCount);
+        var platform = (request.Platform ?? post.Platform).ToLowerInvariant();
+        if (platform != post.Platform.ToLowerInvariant() || platform is not ("facebook" or "tiktok"))
+            return BadRequest(new { error = "PLATFORM_MISMATCH", message = "Nền tảng xác nhận không khớp với bản nháp." });
+        if (request.Privacy != "only_me")
+            return BadRequest(new { error = "ONLY_ME_PRIVACY_REQUIRED", message = "Lượt đăng này yêu cầu quyền riêng tư Chỉ mình tôi." });
+        if (!IsRealPostPermalink(platform, request.PostUrl, request.RealPostId))
+            return BadRequest(new { error = "INVALID_POST_PERMALINK", message = "Đường dẫn phải trỏ đến một bài viết cụ thể đã đăng, không phải trang cá nhân." });
+        if (!DateTimeOffset.TryParse(request.PublishedTime, out var publishedAt))
+            return BadRequest(new { error = "INVALID_PUBLISHED_TIME", message = "Extension chưa trả thời gian đăng hợp lệ." });
+
+        var success = db.PublishRealSocialPost(
+            id,
+            request.PostUrl,
+            publishedAt.ToUniversalTime().ToString("o"),
+            platform,
+            request.Privacy,
+            request.LikesCount,
+            request.SharesCount,
+            request.CommentsCount);
         var updated = db.GetSocialPostById(id);
         return Ok(new { ok = success, post = updated });
+    }
+
+    private static bool IsRealPostPermalink(string platform, string postUrl, string realPostId)
+    {
+        if (!Uri.TryCreate(postUrl, UriKind.Absolute, out var uri) || string.IsNullOrWhiteSpace(realPostId)) return false;
+
+        var host = uri.Host.ToLowerInvariant();
+        if (platform == "facebook")
+        {
+            if (host != "facebook.com" && !host.EndsWith(".facebook.com", StringComparison.Ordinal)) return false;
+            var storyId = System.Text.RegularExpressions.Regex.Match(uri.Query, @"(?:story_fbid|fbid)=([^&]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            var pathId = System.Text.RegularExpressions.Regex.Match(uri.AbsolutePath, @"/(?:posts|share/p)/([^/?]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            var actualId = storyId.Success ? Uri.UnescapeDataString(storyId.Groups[1].Value) : pathId.Success ? pathId.Groups[1].Value : null;
+            return actualId == realPostId;
+        }
+
+        if (platform == "tiktok")
+        {
+            if (host != "tiktok.com" && !host.EndsWith(".tiktok.com", StringComparison.Ordinal)) return false;
+            var match = System.Text.RegularExpressions.Regex.Match(
+                uri.AbsolutePath,
+                @"^/@harutv666/(?:video|photo)/([0-9]+)/?$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            return match.Success && match.Groups[1].Value == realPostId;
+        }
+
+        return false;
     }
 
     [HttpDelete("posts/{id}")]

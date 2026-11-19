@@ -22,6 +22,7 @@ try {
 
 // Lắng nghe yêu cầu từ Store-Admin Web App
 window.addEventListener('message', (event) => {
+  if (event.source !== window || event.origin !== window.location.origin) return
   if (!event.data || event.data.source !== 'OMNICART_ADMIN_REQUEST') return
 
   const { action, payload, requestId } = event.data
@@ -42,12 +43,13 @@ window.addEventListener('message', (event) => {
     ...payload
   }, (response) => {
     const lastError = chrome.runtime.lastError
+    const ok = !lastError && response?.ok === true
     window.postMessage({
       source: 'OMNICART_EXTENSION_RESPONSE',
       requestId,
-      ok: !lastError && response?.ok !== false,
-      data: response,
-      error: lastError ? lastError.message : response?.error
+      ok,
+      data: response || null,
+      error: lastError?.message || response?.error || (response ? null : 'NO_EXTENSION_RESPONSE')
     }, '*')
   })
 })
