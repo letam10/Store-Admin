@@ -490,9 +490,6 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
             <span style={{ fontSize: '24px' }}>📢</span>
             <div>
               <h2>Hệ Thống Tự Động Hóa Đăng Bài Mạng Xã Hội</h2>
-              <small style={{ color: '#bbf7d0', fontSize: '11px' }}>
-                Đồng hành vận hành kinh doanh đa kênh ngay cả khi bạn vắng mặt hoặc nghỉ ốm
-              </small>
             </div>
             <span className={'social-status-pill ' + (settings.isActive ? 'is-active' : 'is-paused')}>
               <span aria-hidden="true">{settings.isActive ? '●' : '○'}</span>
@@ -594,14 +591,10 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
         <section className="social-panel">
           <div className="social-panel__heading">
             <h3>⚙️ Thiết Lập Lịch Trình & Phong Cách Đăng Bài Tự Động</h3>
-            <p>Định cấu hình để hệ thống tự động vận hành trong suốt những ngày bạn không thể trực tiếp quản lý.</p>
           </div>
 
           <div className="social-info-banner">
             <strong>ℹ️ Lưu ý cơ chế vận hành ngầm & tính trung thực:</strong>
-            <div>
-              Module tự động hóa hoạt động khi dịch vụ <code>admin:api</code> (backend server) đang chạy. Nếu tắt máy chủ / đóng terminal backend, tác vụ nền sẽ tạm dừng và sẽ tự chạy tiếp khi khởi động lại. Cấu hình hỗ trợ linh hoạt 5 mốc: <strong>5 phút, 30 phút, 1 giờ, 2 giờ, 6 giờ</strong> cùng chế độ <strong>Chỉ mình tôi (only_me)</strong> để kiểm thử an toàn. Tất cả số liệu bắt đầu từ 0 thực tế và các bài viết nội bộ được ghi rõ trạng thái <em>Nháp nội bộ / Sẵn sàng đăng</em>, cam kết không tạo liên kết giả mạo.
-            </div>
           </div>
 
           <form onSubmit={handleSaveSettings}>
@@ -615,10 +608,9 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   value={settings.isActive ? '1' : '0'}
                   onChange={e => setSettings({ ...settings, isActive: e.target.value === '1' })}
                 >
-                  <option value="1">🟢 Bật - Hệ thống tự động đăng bài theo chu kỳ</option>
-                  <option value="0">🔴 Tắt - Tạm dừng toàn bộ tác vụ đăng bài</option>
+                  <option value="1">🟢 Bật - Tự động theo chu kỳ</option>
+                  <option value="0">🔴 Tắt - Tạm dừng toàn bộ</option>
                 </select>
-                <small>Bật để máy chủ tự động chọn sản phẩm và viết bài đăng định kỳ.</small>
               </div>
 
               <div className="social-field">
@@ -629,14 +621,9 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   value={settings.mode}
                   onChange={e => setSettings({ ...settings, mode: e.target.value })}
                 >
-                  <option value="full_auto">🚀 Hoàn toàn tự động (Full-Auto) - Thích hợp khi nghỉ bệnh</option>
-                  <option value="semi_auto">📝 Duyệt trước (Semi-Auto) - Tạo nháp chờ Admin bấm duyệt</option>
+                  <option value="full_auto">🚀 Hoàn toàn tự động (Full-Auto)</option>
+                  <option value="semi_auto">📝 Duyệt trước (Semi-Auto)</option>
                 </select>
-                <small>
-                  {settings.mode === 'full_auto'
-                    ? 'Hệ thống tự động: Chọn sản phẩm → Qwen viết bài → Xuất bản ngay → Ghi log.'
-                    : 'Qwen viết sẵn bài đưa vào hàng đợi chờ duyệt, Admin rảnh bấm duyệt sau.'}
-                </small>
               </div>
 
               <div className="social-field">
@@ -647,14 +634,13 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   value={currentIntervalKey}
                   onChange={e => handleIntervalChange(e.target.value)}
                 >
-                  <option value="5m">⚡ Mỗi 5 phút (Kiểm tra nhanh & Đăng cấp tốc)</option>
-                  <option value="30m">⏱️ Mỗi 30 phút (Chiến dịch tần suất cao)</option>
-                  <option value="1">🕐 Mỗi 1 giờ (Khung giờ chuẩn luân phiên)</option>
-                  <option value="2">Mỗi 2 giờ (Khuyên dùng để duy trì tương tác tốt nhất)</option>
-                  <option value="3">Mỗi 3 giờ (Nhẹ nhàng, trải đều các khung giờ vàng)</option>
-                  <option value="6">Mỗi 6 giờ (4 bài mỗi ngày, tối ưu ổn định)</option>
+                  <option value="5m">⚡ Mỗi 5 phút</option>
+                  <option value="30m">🕐 Mỗi 30 phút</option>
+                  <option value="1">🕐 Mỗi 1 giờ</option>
+                  <option value="2">🕐 Mỗi 2 giờ</option>
+                  <option value="3">🕐 Mỗi 3 giờ</option>
+                  <option value="6">🕐 Mỗi 6 giờ</option>
                 </select>
-                <small>Hỗ trợ chính xác 5 phút, 30 phút, 1 giờ, 2 giờ, 6 giờ.</small>
               </div>
 
               <div className="social-field">
@@ -665,10 +651,9 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   value={settings.privacy || 'only_me'}
                   onChange={e => setSettings({ ...settings, privacy: e.target.value })}
                 >
-                  <option value="only_me">🔒 Chỉ mình tôi (Private / Only me) - Kiểm thử an toàn</option>
-                  <option value="public">🌐 Công khai (Public) - Xuất bản cho mọi người</option>
+                  <option value="only_me">🔒 Chỉ mình tôi</option>
+                  <option value="public">🌐 Công khai</option>
                 </select>
-                <small>Chế độ "Chỉ mình tôi" được đề xuất để kiểm thử 2-3 bài an toàn mà không hiển thị ra ngoài.</small>
               </div>
 
               <div className="social-field">
@@ -683,7 +668,6 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   <option value="facebook">Chỉ xuất bản lên Facebook</option>
                   <option value="tiktok">Chỉ xuất bản lên TikTok</option>
                 </select>
-                <small>Hệ thống sẽ luân phiên xuất bản bài viết theo các kênh đã chọn.</small>
               </div>
 
               {/* Cột 2: Nội dung & Giọng văn */}
@@ -695,29 +679,27 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   value={settings.preferredCategory}
                   onChange={e => setSettings({ ...settings, preferredCategory: e.target.value })}
                 >
-                  <option value="all">Tất cả sản phẩm trong kho (Tự động xoay vòng)</option>
-                  <option value="Đồ gia dụng">Đồ gia dụng & Tiện ích gia đình</option>
-                  <option value="Thời trang">Thời trang & Phụ kiện Canvas</option>
-                  <option value="Công nghệ">Đồ công nghệ, Tai nghe & Thiết bị</option>
+                  <option value="all">Tất cả sản phẩm</option>
+                  <option value="Đồ gia dụng">Đồ gia dụng và tiện ích gia đình</option>
+                  <option value="Thời trang">Thời trang và phụ kiện</option>
+                  <option value="Công nghệ">Đồ công nghệ và thiết bị</option>
                 </select>
-                <small>Ưu tiên các nhóm hàng mang lại doanh thu cao hoặc đang có ưu đãi.</small>
               </div>
 
               <div className="social-field">
-                <label htmlFor="cfg-tone">Phong cách văn chương AI (Tone of Voice)</label>
+                <label htmlFor="cfg-tone">Phong cách văn chương</label>
                 <select
                   id="cfg-tone"
                   className="social-select"
                   value={settings.toneStyle}
                   onChange={e => setSettings({ ...settings, toneStyle: e.target.value })}
                 >
-                  <option value="viral_engaging">Bắt trend & Tương tác cao (Khuyên dùng cho MXH)</option>
+                  <option value="viral_engaging">Bắt trend và tương tác cao</option>
                   <option value="humorous">Hài hước, dí dỏm, duyên dáng</option>
-                  <option value="fomo_sales">Kêu gọi chốt đơn gấp (FOMO - Deal sốc có hạn)</option>
-                  <option value="authentic_review">Review chân thực, đi sâu vào giải pháp tiện ích</option>
-                  <option value="storytelling">Kể chuyện nhẹ nhàng, truyền cảm hứng sống đẹp</option>
+                  <option value="fomo_sales">Kêu gọi chốt đơn gấp</option>
+                  <option value="authentic_review">Review chân thực, đi sâu vào tiện ích</option>
+                  <option value="storytelling">Kể chuyện nhẹ nhàng, truyền cảm hứng</option>
                 </select>
-                <small>Định hướng ngữ điệu để AI Qwen 4B tạo bài viết cuốn hút người đọc.</small>
               </div>
 
               <div className="social-field">
@@ -743,7 +725,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   onChange={e => setSettings({ ...settings, orderLinkTemplate: e.target.value })}
                   placeholder="https://omnicart.vn/products/{id}"
                 />
-                <small>Khách hàng bấm vào link này sẽ dẫn thẳng đến trang chi tiết sản phẩm.</small>
+                <small>Khách hàng bấm vào link sẽ dẫn thẳng đến sản phẩm.</small>
               </div>
             </div>
 
@@ -810,7 +792,6 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
         <section className="social-panel">
           <div className="social-panel__heading">
             <h3>✍️ Trình Sáng Tạo Nội Dung Bán Hàng Bằng Local Qwen AI</h3>
-            <p>Kiểm tra khả năng sáng tạo bài viết của mô hình Qwen cục bộ kết hợp dữ liệu sản phẩm thực tế từ StoreDb.</p>
           </div>
 
           <div className="social-studio-grid">
@@ -846,16 +827,16 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   value={studioTone}
                   onChange={e => setStudioTone(e.target.value)}
                 >
-                  <option value="viral_engaging">Bắt trend & Tương tác cao</option>
+                  <option value="viral_engaging">Bắt trend và tương tác cao</option>
                   <option value="humorous">Hài hước, dí dỏm, duyên dáng</option>
-                  <option value="fomo_sales">Kêu gọi chốt đơn gấp (FOMO)</option>
+                  <option value="fomo_sales">Kêu gọi chốt đơn gấp</option>
                   <option value="authentic_review">Review chân thực 100%</option>
                   <option value="storytelling">Kể chuyện nhẹ nhàng truyền cảm hứng</option>
                 </select>
               </div>
 
               <div className="social-field">
-                <label htmlFor="studio-topic">Yêu cầu riêng / Chủ đề bổ sung (Tùy chọn)</label>
+                <label htmlFor="studio-topic">Yêu cầu riêng và Chủ đề bổ sung</label>
                 <input
                   id="studio-topic"
                   type="text"
@@ -970,7 +951,6 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
           <section className="social-panel">
             <div className="social-panel__heading">
               <h3>👥 Danh Sách Hội Nhóm Facebook Mục Tiêu Đăng Bài</h3>
-              <p>Cấu hình và khám phá các group Facebook tiềm năng có lượng tương tác cao để hệ thống chia sẻ bài tự động.</p>
             </div>
 
             {/* Thanh Tìm Kiếm Nhóm */}
@@ -1095,7 +1075,6 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
           <section className="social-panel">
             <div className="social-panel__heading">
               <h3>🔥 Kho Cảm Hứng & Quản Lý Bài Đăng Hot / Viral</h3>
-              <p>Theo dõi các bài viết đạt lượt xem và tương tác đột biến trên mạng xã hội để làm cảm hứng mẫu cho AI Qwen.</p>
             </div>
 
             <div className="social-table-shell">
@@ -1158,8 +1137,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
       {activeSubTab === 'logs' && (
         <section className="social-panel">
           <div className="social-panel__heading">
-            <h3>📋 Báo Cáo Chi Tiết & Lưu Vết Lịch Sử Đăng Bài (Audit Logs)</h3>
-            <p>Báo cáo đầy đủ nội dung, hình ảnh và mốc thời gian để Admin dễ dàng kiểm tra đối soát bất kỳ khi nào rảnh.</p>
+            <h3>📋 Báo Cáo chi tiết và lưu Lịch Sử Đăng Bài</h3>
           </div>
 
           {/* Bộ Lọc Nhật Ký */}
@@ -1173,10 +1151,10 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                 onChange={e => setPostFilterStatus(e.target.value)}
               >
                 <option value="all">Tất cả trạng thái</option>
-                <option value="published">🟢 Đã đăng thật</option>
-                <option value="internal_draft">📝 Nháp nội bộ / Sẵn sàng</option>
-                <option value="ready_for_api">⏳ Chờ gửi API thật</option>
-                <option value="pending_approval">🟡 Chờ Admin duyệt (Semi-Auto)</option>
+                <option value="published">🟢 Đã đăng</option>
+                <option value="internal_draft">📝 Bản Nháp</option>
+                <option value="ready_for_api">⏳ Chờ gửi API</option>
+                <option value="pending_approval">🟡 Chờ Admin duyệt</option>
                 <option value="failed">🔴 Thất bại</option>
               </select>
             </div>
@@ -1271,9 +1249,9 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                     </td>
                     <td>
                       <span className={'status-tag status-tag--' + p.status}>
-                        {p.status === 'published' ? '🟢 Đã đăng thật' :
-                         p.status === 'ready_for_api' ? '⏳ Chờ gửi API thật' :
-                         p.status === 'internal_draft' ? '📝 Nháp nội bộ' :
+                        {p.status === 'published' ? '🟢 Đã đăng' :
+                         p.status === 'ready_for_api' ? '⏳ Chờ gửi API' :
+                         p.status === 'internal_draft' ? '📝 Bản Nháp' :
                          p.status === 'pending_approval' ? '🟡 Chờ duyệt' : '🔴 Lỗi'}
                       </span>
                     </td>
@@ -1293,7 +1271,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                           Xem bài ↗
                         </a>
                       ) : (
-                        <span className="social-muted-text">Chưa đăng thật (Bản nháp)</span>
+                        <span className="social-muted-text">Bản nháp</span>
                       )}
                     </td>
                     <td>
@@ -1355,9 +1333,9 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                 {selectedPostModal.platform}
               </span>
               <span className={'status-tag status-tag--' + selectedPostModal.status}>
-                {selectedPostModal.status === 'published' ? '🟢 Đã đăng thật' :
-                 selectedPostModal.status === 'ready_for_api' ? '⏳ Chờ gửi API thật' :
-                 selectedPostModal.status === 'internal_draft' ? '📝 Nháp nội bộ / Sẵn sàng' :
+                {selectedPostModal.status === 'published' ? '🟢 Đã đăng' :
+                 selectedPostModal.status === 'ready_for_api' ? '⏳ Chờ gửi API' :
+                 selectedPostModal.status === 'internal_draft' ? '📝 Bản Nháp' :
                  selectedPostModal.status === 'pending_approval' ? '🟡 Chờ duyệt' : '🔴 Lỗi'}
               </span>
               <span className="social-muted-text" style={{ marginLeft: 'auto' }}>
