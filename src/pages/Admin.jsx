@@ -1,8 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Màn hình điều phối admin, session, module, dashboard, cài đặt AI context size và chuyển đổi Tự động hóa đăng bài Mạng Xã Hội.
+  - Mục đích: Màn hình điều phối admin, hiển thị logo thương hiệu OmniCart (ảnh vuông), session, module, dashboard, cài đặt AI context size và chuyển đổi Tự động hóa đăng bài Mạng Xã Hội.
   - Liên kết trực tiếp: ../api/chat.js, ./AdminModules.jsx, ./AdminSocialAutomation.jsx, ../services/adminState.js
-  - Vùng ảnh hưởng khi sửa: Giao diện quản trị, cài đặt ngữ cảnh AI, session, chat hỗ trợ admin và tab đăng bài mạng xã hội.
+  - Vùng ảnh hưởng khi sửa: Giao diện quản trị, logo thương hiệu admin, cài đặt ngữ cảnh AI, session, chat hỗ trợ admin và tab đăng bài mạng xã hội.
 */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { canOpenModule, landingModule } from '../services/adminAccess'
@@ -417,18 +417,7 @@ export default function Admin() {
   if (!session?.authenticated) return (
     <main className="admin-shell admin-shell--login"><div className="admin-login-card"><div className="admin-login-card__preferences"><ThemeLanguageControls /></div><form className="admin-login" onSubmit={login}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-        <svg viewBox="0 0 36 36" width="36" height="36" fill="none" aria-hidden="true">
-          <rect x="1" y="1" width="34" height="34" rx="10" fill="url(#login-brand-bg)" stroke="#52aa7a" strokeWidth="1.2"/>
-          <circle cx="16" cy="16" r="6.2" stroke="#fff" strokeWidth="3.6" fill="none" strokeLinecap="round"/>
-          <circle cx="24.5" cy="24.5" r="4.2" fill="#5fe39d" stroke="#fff" strokeWidth="1.2"/>
-          <defs>
-            <linearGradient id="login-brand-bg" x1="0" y1="0" x2="36" y2="36">
-              <stop stopColor="#143d2c"/>
-              <stop offset="0.55" stopColor="#226344"/>
-              <stop offset="1" stopColor="#358b5e"/>
-            </linearGradient>
-          </defs>
-        </svg>
+        <img src="/brand-logo-square.jpg" alt="OmniCart" style={{ width: '40px', height: '40px', borderRadius: '8px', objectFit: 'cover' }} />
         <span style={{ fontSize: '24px', fontWeight: 900, color: '#163f2d', letterSpacing: '-1px' }}>OmniCart<span style={{ color: '#2e8658' }}>.</span></span>
       </div>
       <p className="admin-eyebrow">QUẢN TRỊ STORE</p><h1>{copy.login}</h1><p>{copy.adminOnly}</p>
@@ -447,7 +436,9 @@ export default function Admin() {
     <main className="admin-shell admin-shell--workspace">
       <div className="admin-workspace-card">
       <aside className="admin-sidebar">
-        <a className="admin-brand" href="/admin">
+        <a className="admin-brand" href="/admin" aria-label="OmniCart Quản trị">
+          <img src="/brand-logo-square.jpg" alt="OmniCart" style={{ width: '32px', height: '32px', borderRadius: '7px', objectFit: 'cover', marginRight: '6px' }} />
+          <span>OmniCart</span><small>{language === 'en' ? 'ADMIN' : 'QUẢN TRỊ'}</small>
         </a>
         <div className="admin-sidebar__profile"><span>{String(session.username || 'A').slice(0, 1).toUpperCase()}</span><div><b>{session.username}</b><small>{session.role === 'staff' ? 'Nhân viên' : 'Quản trị viên'}</small></div></div>
         <nav aria-label="Điều hướng quản trị">

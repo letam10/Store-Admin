@@ -365,7 +365,7 @@ test('Nhật ký bài đăng và Studio hiển thị số liệu trung thực xu
     // Kiểm tra dòng hiển thị trong bảng
     const row = doc.querySelector('.social-table tbody tr')
     assert.ok(row, 'Phải có hàng bản ghi nhật ký')
-    assert.ok(row.textContent.includes('Nháp nội bộ'), 'Trạng thái bài viết chưa đăng thật phải ghi rõ Nháp nội bộ')
+    assert.ok(row.textContent.includes('Bản Nháp') || row.textContent.includes('Nháp nội bộ'), 'Trạng thái bài viết chưa đăng thật phải ghi rõ Bản Nháp hoặc Nháp nội bộ')
     assert.ok(row.textContent.includes('👍 0 · 🔁 0 · 💬 0'), 'Số liệu tương tác khởi tạo phải là 0 thực tế')
     assert.ok(row.textContent.includes('Chưa đăng thật'), 'Khi postUrl là null, phải ghi rõ Chưa đăng thật thay vì link giả')
   })

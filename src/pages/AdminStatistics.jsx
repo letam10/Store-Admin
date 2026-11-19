@@ -36,7 +36,7 @@ export default function AdminStatistics({ Chart }) {
 
   return <section className="admin-module-card statistics-module">
     <div className="admin-module-head">
-      <div><p className="admin-eyebrow">THỐNG KÊ DOANH THU</p><h2>Báo cáo theo kỳ</h2><p>Màn hình và tệp xuất sử dụng cùng khoảng ngày và cách tính.</p></div>
+      <div><p className="admin-eyebrow">THỐNG KÊ DOANH THU</p><h2>Báo cáo theo kỳ</h2></div>
       <div className="statistics-head-actions">
         <button type="button" disabled={!ready} onClick={() => exportReport('html')}>In / lưu PDF</button>
         <button type="button" disabled={!ready} onClick={() => exportReport('xlsx')}>Xuất Excel</button>

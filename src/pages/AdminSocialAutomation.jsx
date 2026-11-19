@@ -52,6 +52,17 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
   const [postFilterStatus, setPostFilterStatus] = useState('all')
   const [postFilterPlatform, setPostFilterPlatform] = useState('all')
   const [selectedPostModal, setSelectedPostModal] = useState(null)
+  const [copiedPostId, setCopiedPostId] = useState(null)
+
+  const handleCopyPost = (post) => {
+    if (!post) return
+    const fullText = (post.title ? post.title + '\n\n' : '') + (post.content || '') + (post.hashtags ? '\n\n' + post.hashtags : '')
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(fullText)
+    }
+    setCopiedPostId(post.id)
+    setTimeout(() => setCopiedPostId(null), 2500)
+  }
 
   // Groups State
   const [groups, setGroups] = useState([])
@@ -1271,11 +1282,20 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                           Xem bài ↗
                         </a>
                       ) : (
-                        <span className="social-muted-text">Bản nháp</span>
+                        <span className="social-muted-text">Bản nháp (Chưa đăng thật)</span>
                       )}
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '4px' }}>
+                        <button
+                          type="button"
+                          className="social-action-btn"
+                          onClick={() => handleCopyPost(p)}
+                          title="Sao chép nội dung bài viết để đăng"
+                          style={{ fontSize: '11px', whiteSpace: 'nowrap' }}
+                        >
+                          {copiedPostId === p.id ? '✓ Đã chép' : '📋 Chép'}
+                        </button>
                         {p.status === 'pending_approval' && (
                           <button
                             type="button"
@@ -1357,7 +1377,15 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
               <span>👁️ Lượt xem: <strong>{selectedPostModal.viewsCount}</strong></span>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="social-btn-trigger"
+                onClick={() => handleCopyPost(selectedPostModal)}
+                style={{ background: copiedPostId === selectedPostModal.id ? '#1e7047' : undefined }}
+              >
+                {copiedPostId === selectedPostModal.id ? '✓ Đã Sao Chép Vào Bộ Nhớ Tạm!' : '📋 Sao Chép Nội Dung Bài Viết'}
+              </button>
               {selectedPostModal.postUrl && (
                 <a
                   href={selectedPostModal.postUrl}

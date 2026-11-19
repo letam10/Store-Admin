@@ -805,7 +805,6 @@ select option,
 .admin-status-row > span {
   font-size: 13px !important;
   font-weight: 600 !important;
-  color: #214432 !important;
 }
 .admin-status-row > div {
   height: 10px !important;
@@ -1054,8 +1053,6 @@ select option,
   border: 1px solid #cad9ce !important;
   border-radius: 9px !important;
   padding: 9px 12px !important;
-  background: #ffffff !important;
-  color: #123223 !important;
   transition: all 0.18s ease !important;
 }
 .admin-editor-grid input:focus,
@@ -1498,7 +1495,6 @@ html[data-admin-theme="dark"] input[type="email"],
 html[data-admin-theme="dark"] input[type="password"],
 html[data-admin-theme="dark"] textarea,
 html[data-admin-theme="dark"] select {
-  background: #091610 !important;
   border-color: #244d35 !important;
   color: #eef8f1 !important;
   color-scheme: dark;
@@ -1507,7 +1503,6 @@ html[data-admin-theme="dark"] input:focus,
 html[data-admin-theme="dark"] textarea:focus,
 html[data-admin-theme="dark"] select:focus {
   border-color: #4ade80 !important;
-  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.22) !important;
   outline: none !important;
 }
 html[data-admin-theme="dark"] input[type="checkbox"] {
