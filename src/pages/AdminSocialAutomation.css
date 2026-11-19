@@ -1,6 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Bộ phong cách giao diện hiện đại (CSS) cho module Tự động hóa đăng bài Mạng Xã Hội (Facebook, TikTok, Group targets, Viral posts, Live preview, Audit logs) với hỗ trợ Dark Mode đồng bộ toàn diện tông xanh ngọc tối #102a1e.
+  - Mục đích: Bộ phong cách giao diện hiện đại (CSS) cho module Tự động hóa đăng bài Mạng Xã Hội (Facebook, TikTok, Group targets, Viral posts, Live preview, Audit logs) với hỗ trợ Dark Mode đồng bộ tông xanh ngọc tối #102a1e, cuộn độc lập cho .social-table-shell không kéo cuộn cả trang, thead sticky cố định.
   - Liên kết trực tiếp: Store-Admin/src/pages/AdminSocialAutomation.jsx, Store-Admin/src/pages/Admin.jsx, Store-Admin/src/pages/AdminPolish.css
   - Vùng ảnh hưởng khi sửa: Giao diện tab chuyển đổi AI cục bộ, bảng điều khiển tự động hóa, trình xem trước bài viết mạng xã hội, các form cấu hình và bảng nhật ký báo cáo.
 */
@@ -521,22 +521,51 @@
   opacity: 0.8;
 }
 
-/* Bảng Audit Logs & Reports */
+/* Bảng Audit Logs & Reports - Hỗ trợ cuộn độc lập bên trong khung bảng, không cuộn cả trang */
 .social-table-shell {
   width: 100%;
+  max-height: clamp(360px, 58vh, 680px);
+  overflow-y: auto;
   overflow-x: auto;
+  overscroll-behavior: contain;
   border-radius: 12px;
   border: 1px solid var(--admin-border-light, #dce7df);
+  background: #ffffff;
+  position: relative;
+  box-shadow: 0 2px 8px rgba(18, 50, 35, 0.04);
+}
+
+.social-table-shell::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.social-table-shell::-webkit-scrollbar-track {
+  background: rgba(18, 50, 35, 0.04);
+  border-radius: 4px;
+}
+
+.social-table-shell::-webkit-scrollbar-thumb {
+  background: #a3c4af;
+  border-radius: 4px;
+}
+
+.social-table-shell::-webkit-scrollbar-thumb:hover {
+  background: #739f82;
 }
 
 .social-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   text-align: left;
   font-size: 12.5px;
 }
 
 .social-table th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   padding: 12px 14px;
   background: #f5f8f6;
   color: var(--admin-muted-dark, #5c7767);
@@ -544,8 +573,9 @@
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  border-bottom: 1px solid var(--admin-border-light, #dce7df);
+  border-bottom: 2px solid var(--admin-border-light, #dce7df);
   text-align: left;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .social-table td {
@@ -929,6 +959,18 @@ html[data-admin-theme="dark"] .social-table-shell {
   background: #0c2017 !important;
 }
 
+html[data-admin-theme="dark"] .social-table-shell::-webkit-scrollbar-track {
+  background: rgba(12, 32, 23, 0.5);
+}
+
+html[data-admin-theme="dark"] .social-table-shell::-webkit-scrollbar-thumb {
+  background: #28543a;
+}
+
+html[data-admin-theme="dark"] .social-table-shell::-webkit-scrollbar-thumb:hover {
+  background: #3e7b57;
+}
+
 html[data-admin-theme="dark"] .social-table th {
   background: #0c2017 !important;
   color: #86efac !important;
@@ -1109,4 +1151,56 @@ html[data-admin-theme="dark"] .social-modal-body-content {
 html[data-admin-theme="dark"] .social-modal-stat-bar {
   border-top-color: #28543a !important;
   color: #8bb39a !important;
+}
+
+/* Banner hướng dẫn Bridge Facebook cá nhân 1-chạm */
+.social-bridge-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 18px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 4px rgba(22, 101, 52, 0.05);
+}
+
+.social-bridge-icon {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.social-bridge-content h4 {
+  margin: 0 0 5px 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #166534;
+}
+
+.social-bridge-content p {
+  margin: 0;
+  font-size: 12px;
+  color: #14532d;
+  line-height: 1.55;
+}
+
+.social-bridge-content strong {
+  font-weight: 700;
+}
+
+html[data-admin-theme="dark"] .social-bridge-banner {
+  background: #0d261b !important;
+  border-color: #28543a !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+}
+
+html[data-admin-theme="dark"] .social-bridge-content h4 {
+  color: #86efac !important;
+}
+
+html[data-admin-theme="dark"] .social-bridge-content p {
+  color: #bbf7d0 !important;
 }

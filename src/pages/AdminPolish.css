@@ -1,7 +1,7 @@
 /*
   FILE NOTE
-  - Mục đích: Bộ quy tắc giao diện cao cấp (Ultra-Polish) cho hệ thống Store Admin (bảng biểu, cuộn nội bộ max-height, sticky th, form, dark mode, z-index ô tìm kiếm toàn cục và vị trí hiển thị header).
-  - Liên kết trực tiếp: Store-Admin/src/pages/Admin.jsx, Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/src/pages/AdminModules.jsx
+  - Mục đích: Bộ quy tắc giao diện cao cấp (Ultra-Polish) cho hệ thống Store Admin (bảng biểu, cuộn nội bộ max-height, sticky th, form, dark mode, z-index ô tìm kiếm toàn cục, hỗ trợ cuộn riêng biệt .social-table-shell và vị trí hiển thị header).
+  - Liên kết trực tiếp: Store-Admin/src/pages/Admin.jsx, Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/src/pages/AdminModules.jsx, Store-Admin/src/pages/AdminSocialAutomation.jsx
   - Vùng ảnh hưởng khi sửa: Toàn bộ bảng dữ liệu, cuộn nội bộ bảng, vị trí hiển thị header, ô tìm kiếm admin và z-index dropdown tìm kiếm.
 */
 
@@ -855,13 +855,15 @@ select option,
 .admin-table-wrap,
 .admin-product-table-wrap,
 .admin-customer-table-wrap,
-.admin-table-scroll {
+.admin-table-scroll,
+.social-table-shell {
   border: 1px solid #dce8df !important;
   border-radius: 16px !important;
   background: #ffffff !important;
-  max-height: 70vh !important;
+  max-height: clamp(360px, 58vh, 680px) !important;
   overflow-y: auto !important;
   overflow-x: auto !important;
+  overscroll-behavior: contain !important;
   position: relative !important;
   box-shadow: 0 4px 16px rgba(18, 50, 35, 0.03) !important;
 }
@@ -869,7 +871,8 @@ select option,
 .admin-table-wrap table,
 .admin-product-table-wrap table,
 .admin-customer-table-wrap table,
-.admin-order-table {
+.admin-order-table,
+.social-table-shell table {
   width: 100% !important;
   border-collapse: separate !important;
   border-spacing: 0 !important;
@@ -880,11 +883,13 @@ select option,
 .admin-customer-table-wrap thead,
 .admin-order-table thead,
 .admin-table-scroll thead,
+.social-table-shell thead,
 .admin-table-wrap th,
 .admin-product-table-wrap th,
 .admin-customer-table-wrap th,
 .admin-order-table th,
-.admin-table-scroll th {
+.admin-table-scroll th,
+.social-table-shell th {
   position: sticky !important;
   top: 0 !important;
   z-index: 20 !important;
@@ -1402,7 +1407,8 @@ html[data-admin-theme="dark"] .admin-realtime-bar span:nth-child(2) {
 html[data-admin-theme="dark"] .admin-table-wrap,
 html[data-admin-theme="dark"] .admin-product-table-wrap,
 html[data-admin-theme="dark"] .admin-customer-table-wrap,
-html[data-admin-theme="dark"] .admin-table-scroll {
+html[data-admin-theme="dark"] .admin-table-scroll,
+html[data-admin-theme="dark"] .social-table-shell {
   background: #12251c !important;
   border-color: #284c37 !important;
 }
@@ -1411,11 +1417,13 @@ html[data-admin-theme="dark"] .admin-product-table-wrap thead,
 html[data-admin-theme="dark"] .admin-customer-table-wrap thead,
 html[data-admin-theme="dark"] .admin-order-table thead,
 html[data-admin-theme="dark"] .admin-table-scroll thead,
+html[data-admin-theme="dark"] .social-table-shell thead,
 html[data-admin-theme="dark"] .admin-table-wrap th,
 html[data-admin-theme="dark"] .admin-product-table-wrap th,
 html[data-admin-theme="dark"] .admin-customer-table-wrap th,
 html[data-admin-theme="dark"] .admin-order-table th,
-html[data-admin-theme="dark"] .admin-table-scroll th {
+html[data-admin-theme="dark"] .admin-table-scroll th,
+html[data-admin-theme="dark"] .social-table-shell th {
   position: sticky !important;
   top: 0 !important;
   z-index: 20 !important;

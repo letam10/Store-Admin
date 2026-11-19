@@ -1,6 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Bộ kiểm thử tự động (Unit & Integration tests) cho tính năng Tự động hóa đăng bài Mạng Xã Hội (Dark Mode CSS tông xanh ngọc #102a1e, chu kỳ 5m/30m/1h/2h/6h, quyền riêng tư chỉ mình tôi/công khai, số liệu trung thực không fake).
+  - Mục đích: Bộ kiểm thử tự động (Unit & Integration tests) cho tính năng Tự động hóa đăng bài Mạng Xã Hội (cuộn độc lập bảng social-table-shell, thead sticky, Dark Mode xanh ngọc #102a1e, cơ chế Bridge Facebook John Harper 61580644871703, nút lấy thêm 5 bài viral thực tế).
   - Liên kết trực tiếp: Store-Admin/src/pages/Admin.jsx, Store-Admin/src/pages/AdminSocialAutomation.jsx, Store-Admin/src/pages/AdminSocialAutomation.css, Store-Admin/src/api/chat.js
   - Vùng ảnh hưởng khi sửa: Đảm bảo độ tin cậy và không hồi quy của luồng giao diện tự động hóa mạng xã hội.
 */
@@ -375,5 +375,163 @@ test('Nhật ký bài đăng và Studio hiển thị số liệu trung thực xu
     assert.ok(row.textContent.includes('Bản Nháp') || row.textContent.includes('Nháp nội bộ'), 'Trạng thái bài viết chưa đăng thật phải ghi rõ Bản Nháp hoặc Nháp nội bộ')
     assert.ok(row.textContent.includes('👍 0 · 🔁 0 · 💬 0'), 'Số liệu tương tác khởi tạo phải là 0 thực tế')
     assert.ok(row.textContent.includes('Chưa đăng thật'), 'Khi postUrl là null, phải ghi rõ Chưa đăng thật thay vì link giả')
+  })
+})
+
+test('Bảng social-table-shell có cấu hình cuộn độc lập (max-height, overflow-y auto, overscroll-behavior contain) và sticky th cố định trên đầu', () => {
+  const css = readFileSync(resolve('src/pages/AdminSocialAutomation.css'), 'utf-8')
+  assert.ok(css.includes('.social-table-shell'), 'Phải định nghĩa class .social-table-shell')
+  assert.ok(css.includes('max-height'), '.social-table-shell phải có giới hạn chiều cao max-height để cuộn nội bộ')
+  assert.ok(css.includes('overflow-y: auto'), '.social-table-shell phải có overflow-y: auto')
+  assert.ok(css.includes('overscroll-behavior: contain'), '.social-table-shell phải có overscroll-behavior: contain để ngăn cuộn toàn trang')
+  assert.ok(css.includes('position: sticky'), '.social-table th phải có position: sticky')
+  assert.ok(css.includes('top: 0'), '.social-table th phải có top: 0 để ghim tiêu đề')
+})
+
+test('Cơ chế Bridge đăng bài Facebook cá nhân John Harper và nút lấy thêm 5 bài viral thực tế', async () => {
+  let fetchMoreViralCalled = false
+  let publishPostCalled = false
+  let lastCopiedText = null
+  let lastOpenedUrl = null
+
+  const mockFetch = async (url, opts) => {
+    const u = String(url)
+    if (u.includes('/api/admin/session')) return json(adminSession)
+    if (u.includes('/api/admin/presence')) return json({ online: true })
+    if (u.includes('/api/admin/settings')) return json({ model: 'qwen3.5:4b', contextSize: 16384, allowedContextSizes: [8192, 16384] })
+    if (u.includes('/api/admin/stats')) return json({ grossRevenue: 1000000, refunds: 0, netRevenue: 1000000, includedOrders: 2, from: '2026-11-01', to: '2026-11-19', dataMode: 'real' })
+    if (u.includes('/api/admin/social/stats')) return json({ stats: { totalPostsToday: 1, publishedCount: 0, pendingCount: 1, failedCount: 0, totalLikes: 0, totalShares: 0, totalComments: 0, lastRunAt: null, nextRunAt: null, isActive: true, intervalHours: 2, mode: 'full_auto' } })
+    if (u.includes('/api/admin/social/settings')) return json({ settings: { id: 1, isActive: true, mode: 'full_auto', intervalHours: 2, privacy: 'only_me', channels: 'facebook', preferredCategory: 'all', toneStyle: 'viral_engaging', includeHashtags: true, includeEmojis: true, includeCta: true, includeHotline: true, contactHotline: '0901.234.567', orderLinkTemplate: 'https://omnicart.vn/products/{id}' } })
+    if (u.includes('/api/admin/social/posts/post-fb-99/publish')) {
+      publishPostCalled = true
+      return json({
+        ok: true,
+        post: {
+          id: 'post-fb-99',
+          productId: '1',
+          productName: 'Tai nghe Bluetooth OmiPro',
+          platform: 'facebook',
+          title: 'Tai nghe OmiPro cực xịn',
+          content: 'Nội dung bài viết OmiPro',
+          hashtags: '#OmniCart #TaiNghe',
+          status: 'published',
+          postUrl: 'https://www.facebook.com/profile.php?id=61580644871703'
+        }
+      })
+    }
+    if (u.includes('/api/admin/social/posts/post-fb-99/approve')) {
+      return json({
+        ok: true,
+        post: {
+          id: 'post-fb-99',
+          productId: '1',
+          productName: 'Tai nghe Bluetooth OmiPro',
+          platform: 'facebook',
+          title: 'Tai nghe OmiPro cực xịn',
+          content: 'Nội dung bài viết OmiPro',
+          hashtags: '#OmniCart #TaiNghe',
+          status: 'published',
+          postUrl: 'https://www.facebook.com/profile.php?id=61580644871703'
+        }
+      })
+    }
+    if (u.includes('/api/admin/social/posts')) return json({ posts: [
+      {
+        id: 'post-fb-99',
+        productId: '1',
+        productName: 'Tai nghe Bluetooth OmiPro',
+        productPrice: 890000,
+        platform: 'facebook',
+        title: 'Tai nghe OmiPro cực xịn',
+        content: 'Nội dung bài viết OmiPro',
+        hashtags: '#OmniCart #TaiNghe',
+        status: 'pending_approval',
+        likesCount: 0,
+        sharesCount: 0,
+        commentsCount: 0,
+        postUrl: 'https://www.facebook.com/profile.php?id=61580644871703'
+      }
+    ] })
+    if (u.includes('/api/admin/social/groups')) return json({ groups: [] })
+    if (u.includes('/api/admin/social/viral/fetch-more') && opts?.method === 'POST') {
+      fetchMoreViralCalled = true
+      return json({
+        ok: true,
+        addedCount: 5,
+        posts: [
+          { id: 'v-new-1', title: 'Top 5 mẹo dùng tai nghe', platform: 'facebook', category: 'Công nghệ', postUrl: 'https://www.facebook.com/profile.php?id=61580644871703', viralityScore: 97, likesCount: 3500, sharesCount: 820, commentsCount: 290, trendingTopic: 'Mẹo công nghệ' }
+        ]
+      })
+    }
+    if (u.includes('/api/admin/social/viral')) return json({ posts: [
+      { id: 'v-new-1', title: 'Top 5 mẹo dùng tai nghe', platform: 'facebook', category: 'Công nghệ', postUrl: 'https://www.facebook.com/profile.php?id=61580644871703', viralityScore: 97, likesCount: 3500, sharesCount: 820, commentsCount: 290, trendingTopic: 'Mẹo công nghệ' }
+    ] })
+    return json({})
+  }
+
+  await renderAdmin(mockFetch, async (doc) => {
+    // Override window.open & navigator.clipboard để spy
+    doc.defaultView.open = (url) => { lastOpenedUrl = url }
+    if (doc.defaultView.navigator.clipboard) {
+      doc.defaultView.navigator.clipboard.writeText = async (txt) => { lastCopiedText = txt }
+    }
+
+    // 1. Chuyển sang AI Cục bộ -> Tab Mạng Xã Hội
+    const aiNavBtn = Array.from(doc.querySelectorAll('.admin-sidebar nav button')).find(b => b.textContent.includes('AI cục bộ') || b.textContent.includes('Local AI'))
+    await act(async () => {
+      aiNavBtn.click()
+    })
+    const tabButtons = Array.from(doc.querySelectorAll('.admin-ai-tab-btn'))
+    await act(async () => {
+      tabButtons[1].click()
+    })
+
+    // 2. Chuyển sang Tab Hội nhóm & Viral
+    const groupsSubnavBtn = Array.from(doc.querySelectorAll('.social-subnav-btn')).find(b => b.textContent.includes('Hội Nhóm'))
+    await act(async () => {
+      groupsSubnavBtn.click()
+    })
+
+    // 3. Kiểm tra nút "🔥 Tải thêm 5 bài viral thực tế" và bấm
+    const fetchMoreBtn = Array.from(doc.querySelectorAll('button')).find(b => b.textContent.includes('Tải thêm 5 bài viral'))
+    assert.ok(fetchMoreBtn, 'Phải có nút 🔥 Tải thêm 5 bài viral thực tế')
+
+    await act(async () => {
+      fetchMoreBtn.click()
+    })
+    assert.strictEqual(fetchMoreViralCalled, true, 'Phải gọi API POST /api/admin/social/viral/fetch-more')
+
+    // 4. Chuyển sang Tab Nhật Ký
+    const logsSubnavBtn = Array.from(doc.querySelectorAll('.social-subnav-btn')).find(b => b.textContent.includes('Nhật Ký'))
+    await act(async () => {
+      logsSubnavBtn.click()
+    })
+
+    // Kiểm tra link trỏ tới profile facebook John Harper
+    const link = doc.querySelector('.social-table-link')
+    assert.ok(link, 'Phải có liên kết bài viết')
+    assert.ok(link.getAttribute('href').includes('61580644871703'), 'Link bài viết phải trỏ tới Facebook cá nhân John Harper (id 61580644871703)')
+
+    // 5. Bấm nút Đăng FB
+    const publishBtn = Array.from(doc.querySelectorAll('button')).find(b => b.textContent.includes('Đăng FB'))
+    assert.ok(publishBtn, 'Phải có nút 🚀 Đăng FB')
+    await act(async () => {
+      publishBtn.click()
+    })
+
+    assert.strictEqual(publishPostCalled, true, 'Phải gọi API publish post')
+    assert.ok(lastOpenedUrl && lastOpenedUrl.includes('61580644871703'), 'Phải mở trực tiếp trang cá nhân Facebook John Harper khi đăng bài')
+    assert.ok(lastCopiedText && lastCopiedText.includes('Tai nghe OmiPro'), 'Phải tự động sao chép nội dung bài viết vào clipboard')
+
+    // 6. Kiểm tra nút Duyệt & Đăng cho bài chờ duyệt
+    const approveBtn = Array.from(doc.querySelectorAll('button')).find(b => b.textContent.includes('Duyệt & Đăng'))
+    assert.ok(approveBtn, 'Phải có nút ✓ Duyệt & Đăng cho bài chờ duyệt')
+    lastOpenedUrl = null
+    lastCopiedText = null
+    await act(async () => {
+      approveBtn.click()
+    })
+    assert.ok(lastOpenedUrl && lastOpenedUrl.includes('61580644871703'), 'Khi duyệt bài Facebook phải tự động mở trang cá nhân John Harper')
+    assert.ok(lastCopiedText && lastCopiedText.includes('Tai nghe OmiPro'), 'Khi duyệt bài Facebook phải tự động sao chép nội dung vào clipboard')
   })
 })

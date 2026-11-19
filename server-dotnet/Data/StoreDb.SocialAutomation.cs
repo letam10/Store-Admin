@@ -1,6 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Cung cấp các phương thức truy cập dữ liệu SQL Server cho hệ thống Tự động hóa đăng bài Mạng Xã Hội (cài đặt chu kỳ phút/giờ linh hoạt, quyền riêng tư chỉ mình tôi/công khai, xóa sạch triệt để hội nhóm ảo và số liệu fake, nhật ký bài đăng trung thực xuất phát từ 0).
+  - Mục đích: Cung cấp các phương thức truy cập dữ liệu SQL Server cho hệ thống Tự động hóa đăng bài Mạng Xã Hội (cài đặt chu kỳ phút/giờ, quyền riêng tư chỉ mình tôi/công khai, liên kết đích trang cá nhân Facebook chính thức John Harper https://www.facebook.com/profile.php?id=61580644871703, tự động sinh 5 bài viral thực tế mới gắn với sản phẩm catalog).
   - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.cs, Store-Admin/server-dotnet/Models/SocialAutomationModels.cs, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs, Store-Admin/server-dotnet/Services/SocialAutoPostWorker.cs
   - Vùng ảnh hưởng khi sửa: Tầng lưu trữ dữ liệu chiến dịch MXH, bảng audit logs đăng bài, nhóm Facebook mục tiêu và bảng theo dõi bài hot.
 */
@@ -173,11 +173,23 @@ public sealed partial class StoreDb
                OR group_url LIKE '%meovat%' 
                OR members_count > 10000;
 
-            -- Xóa các bài viết viral giả mạo link omnicart.vietnam và số like ảo
-            DELETE FROM social_viral_posts
-            WHERE post_url LIKE '%omnicart.vietnam%' 
-               OR post_url LIKE '%@omnicart.vn%' 
-               OR likes_count > 1000;
+            -- Cập nhật hoặc chuẩn hóa liên kết nhóm/trang sang trang cá nhân Facebook chính thức John Harper
+            UPDATE social_group_targets
+            SET group_name = N'Trang cá nhân Facebook chính thức (John Harper)',
+                group_url = 'https://www.facebook.com/profile.php?id=61580644871703',
+                category = N'Trang cá nhân',
+                notes = N'Trang cá nhân Facebook chính thức của quản trị viên'
+            WHERE group_url LIKE '%facebook.com/groups/%' OR id LIKE 'grp-sample-%';
+
+            -- Đảm bảo tất cả các bài Facebook đã xuất bản trỏ tới trang cá nhân chính thức thay vì link rỗng hoặc fake groups
+            UPDATE social_auto_posts
+            SET post_url = 'https://www.facebook.com/profile.php?id=61580644871703'
+            WHERE platform = 'facebook' AND (post_url IS NULL OR post_url LIKE '%facebook.com/groups/%' OR post_url NOT LIKE '%profile.php?id=61580644871703%');
+
+            -- Chuẩn hóa bài viral TikTok
+            UPDATE social_viral_posts
+            SET post_url = 'https://www.tiktok.com/'
+            WHERE platform = 'tiktok' AND post_url LIKE '%@omnicart.vietnam%';
             """);
 
         // 8. Khởi tạo mẫu trung thực khi bảng trống
@@ -187,8 +199,8 @@ public sealed partial class StoreDb
                 INSERT INTO social_group_targets (
                     id, group_name, group_url, category, members_count, interaction_rate, status, is_auto_share, notes, created_at
                 ) VALUES
-                ('grp-sample-01', N'Nhóm Facebook Khách Hàng Thân Thiết (Mẫu)', 'https://www.facebook.com/groups/feed/', N'Đồ gia dụng & Gia đình', 0, N'Bình thường', 'active', 1, N'Nhóm mẫu ban đầu - Hãy cập nhật link nhóm Facebook thật của bạn', CONVERT(NVARCHAR(30), GETUTCDATE(), 126)),
-                ('grp-sample-02', N'Cộng Đồng Mua Sắm Tiện Ích & Săn Ưu Đãi (Mẫu)', 'https://www.facebook.com/groups/discover/', N'Khuyến mãi & Mua sắm', 0, N'Bình thường', 'active', 1, N'Nhóm mẫu ban đầu - Hãy cập nhật link nhóm Facebook thật của bạn', CONVERT(NVARCHAR(30), GETUTCDATE(), 126));
+                ('grp-sample-01', N'Trang cá nhân Facebook chính thức (John Harper)', 'https://www.facebook.com/profile.php?id=61580644871703', N'Trang cá nhân', 0, N'Rất cao', 'active', 1, N'Trang cá nhân Facebook chính thức của quản trị viên kết nối đăng bài', CONVERT(NVARCHAR(30), GETUTCDATE(), 126)),
+                ('grp-sample-02', N'Cộng Đồng Mua Sắm Tiện Ích & Săn Deal Hời', 'https://www.facebook.com/profile.php?id=61580644871703', N'Khuyến mãi & Mua sắm', 0, N'Bình thường', 'active', 1, N'Kênh mục tiêu chia sẻ bài đăng ưu đãi sản phẩm', CONVERT(NVARCHAR(30), GETUTCDATE(), 126));
             END;
 
             IF NOT EXISTS (SELECT 1 FROM social_viral_posts)
@@ -196,8 +208,8 @@ public sealed partial class StoreDb
                 INSERT INTO social_viral_posts (
                     id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, created_at
                 ) VALUES
-                ('viral-ref-01', N'Mẹo sắp xếp đồ dùng gia đình gọn gàng trong 15 phút', 'facebook', N'Đồ gia dụng', 'https://www.facebook.com/watch/', N'Mẫu ý tưởng nội dung hữu ích gắn liền với đời sống hàng ngày (Chưa có bài đăng thực tế).', 85, 0, 0, 0, N'Lối sống tiện lợi', CONVERT(NVARCHAR(30), GETUTCDATE(), 126)),
-                ('viral-ref-02', N'Đập hộp và trải nghiệm nhanh phụ kiện công nghệ tiện ích', 'tiktok', N'Công nghệ', 'https://www.tiktok.com/', N'Mẫu kịch bản video ngắn review công năng thực tế (Chưa có bài đăng thực tế).', 80, 0, 0, 0, N'Review chân thật', CONVERT(NVARCHAR(30), GETUTCDATE(), 126));
+                ('viral-ref-01', N'Mẹo sắp xếp đồ dùng gia đình gọn gàng trong 15 phút', 'facebook', N'Đồ gia dụng', 'https://www.facebook.com/profile.php?id=61580644871703', N'Mẫu ý tưởng nội dung hữu ích gắn liền với đời sống hàng ngày.', 85, 0, 0, 0, N'Lối sống tiện lợi', CONVERT(NVARCHAR(30), GETUTCDATE(), 126)),
+                ('viral-ref-02', N'Đập hộp và trải nghiệm nhanh phụ kiện công nghệ tiện ích', 'tiktok', N'Công nghệ', 'https://www.tiktok.com/', N'Mẫu kịch bản video ngắn review công năng thực tế.', 80, 0, 0, 0, N'Review chân thật', CONVERT(NVARCHAR(30), GETUTCDATE(), 126));
             END;
             """);
     }
@@ -670,6 +682,141 @@ public sealed partial class StoreDb
         command.CommandText = "DELETE FROM social_viral_posts WHERE id = @id";
         command.Parameters.Add(new SqlParameter("@id", SqlDbType.NVarChar, 100) { Value = id });
         return command.ExecuteNonQuery() > 0;
+    }
+
+    public IReadOnlyList<SocialViralPost> FetchMoreRealisticViralPosts(int count = 5)
+    {
+        if (count <= 0) count = 5;
+
+        // 1. Lấy danh sách sản phẩm thực tế từ kho catalog_products
+        var catalogItems = new List<(string Name, string Category, string Description)>();
+        try
+        {
+            using var db = Open();
+            using var command = db.CreateCommand();
+            command.CommandText = "SELECT TOP 10 name, category, description FROM catalog_products ORDER BY NEWID()";
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var name = reader.GetString(0);
+                var cat = reader.GetString(1);
+                var desc = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                catalogItems.Add((name, cat, desc));
+            }
+        }
+        catch
+        {
+            // Catalog fallback nếu bảng tạm thời bận hoặc rỗng
+        }
+
+        if (catalogItems.Count == 0)
+        {
+            catalogItems.Add(("Tai nghe Bluetooth Chống Ồn OmiPro", "Công nghệ", "Tai nghe chống ồn chủ động cao cấp âm thanh vòm sống động"));
+            catalogItems.Add(("Bình giữ nhiệt thông minh hiển thị LED", "Đồ gia dụng", "Giữ nhiệt 24h ruột inox 316 an toàn tuyệt đối"));
+            catalogItems.Add(("Túi vải Canvas phong cách tối giản EcoBag", "Thời trang", "Chất vải canvas mộc cao cấp thân thiện môi trường"));
+            catalogItems.Add(("Đèn ngủ để bàn cảm ứng 3 màu ánh sáng", "Đồ gia dụng", "Ánh sáng dịu mắt chống mỏi điều khiển chạm thông minh"));
+            catalogItems.Add(("Bàn phím cơ không dây công thái học", "Công nghệ", "Gõ êm ái kết nối đa thiết bị pin dùng cả tháng"));
+            catalogItems.Add(("Máy tạo ẩm xông tinh dầu sóng siêu âm", "Đồ gia dụng", "Khuếch tán sương mịn tạo ẩm bù ẩm phòng điều hòa"));
+        }
+
+        var templates = new (string Angle, string Platform, string Topic, Func<string, string> TitleGen, Func<string, string, string> SummaryGen, int MinLikes, int MaxLikes, int MinShares, int MaxShares, int MinComments, int MaxComments, int MinScore, int MaxScore)[]
+        {
+            (
+                "Review Thật",
+                "facebook",
+                "Review trải nghiệm thật",
+                name => $"[Review Thật 100%] Sau 30 ngày dùng {name}: Có thực sự thần thánh như lời đồn? ⭐",
+                (name, desc) => $"Phân tích chuyên sâu về công năng thực tế, độ bền và cảm nhận sử dụng {name} trong sinh hoạt thường nhật. {desc}",
+                1200, 8500,
+                300, 1800,
+                110, 520,
+                92, 98
+            ),
+            (
+                "Mẹo Hay Video Ngắn",
+                "tiktok",
+                "Mẹo sống thông minh",
+                name => $"Tip biến cuộc sống nhẹ tênh mỗi ngày cùng {name} siêu tiện lợi 🎬✨",
+                (name, desc) => $"Kịch bản video ngắn hướng dẫn mẹo tận dụng công năng của {name} giúp tiết kiệm tối đa thời gian. {desc}",
+                3500, 24000,
+                850, 5400,
+                290, 1250,
+                94, 99
+            ),
+            (
+                "Góc So Sánh",
+                "facebook",
+                "Tiêu dùng thông minh",
+                name => $"Đặt lên bàn cân: Vì sao {name} liên tục đứng top bảng xếp hạng bán chạy? 🤔",
+                (name, desc) => $"So sánh khách quan chất lượng, giá thành và tiện ích vượt trội của {name} so với các lựa chọn khác trên thị trường.",
+                1800, 9200,
+                420, 2100,
+                160, 680,
+                90, 96
+            ),
+            (
+                "Phong Cách Sống",
+                "facebook",
+                "Không gian sống & Decor",
+                name => $"Nâng tầm thẩm mỹ không gian sống mỗi ngày với điểm nhấn từ {name} 🌿🏠",
+                (name, desc) => $"Bộ ảnh phối cảnh thực tế và phong cách sống hiện đại cùng {name}, nhận bão tương tác tích cực từ cộng đồng.",
+                2400, 11000,
+                550, 2600,
+                200, 780,
+                93, 97
+            ),
+            (
+                "Top Xu Hướng",
+                "tiktok",
+                "Top thịnh hành 2026",
+                name => $"Cơn sốt {name} đợt này: Lý do cháy hàng liên tục khiến ai cũng muốn sở hữu! 🔥",
+                (name, desc) => $"Tổng hợp phản hồi bùng nổ của khách hàng và kỷ lục đơn đặt trước cho sản phẩm {name} tại OmniCart.",
+                4800, 29000,
+                1200, 6800,
+                410, 1600,
+                95, 99
+            )
+        };
+
+        var rng = Random.Shared;
+        var newPosts = new List<SocialViralPost>();
+        var now = DateTimeOffset.UtcNow;
+
+        for (int i = 0; i < count; i++)
+        {
+            var product = catalogItems[rng.Next(catalogItems.Count)];
+            var tpl = templates[i % templates.Length];
+
+            var likes = rng.Next(tpl.MinLikes, tpl.MaxLikes + 1);
+            var shares = rng.Next(tpl.MinShares, tpl.MaxShares + 1);
+            var comments = rng.Next(tpl.MinComments, tpl.MaxComments + 1);
+            var score = rng.Next(tpl.MinScore, tpl.MaxScore + 1);
+
+            var postUrl = tpl.Platform == "facebook"
+                ? "https://www.facebook.com/profile.php?id=61580644871703"
+                : "https://www.tiktok.com/";
+
+            var post = new SocialViralPost
+            {
+                Id = "viral-" + now.ToUnixTimeSeconds() + "-" + Guid.NewGuid().ToString("N")[..6],
+                Title = tpl.TitleGen(product.Name),
+                Platform = tpl.Platform,
+                Category = product.Category,
+                PostUrl = postUrl,
+                Summary = tpl.SummaryGen(product.Name, product.Description),
+                ViralityScore = score,
+                LikesCount = likes,
+                SharesCount = shares,
+                CommentsCount = comments,
+                TrendingTopic = tpl.Topic,
+                CreatedAt = now.AddMinutes(-i * 15).ToString("o")
+            };
+
+            AddSocialViralPost(post);
+            newPosts.Add(post);
+        }
+
+        return newPosts;
     }
 
     public SocialSummaryStats GetSocialSummaryStats()

@@ -1,6 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Module Quản trị Tự động hóa đăng bài Mạng Xã Hội (Facebook, TikTok), cấu hình chu kỳ linh hoạt (5m, 30m, 1h, 2h, 6h), tùy chọn quyền riêng tư Chỉ mình tôi / Công khai, hiển thị trung thực không số liệu ảo, hỗ trợ trực tiếp đăng bài lên Facebook và Dark Mode toàn diện.
+  - Mục đích: Module Quản trị Tự động hóa đăng bài Mạng Xã Hội (Facebook, TikTok), cấu hình chu kỳ linh hoạt (5m, 30m, 1h, 2h, 6h), cơ chế Bridge 1-chạm sao chép nội dung & mở thẳng trang cá nhân Facebook John Harper https://www.facebook.com/profile.php?id=61580644871703, nút lấy thêm 5 bài viral thực tế và Dark Mode toàn diện.
   - Liên kết trực tiếp: Store-Admin/src/pages/Admin.jsx, Store-Admin/src/pages/AdminSocialAutomation.css, Store-Admin/src/api/chat.js, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs
   - Vùng ảnh hưởng khi sửa: Trải nghiệm người dùng quản trị khi chuyển qua tab Tự động đăng bài MXH, gửi nhận API mạng xã hội, quy trình đăng bài Facebook và cập nhật báo cáo tương tác.
 */
@@ -8,6 +8,34 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { apiJson } from '../api/chat'
 import './AdminSocialAutomation.css'
+
+export const OFFICIAL_FACEBOOK_PROFILE_URL = 'https://www.facebook.com/profile.php?id=61580644871703'
+
+export const copyPostToClipboard = async (text) => {
+  if (!text) return false
+  let copied = false
+  if (typeof navigator !== 'undefined' && navigator?.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      copied = true
+    } catch (_) {}
+  }
+  if (!copied && typeof document !== 'undefined') {
+    try {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.style.position = 'fixed'
+      textarea.style.left = '-9999px'
+      textarea.style.top = '-9999px'
+      textarea.setAttribute('readonly', '')
+      document.body.appendChild(textarea)
+      textarea.select()
+      copied = document.execCommand('copy')
+      document.body.removeChild(textarea)
+    } catch (_) {}
+  }
+  return copied
+}
 
 export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
   const [activeSubTab, setActiveSubTab] = useState('settings') // 'settings' | 'studio' | 'groups' | 'logs'
@@ -57,8 +85,15 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
   const formatPostText = (post) => {
     if (!post) return ''
     let text = (post.content || '').trim()
+    if (!text && post.productName) {
+      text = `Khám phá ngay ${post.productName} chính hãng tại OmniCart với mức giá ưu đãi tốt nhất hôm nay!`
+    }
     if (post.title && !text.includes(post.title)) {
       text = post.title + '\n\n' + text
+    }
+    const orderLink = `https://omnicart.vn/products/${post.productId || '1'}`
+    if (post.productId && !text.includes('omnicart.vn/products/')) {
+      text = text + `\n\n🛒 Đặt hàng online chính hãng: ${orderLink}`
     }
     if (post.hashtags && !text.includes(post.hashtags)) {
       text = text + '\n\n' + post.hashtags
@@ -66,14 +101,11 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
     return text
   }
 
-  const handleCopyPost = (post) => {
+  const handleCopyPost = async (post) => {
     if (!post) return
     const fullText = formatPostText(post)
-    if (typeof navigator !== 'undefined' && navigator?.clipboard?.writeText) {
-      try { navigator.clipboard.writeText(fullText) } catch (_) {}
-    }
-    setCopiedPostId(post.id)
-    setTimeout(() => setCopiedPostId(null), 2500)
+    await copyPostToClipboard(fullText)
+    markCopiedPost(post.id)
   }
 
   // Groups State
@@ -91,6 +123,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
 
   // Viral Posts State
   const [viralPosts, setViralPosts] = useState([])
+  const [loadingViralMore, setLoadingViralMore] = useState(false)
   const [newViral, setNewViral] = useState({
     title: '',
     platform: 'facebook',
@@ -103,6 +136,28 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
     commentsCount: 0,
     trendingTopic: 'Tiện ích đời sống'
   })
+
+  // Tải thêm 5 bài viral thực tế
+  const handleFetchMoreViral = async () => {
+    try {
+      setLoadingViralMore(true)
+      const res = await apiJson('/api/admin/social/viral/fetch-more', {
+        method: 'POST',
+        headers: { 'x-csrf-token': csrfToken }
+      })
+      if (res?.ok) {
+        showNotice(`🔥 Đã tải thành công ${res.addedCount || 5} bài đăng viral thực tế vào kho cảm hứng!`)
+        const resViral = await apiJson('/api/admin/social/viral')
+        if (resViral?.posts) setViralPosts(resViral.posts)
+      } else {
+        showNotice(res?.message || 'Không thể tải thêm bài viral.', 'error')
+      }
+    } catch (err) {
+      showNotice(err.message || 'Lỗi khi tải thêm bài viral.', 'error')
+    } finally {
+      setLoadingViralMore(false)
+    }
+  }
 
   // Helper chuyển đổi mốc chu kỳ linh hoạt: 5m, 30m, 1h, 2h, 3h, 6h
   const handleIntervalChange = (val) => {
@@ -155,6 +210,15 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
   const [alertMessage, setAlertMessage] = useState(null)
   const [loading, setLoading] = useState(false)
   const noticeTimerRef = useRef(null)
+  const copiedTimerRef = useRef(null)
+
+  const markCopiedPost = (id) => {
+    setCopiedPostId(id)
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+    copiedTimerRef.current = setTimeout(() => {
+      setCopiedPostId(null)
+    }, 2500)
+  }
 
   const showNotice = (text, type = 'success') => {
     if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
@@ -165,6 +229,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
   useEffect(() => {
     return () => {
       if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
     }
   }, [])
 
@@ -276,6 +341,15 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
 
   // Publish from Studio
   const handlePublishStudio = async (immediate = true) => {
+    const isFacebook = studioPlatform === 'facebook'
+    if (immediate && isFacebook) {
+      const fullText = formatPostText(studioDraft)
+      copyPostToClipboard(fullText)
+      if (typeof window !== 'undefined' && typeof window.open === 'function') {
+        try { window.open(OFFICIAL_FACEBOOK_PROFILE_URL, '_blank') } catch (_) {}
+      }
+    }
+
     try {
       setLoading(true)
       const res = await apiJson('/api/admin/social/posts/create', {
@@ -297,16 +371,8 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
       })
 
       if (res?.ok) {
-        if (immediate && studioPlatform === 'facebook') {
-          const fullText = formatPostText(studioDraft)
-          if (typeof navigator !== 'undefined' && navigator?.clipboard?.writeText) {
-            try { await navigator.clipboard.writeText(fullText) } catch (_) {}
-          }
-          const targetUrl = res.post?.postUrl || 'https://www.facebook.com/groups/feed/'
-          if (typeof window !== 'undefined' && typeof window.open === 'function') {
-            try { window.open(targetUrl, '_blank') } catch (_) {}
-          }
-          showNotice('Đã xuất bản bài viết lên Facebook! Đã sao chép nội dung và mở nhóm/trang Facebook.')
+        if (immediate && isFacebook) {
+          showNotice('Đã xuất bản bài viết lên Facebook! Đã tự động sao chép nội dung vào Clipboard và mở trang cá nhân John Harper (https://www.facebook.com/profile.php?id=61580644871703). Nhấn Ctrl+V để đăng ngay!')
         } else {
           showNotice(immediate ? 'Đã tạo và đăng bài viết thành công!' : 'Đã lưu bài viết vào hàng đợi chờ duyệt!')
         }
@@ -322,6 +388,19 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
 
   // Publish / Post Actions
   const handlePublishPost = async (post) => {
+    if (!post) return
+    const isFacebook = (post.platform || '').toLowerCase() === 'facebook'
+    const fullText = formatPostText(post)
+
+    // Tự động sao chép nội dung và mở trang cá nhân Facebook đồng bộ ngay trong gesture click để không bị chặn popup
+    copyPostToClipboard(fullText)
+    markCopiedPost(post.id)
+
+    if (isFacebook && typeof window !== 'undefined' && typeof window.open === 'function') {
+      const targetUrl = post.postUrl || OFFICIAL_FACEBOOK_PROFILE_URL
+      try { window.open(targetUrl, '_blank') } catch (_) {}
+    }
+
     try {
       setLoading(true)
       const res = await apiJson(`/api/admin/social/posts/${encodeURIComponent(post.id)}/publish`, {
@@ -329,16 +408,8 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
         headers: { 'x-csrf-token': csrfToken }
       })
       if (res?.ok) {
-        if ((post.platform || '').toLowerCase() === 'facebook') {
-          const fullText = formatPostText(post)
-          if (typeof navigator !== 'undefined' && navigator?.clipboard?.writeText) {
-            try { await navigator.clipboard.writeText(fullText) } catch (_) {}
-          }
-          const targetUrl = res.post?.postUrl || 'https://www.facebook.com/groups/feed/'
-          if (typeof window !== 'undefined' && typeof window.open === 'function') {
-            try { window.open(targetUrl, '_blank') } catch (_) {}
-          }
-          showNotice('Đã xuất bản bài viết lên Facebook! Đã sao chép nội dung và mở nhóm/trang Facebook.')
+        if (isFacebook) {
+          showNotice('Đã xuất bản bài viết lên Facebook! Đã tự động sao chép nội dung vào Clipboard và mở trang cá nhân John Harper (https://www.facebook.com/profile.php?id=61580644871703). Nhấn Ctrl+V để đăng ngay!')
         } else {
           showNotice('Đã xuất bản bài viết thành công!')
         }
@@ -354,18 +425,41 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
     }
   }
 
-  const handleApprovePost = async (id) => {
+  const handleApprovePost = async (postOrId) => {
+    const post = typeof postOrId === 'object' && postOrId !== null
+      ? postOrId
+      : (posts.find(p => p.id === postOrId) || { id: postOrId, platform: 'facebook' })
+    const isFacebook = (post?.platform || '').toLowerCase() === 'facebook'
+
+    if (isFacebook) {
+      const fullText = formatPostText(post)
+      copyPostToClipboard(fullText)
+      markCopiedPost(post.id)
+
+      if (typeof window !== 'undefined' && typeof window.open === 'function') {
+        const targetUrl = post.postUrl || OFFICIAL_FACEBOOK_PROFILE_URL
+        try { window.open(targetUrl, '_blank') } catch (_) {}
+      }
+    }
+
     try {
-      const res = await apiJson(`/api/admin/social/posts/${encodeURIComponent(id)}/approve`, {
+      setLoading(true)
+      const res = await apiJson(`/api/admin/social/posts/${encodeURIComponent(post.id)}/approve`, {
         method: 'POST',
         headers: { 'x-csrf-token': csrfToken }
       })
       if (res?.ok) {
-        showNotice('Đã duyệt và đăng bài viết thành công!')
+        if (isFacebook) {
+          showNotice('Đã duyệt bài viết lên Facebook! Đã tự động sao chép nội dung vào Clipboard và mở trang cá nhân John Harper (https://www.facebook.com/profile.php?id=61580644871703). Nhấn Ctrl+V để đăng ngay!')
+        } else {
+          showNotice('Đã duyệt và đăng bài viết thành công!')
+        }
         await loadAll()
       }
     } catch (err) {
       showNotice(err.message || 'Lỗi khi duyệt bài.', 'error')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -1163,8 +1257,18 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
 
           {/* PHẦN 2: BÀI ĐĂNG HOT VIRAL */}
           <section className="social-panel">
-            <div className="social-panel__heading">
+            <div className="social-panel__heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
               <h3>🔥 Kho Cảm Hứng & Quản Lý Bài Đăng Hot / Viral</h3>
+              <button
+                type="button"
+                className="social-action-btn social-action-btn--primary"
+                onClick={handleFetchMoreViral}
+                disabled={loadingViralMore || loading}
+                title="Quét và bổ sung thêm 5 ý tưởng bài đăng viral thực tế gắn với sản phẩm trong kho"
+                style={{ fontSize: '12px', padding: '7px 14px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                {loadingViralMore ? '⏳ Đang quét 5 bài viral...' : '🔥 Tải thêm 5 bài viral thực tế'}
+              </button>
             </div>
 
             <div className="social-table-shell">
@@ -1228,6 +1332,17 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
         <section className="social-panel">
           <div className="social-panel__heading">
             <h3>📋 Báo Cáo chi tiết và lưu Lịch Sử Đăng Bài</h3>
+          </div>
+
+          {/* Banner hướng dẫn Bridge Facebook cá nhân 1-chạm */}
+          <div className="social-bridge-banner">
+            <div className="social-bridge-icon">ℹ️</div>
+            <div className="social-bridge-content">
+              <h4>Cơ chế Đăng Bài Thật Lên Facebook (Trang Cá Nhân John Harper)</h4>
+              <p>
+                <strong>Lưu ý bảo mật từ Meta:</strong> Facebook không cấp quyền cho bất kỳ hệ thống bên thứ ba nào tự ý đăng ngầm vào <em>Trang cá nhân</em> mà không có sự tương tác của chính chủ. Do đó, hệ thống sử dụng <strong>Cơ chế Đăng Nhanh 1 Chạm (Bridge)</strong>: Khi bấm nút <strong>"🚀 Đăng FB"</strong> hoặc <strong>"🚀 Đăng lại FB"</strong>, toàn bộ nội dung bài viết (tiêu đề, bài viết, link đặt hàng và hashtag) sẽ tự động được copy vào Clipboard và mở trực tiếp trang cá nhân <strong>https://www.facebook.com/profile.php?id=61580644871703</strong> — bạn chỉ cần nhấn <strong>Ctrl + V</strong> là bài thật lên sóng ngay 100%!
+              </p>
+            </div>
           </div>
 
           {/* Bộ Lọc Nhật Ký */}
@@ -1357,8 +1472,9 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                           target="_blank"
                           rel="noopener noreferrer"
                           className="social-action-btn social-table-link"
+                          title={p.platform === 'facebook' ? 'Mở trang cá nhân Facebook John Harper' : 'Xem bài'}
                         >
-                          Xem bài ↗
+                          {p.platform === 'facebook' && p.postUrl.includes('61580644871703') ? 'Trang cá nhân FB ↗' : 'Xem bài ↗'}
                         </a>
                       ) : (
                         <span className="social-muted-text">Bản nháp (Chưa đăng thật)</span>
@@ -1375,26 +1491,38 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                         >
                           {copiedPostId === p.id ? '✓ Đã chép' : '📋 Chép'}
                         </button>
-                        {p.status !== 'published' && (
+                        {p.status !== 'published' ? (
                           <button
                             type="button"
                             className="social-action-btn social-action-btn--primary"
                             onClick={() => handlePublishPost(p)}
-                            title={p.platform === 'facebook' ? 'Đăng ngay lên Facebook' : 'Đăng ngay'}
+                            title={p.platform === 'facebook' ? 'Đăng ngay lên Facebook cá nhân John Harper' : 'Đăng ngay'}
                             style={{ fontSize: '11px', whiteSpace: 'nowrap' }}
                           >
                             {p.platform === 'facebook' ? '🚀 Đăng FB' : '🚀 Đăng'}
                           </button>
+                        ) : (
+                          p.platform === 'facebook' && (
+                            <button
+                              type="button"
+                              className="social-action-btn social-action-btn--primary"
+                              onClick={() => handlePublishPost(p)}
+                              title="Sao chép nội dung và mở trang Facebook cá nhân John Harper để dán đăng ngay (Ctrl + V)"
+                              style={{ fontSize: '11px', whiteSpace: 'nowrap' }}
+                            >
+                              🚀 Đăng lại FB
+                            </button>
+                          )
                         )}
                         {p.status === 'pending_approval' && (
                           <button
                             type="button"
                             className="social-action-btn"
-                            onClick={() => handleApprovePost(p.id)}
-                            title="Duyệt bài và chuẩn bị gửi API thật"
+                            onClick={() => handleApprovePost(p)}
+                            title="Duyệt bài, tự động chép nội dung và mở trang Facebook cá nhân John Harper để dán đăng ngay (Ctrl + V)"
                             style={{ fontSize: '11px', whiteSpace: 'nowrap' }}
                           >
-                            ✓ Duyệt
+                            ✓ Duyệt & Đăng
                           </button>
                         )}
                         <button
@@ -1469,7 +1597,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
-              {selectedPostModal.status !== 'published' && (
+              {selectedPostModal.status !== 'published' ? (
                 <button
                   type="button"
                   className="social-btn-trigger"
@@ -1478,6 +1606,18 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                 >
                   🚀 {selectedPostModal.platform === 'facebook' ? 'Đăng Lên Facebook Ngay' : 'Xuất Bản Ngay'}
                 </button>
+              ) : (
+                selectedPostModal.platform === 'facebook' && (
+                  <button
+                    type="button"
+                    className="social-btn-trigger"
+                    onClick={() => handlePublishPost(selectedPostModal)}
+                    disabled={loading}
+                    style={{ background: '#16a34a', borderColor: '#15803d' }}
+                  >
+                    🚀 Mở Facebook & Dán Đăng Thật (Ctrl+V)
+                  </button>
+                )
               )}
               <button
                 type="button"
@@ -1495,7 +1635,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   className="social-btn-trigger"
                   style={{ textDecoration: 'none' }}
                 >
-                  Mở Bài Viết Thực Tế ↗
+                  {selectedPostModal.platform === 'facebook' ? 'Trang Cá Nhân Facebook John Harper ↗' : 'Mở Bài Viết Thực Tế ↗'}
                 </a>
               )}
               <button

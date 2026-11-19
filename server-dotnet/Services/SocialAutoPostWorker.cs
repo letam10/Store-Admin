@@ -1,6 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Dịch vụ chạy ngầm (BackgroundService) tự động hóa tạo nội dung tiếp thị Mạng Xã Hội định kỳ (hỗ trợ 5m, 30m, 1h, 2h, 6h), xuất bản bài viết lên Facebook tự động trung thực không số liệu ảo, bảo toàn quyền riêng tư chỉ mình tôi / công khai.
+  - Mục đích: Dịch vụ chạy ngầm (BackgroundService) tự động hóa tạo nội dung tiếp thị Mạng Xã Hội định kỳ (hỗ trợ 5m, 30m, 1h, 2h, 6h), xuất bản bài viết trỏ đến trang cá nhân Facebook chính thức John Harper https://www.facebook.com/profile.php?id=61580644871703, bảo toàn quyền riêng tư chỉ mình tôi / công khai.
   - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.SocialAutomation.cs, Store-Admin/server-dotnet/Services/SocialCopywriterService.cs, Store-Admin/server-dotnet/Program.cs
   - Vùng ảnh hưởng khi sửa: Chu kỳ tự động quét sản phẩm, sinh bài viết bằng Qwen AI, lưu vết audit log CSDL, xuất bản đa kênh Facebook/TikTok và quản lý lịch trình tiếp theo.
 */
@@ -141,8 +141,14 @@ public sealed class SocialAutoPostWorker(
                 {
                     var matchedGroup = !string.IsNullOrWhiteSpace(targetGroup)
                         ? groups.FirstOrDefault(g => g.GroupName.Equals(targetGroup, StringComparison.OrdinalIgnoreCase))
-                        : activeGroups.FirstOrDefault();
-                    postUrl = matchedGroup?.GroupUrl ?? "https://www.facebook.com/groups/feed/";
+                        : null;
+                    postUrl = matchedGroup != null 
+                        && !string.IsNullOrWhiteSpace(matchedGroup.GroupUrl) 
+                        && !matchedGroup.GroupUrl.Contains("/groups/feed") 
+                        && !matchedGroup.GroupUrl.Contains("/groups/discover")
+                        && !matchedGroup.Id.StartsWith("grp-sample-")
+                        ? matchedGroup.GroupUrl
+                        : "https://www.facebook.com/profile.php?id=61580644871703";
                 }
                 else
                 {

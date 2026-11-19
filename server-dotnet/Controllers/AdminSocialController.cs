@@ -1,6 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Controller API quản trị cho module Tự động hóa tiếp thị Mạng Xã Hội (cấu hình chu kỳ phút/giờ, quyền riêng tư chỉ mình tôi/công khai, sinh nội dung AI Qwen, duyệt bài, xuất bản bài viết lên Facebook, nhật ký audit logs trung thực, nhóm Facebook, bài viral).
+  - Mục đích: Controller API quản trị cho module Tự động hóa tiếp thị Mạng Xã Hội (chu kỳ phút/giờ, quyền riêng tư chỉ mình tôi/công khai, liên kết Facebook chính thức John Harper https://www.facebook.com/profile.php?id=61580644871703, API tải thêm 5 bài viral thực tế /api/admin/social/viral/fetch-more).
   - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.SocialAutomation.cs, Store-Admin/server-dotnet/Services/SocialCopywriterService.cs, Store-Admin/server-dotnet/Services/SocialAutoPostWorker.cs
   - Vùng ảnh hưởng khi sửa: Toàn bộ API mạng xã hội cung cấp dữ liệu cho tab "Tự động đăng bài Mạng Xã Hội" trên giao diện Admin và đăng bài Facebook.
 */
@@ -22,6 +22,7 @@ public sealed class AdminSocialController(
     SocialAutoPostWorker worker) : ControllerBase
 {
     private const string Cookie = "store_admin_session";
+    public const string DefaultFacebookProfileUrl = "https://www.facebook.com/profile.php?id=61580644871703";
 
     private bool CsrfValid()
     {
@@ -29,6 +30,30 @@ public sealed class AdminSocialController(
         return !string.IsNullOrWhiteSpace(raw) &&
                Request.Headers.TryGetValue("x-csrf-token", out var value) &&
                value == Tokens.Sha256("csrf:" + raw);
+    }
+
+    private string ResolvePlatformUrl(string? platform, string? targetGroup)
+    {
+        var plat = (platform ?? "facebook").ToLowerInvariant();
+        if (plat == "facebook")
+        {
+            if (!string.IsNullOrWhiteSpace(targetGroup))
+            {
+                var groups = db.GetSocialGroupTargets();
+                var matchedGroup = groups.FirstOrDefault(g => g.GroupName.Equals(targetGroup, StringComparison.OrdinalIgnoreCase));
+
+                // Chỉ trả về link nhóm nếu nhóm đó là nhóm thực do quản trị viên cấu hình riêng (không phải nhóm mẫu/link generic)
+                if (matchedGroup != null && !string.IsNullOrWhiteSpace(matchedGroup.GroupUrl)
+                    && !matchedGroup.GroupUrl.Contains("/groups/feed")
+                    && !matchedGroup.GroupUrl.Contains("/groups/discover")
+                    && !matchedGroup.Id.StartsWith("grp-sample-"))
+                {
+                    return matchedGroup.GroupUrl;
+                }
+            }
+            return DefaultFacebookProfileUrl;
+        }
+        return "https://www.tiktok.com/";
     }
 
     [HttpGet("settings")]
@@ -63,23 +88,7 @@ public sealed class AdminSocialController(
         var platform = (request.Platform ?? "facebook").ToLowerInvariant();
         var postId = "post-" + now.ToUnixTimeSeconds() + "-" + Guid.NewGuid().ToString("N")[..4];
 
-        string? postUrl = null;
-        if (isPublished)
-        {
-            if (platform == "facebook")
-            {
-                var groups = db.GetSocialGroupTargets();
-                var matchedGroup = !string.IsNullOrWhiteSpace(request.TargetGroup)
-                    ? groups.FirstOrDefault(g => g.GroupName.Equals(request.TargetGroup, StringComparison.OrdinalIgnoreCase))
-                    : groups.FirstOrDefault(g => g.IsAutoShare);
-
-                postUrl = matchedGroup?.GroupUrl ?? "https://www.facebook.com/groups/feed/";
-            }
-            else
-            {
-                postUrl = "https://www.tiktok.com/";
-            }
-        }
+        string? postUrl = isPublished ? ResolvePlatformUrl(platform, request.TargetGroup) : null;
 
         var post = new SocialAutoPost
         {
@@ -157,20 +166,7 @@ public sealed class AdminSocialController(
         var post = db.GetSocialPostById(id);
         if (post == null) return NotFound(new { error = "POST_NOT_FOUND" });
 
-        string postUrl;
-        if ((post.Platform ?? "").ToLowerInvariant() == "facebook")
-        {
-            var groups = db.GetSocialGroupTargets();
-            var matchedGroup = !string.IsNullOrWhiteSpace(post.TargetGroup)
-                ? groups.FirstOrDefault(g => g.GroupName.Equals(post.TargetGroup, StringComparison.OrdinalIgnoreCase))
-                : groups.FirstOrDefault(g => g.IsAutoShare);
-            postUrl = matchedGroup?.GroupUrl ?? "https://www.facebook.com/groups/feed/";
-        }
-        else
-        {
-            postUrl = "https://www.tiktok.com/";
-        }
-
+        string postUrl = ResolvePlatformUrl(post.Platform, post.TargetGroup);
         db.UpdateSocialPostStatus(id, "published", errorMessage: null, postUrl: postUrl);
         var updated = db.GetSocialPostById(id);
         return Ok(new { ok = true, post = updated });
@@ -184,20 +180,7 @@ public sealed class AdminSocialController(
         var post = db.GetSocialPostById(id);
         if (post == null) return NotFound(new { error = "POST_NOT_FOUND" });
 
-        string postUrl;
-        if ((post.Platform ?? "").ToLowerInvariant() == "facebook")
-        {
-            var groups = db.GetSocialGroupTargets();
-            var matchedGroup = !string.IsNullOrWhiteSpace(post.TargetGroup)
-                ? groups.FirstOrDefault(g => g.GroupName.Equals(post.TargetGroup, StringComparison.OrdinalIgnoreCase))
-                : groups.FirstOrDefault(g => g.IsAutoShare);
-            postUrl = matchedGroup?.GroupUrl ?? "https://www.facebook.com/groups/feed/";
-        }
-        else
-        {
-            postUrl = "https://www.tiktok.com/";
-        }
-
+        string postUrl = ResolvePlatformUrl(post.Platform, post.TargetGroup);
         db.UpdateSocialPostStatus(id, "published", errorMessage: null, postUrl: postUrl);
         var updated = db.GetSocialPostById(id);
         return Ok(new { ok = true, post = updated });
@@ -291,6 +274,14 @@ public sealed class AdminSocialController(
 
         var created = db.AddSocialViralPost(viral);
         return Ok(new { ok = true, viral = created });
+    }
+
+    [HttpPost("viral/fetch-more")]
+    public IActionResult FetchMoreViralPosts()
+    {
+        if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        var added = db.FetchMoreRealisticViralPosts(5);
+        return Ok(new { ok = true, addedCount = added.Count, posts = added });
     }
 
     [HttpDelete("viral/{id}")]
