@@ -21,8 +21,10 @@ public sealed class RequestTimingMiddleware
     {
         var path = context.Request.Path.Value ?? string.Empty;
 
-        // Bỏ qua tài nguyên tĩnh hoặc swagger assets để console phát triển không bị rác
+        // Bỏ qua tài nguyên tĩnh, swagger assets hoặc heartbeat polling để console không bị rác
         if (path.StartsWith("/swagger", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/api/admin/presence", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/api/health", StringComparison.OrdinalIgnoreCase) ||
             path.EndsWith(".css", StringComparison.OrdinalIgnoreCase) ||
             path.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ||
             path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase) ||
