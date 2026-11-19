@@ -1592,15 +1592,6 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
           </div>
 
           {/* Banner hướng dẫn Bridge Facebook cá nhân 1-chạm */}
-          <div className="social-bridge-banner">
-            <div className="social-bridge-icon">ℹ️</div>
-            <div className="social-bridge-content">
-              <h4>Cơ chế Đăng Bài Thật Lên Facebook (Trang Cá Nhân John Harper)</h4>
-              <p>
-                <strong>Lưu ý bảo mật từ Meta:</strong> Facebook không cấp quyền cho bất kỳ hệ thống bên thứ ba nào tự ý đăng ngầm vào <em>Trang cá nhân</em> mà không có sự tương tác của chính chủ. Do đó, hệ thống sử dụng <strong>Cơ chế Đăng Nhanh 1 Chạm (Bridge)</strong>: Khi bấm nút <strong>"🚀 Đăng FB"</strong> hoặc <strong>"🚀 Đăng lại FB"</strong>, toàn bộ nội dung bài viết (tiêu đề, bài viết, link đặt hàng và hashtag) sẽ tự động được copy vào Clipboard và mở trực tiếp trang cá nhân <strong>https://www.facebook.com/profile.php?id=61580644871703</strong> — bạn chỉ cần nhấn <strong>Ctrl + V</strong> là bài thật lên sóng ngay 100%!
-              </p>
-            </div>
-          </div>
 
           {/* Bộ Lọc Nhật Ký */}
           <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
