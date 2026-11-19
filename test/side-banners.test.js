@@ -1,6 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Bộ kiểm thử unit test cho dịch vụ banner hai bên trang chủ (sideBanners.js) và kiểm tra CSS liên quan trong Store-Admin (hỗ trợ tùy chỉnh từ 10 đến 30 banner mỗi bên).
+  - Mục đích: Bộ kiểm thử unit test cho dịch vụ banner hai bên trang chủ (sideBanners.js) và kiểm tra CSS liên quan trong Store-Admin (hỗ trợ tùy chọn 0 banner và từ 10 đến 20 banner mỗi bên).
   - Liên kết trực tiếp: Store-Admin/src/services/sideBanners.js, Store-Admin/src/pages/ThemeEditor.css.
   - Vùng ảnh hưởng khi sửa: Quá trình chạy test npm test của Store-Admin.
 */
@@ -8,20 +8,21 @@
 /**
  * @codex-vn-doc
  * Tệp: test/side-banners.test.js
- * Mục đích: Kiểm thử unit cho service banner hai bên: parse chuỗi/object, cắt 30,
+ * Mục đích: Kiểm thử unit cho service banner hai bên: parse chuỗi/object, cắt 20,
  * đệm ô trống cho trạng thái chỉnh sửa và loại ô trống khi lưu, tự động điền (auto-fill),
  * tìm kiếm sản phẩm tiếng Việt và CSS đồng bộ.
  * Số lượng banner là CHUNG cho cả 2 bên: editor luôn mở 2 bên cùng số ô, bên ít hơn
- * được đệm ô tới số chung (bên nhiều hơn quyết định số chung, kẹp 10-30).
+ * được đệm ô tới số chung (bên nhiều hơn quyết định số chung, hỗ trợ 0 banner hoặc kẹp 10-20).
  * Thành phần chính: parseSideBanners, serializeSideBanners, editorSideBanners,
  * padSideBannerList, normalizeSideBannerSlot, normalizeHexColor, commonSideBannerCount,
- * autoFillSideBanners, filterCatalogProducts, sortCatalogForBanners.
+ * autoFillSideBanners, filterCatalogProducts, sortCatalogForBanners, SIDE_BANNER_COUNT_OPTIONS.
  * Liên kết trực tiếp: src/services/sideBanners.js.
  */
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
+  SIDE_BANNER_COUNT_OPTIONS,
   SIDE_BANNER_MAX_COUNT,
   SIDE_BANNER_MIN_COUNT,
   autoFillSideBanners,
@@ -40,9 +41,10 @@ import {
 
 const slot = (productId, extra = {}) => ({ productId, title: '', note: '', bg: '', text: '', accent: '', ...extra })
 
-test('giới hạn số lượng banner: tối thiểu 10, tối đa 30 mỗi bên', () => {
+test('giới hạn số lượng banner: tối thiểu 10, tối đa 20 mỗi bên, có tùy chọn 0 banner', () => {
   assert.equal(SIDE_BANNER_MIN_COUNT, 10)
-  assert.equal(SIDE_BANNER_MAX_COUNT, 30)
+  assert.equal(SIDE_BANNER_MAX_COUNT, 20)
+  assert.deepEqual(SIDE_BANNER_COUNT_OPTIONS, [0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20])
 })
 
 test('parse chuỗi JSON và object cho cùng một cấu hình', () => {
@@ -62,7 +64,7 @@ test('parse bỏ slot không có productId, chuỗi rỗng và JSON hỏng trả
   })
 })
 
-test('parse cắt mỗi bên tối đa 30 slot và không khử trùng lặp sản phẩm', () => {
+test('parse cắt mỗi bên tối đa 20 slot và không khử trùng lặp sản phẩm', () => {
   const many = Array.from({ length: 35 }, () => slot('1'))
   const parsed = parseSideBanners({ left: many, right: many })
   assert.equal(parsed.left.length, SIDE_BANNER_MAX_COUNT)
@@ -112,7 +114,7 @@ test('editor giữ số ô đã lưu và đồng bộ 2 bên: đã lưu 12 slot 
 test('số lượng chung: cấu hình cũ 2 bên lệch nhau thì bên ít hơn được đệm ô trống tới số chung', () => {
   assert.equal(commonSideBannerCount({ left: Array.from({ length: 14 }, () => slot('1')), right: [slot('2')] }), 14)
   assert.equal(commonSideBannerCount(null), 10)
-  assert.equal(commonSideBannerCount({ left: Array.from({ length: 35 }, () => slot('1')), right: [] }), 30)
+  assert.equal(commonSideBannerCount({ left: Array.from({ length: 35 }, () => slot('1')), right: [] }), 20)
   assert.equal(commonSideBannerCount({ left: [slot('1')], right: [slot('2')] }), 10)
   const editor = editorSideBanners({
     left: Array.from({ length: 12 }, (_, index) => slot(String(index + 1))),
@@ -128,20 +130,24 @@ test('số lượng chung: cấu hình cũ 2 bên lệch nhau thì bên ít hơn
   assert.equal(saved.right.length, 3)
 })
 
-test('editor luôn trả 2 bên cùng số ô, kẹp trong khoảng 10-30', () => {
+test('editor luôn trả 2 bên cùng số ô, kẹp trong khoảng 10-20 hoặc 0', () => {
   for (const value of [null, '', {}, { left: [], right: [] }, { left: [slot('1')], right: Array.from({ length: 12 }, () => slot('2')) }]) {
     const editor = editorSideBanners(value)
     assert.equal(editor.left.length, editor.right.length)
-    assert.ok(editor.left.length >= 10 && editor.left.length <= 30)
+    assert.ok(editor.left.length >= 10 && editor.left.length <= 20)
   }
+  const zeroEditor = editorSideBanners({ version: 1, count: 0, left: [], right: [] })
+  assert.equal(zeroEditor.left.length, 0)
+  assert.equal(zeroEditor.right.length, 0)
 })
 
-test('pad đổi số ô trong khoảng 10-30, kẹp giá trị ngoài khoảng', () => {
+test('pad đổi số ô trong khoảng 10-20, kẹp giá trị ngoài khoảng, count 0 trả mảng rỗng', () => {
   assert.equal(padSideBannerList([slot('1')], 14).length, 14)
   assert.equal(padSideBannerList([slot('1')], 3).length, 10)
-  assert.equal(padSideBannerList([slot('1')], 99).length, 30)
+  assert.equal(padSideBannerList([slot('1')], 99).length, 20)
   assert.equal(padSideBannerList(Array.from({ length: 15 }, () => slot('1')), 12).length, 12)
   assert.equal(padSideBannerList([slot('1')]).length, 10)
+  assert.equal(padSideBannerList([slot('1')], 0).length, 0)
 })
 
 test('serialize loại mọi ô trống khi lưu nếu không có catalog', () => {

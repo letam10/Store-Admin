@@ -317,11 +317,11 @@ test('Cấu hình chu kỳ đăng bài hỗ trợ 5 phút, 30 phút, 1 giờ, 2 
       tabButtons[1].click()
     })
 
-    // 2. Kiểm tra dropdown chu kỳ đăng bài có đầy đủ 5 mốc: 5m, 30m, 1h, 2h, 6h
+    // 2. Kiểm tra dropdown chu kỳ đăng bài có đầy đủ các mốc: 30s, 30m, 1h, 2h, 6h
     const intervalSelect = doc.querySelector('#cfg-interval')
     assert.ok(intervalSelect, 'Phải có dropdown #cfg-interval')
     const options = Array.from(intervalSelect.querySelectorAll('option')).map(o => o.value)
-    assert.ok(options.includes('5m'), 'Phải có mốc 5 phút (5m)')
+    assert.ok(options.includes('30s'), 'Phải có mốc 30 giây (30s)')
     assert.ok(options.includes('30m'), 'Phải có mốc 30 phút (30m)')
     assert.ok(options.includes('1'), 'Phải có mốc 1 giờ (1)')
     assert.ok(options.includes('2'), 'Phải có mốc 2 giờ (2)')

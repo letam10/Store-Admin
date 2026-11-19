@@ -1,6 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Chuẩn hóa, tự động điền (auto-fill), tìm kiếm và xử lý logic banner hai bên trang chủ cho ThemeEditor (Store-Admin) và đồng bộ với Store (hỗ trợ tùy chỉnh từ 10 đến 30 banner mỗi bên).
+  - Mục đích: Chuẩn hóa, tự động điền (auto-fill), tìm kiếm và xử lý logic banner hai bên trang chủ cho ThemeEditor (Store-Admin) và đồng bộ với Store (hỗ trợ các lựa chọn 0 banner và từ 10 đến 20 banner mỗi bên).
   - Liên kết trực tiếp: Store-Admin/src/pages/ThemeEditor.jsx, Store-Admin/test/side-banners.test.js.
   - Vùng ảnh hưởng khi sửa: Tab Banner trong ThemeEditor, dữ liệu appearance.sideBanners lưu xuống backend và hiển thị ở Store.
 */
@@ -12,19 +12,20 @@
  * giữa ThemeEditor (nhánh Admin) và trang chủ phía khách (nhánh Store).
  * Thành phần chính: parseSideBanners, serializeSideBanners, editorSideBanners,
  * padSideBannerList, normalizeSideBannerSlot, normalizeHexColor, commonSideBannerCount,
- * autoFillSideBanners, filterCatalogProducts, sortCatalogForBanners.
+ * autoFillSideBanners, filterCatalogProducts, sortCatalogForBanners, SIDE_BANNER_COUNT_OPTIONS.
  * Liên kết trực tiếp: src/pages/ThemeEditor.jsx (trạng thái chỉnh sửa), trang chủ Store (render).
  * Cẩn trọng: khi sửa hàm, schema hoặc export phải kiểm tra các tệp gọi nó; chuỗi JSON đã lưu
  * chỉ chứa slot có productId thật, ô trống chỉ tồn tại trong trạng thái chỉnh sửa.
  * Số lượng banner là CHUNG cho cả 2 bên: editor luôn đệm 2 bên tới cùng một số ô
- * (bên nhiều hơn quyết định số chung, kẹp 10-30); hỗ trợ tự động điền sản phẩm từ catalog
+ * (bên nhiều hơn quyết định số chung, hỗ trợ 0 banner hoặc kẹp 10-20); hỗ trợ tự động điền sản phẩm từ catalog
  * khi lưu hoặc chọn số lượng để tránh lỗi ô trống.
  */
 export const SIDE_BANNER_MIN_COUNT = 10
-export const SIDE_BANNER_MAX_COUNT = 30
+export const SIDE_BANNER_MAX_COUNT = 20
 export const SIDE_BANNER_DEFAULT_COUNT = 10
 export const SIDE_BANNER_TITLE_MAX = 120
 export const SIDE_BANNER_NOTE_MAX = 240
+export const SIDE_BANNER_COUNT_OPTIONS = [0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
 const HEX_COLOR_PATTERN = /^#[0-9A-F]{6}$/
 
@@ -42,7 +43,9 @@ export function emptySideBannerSlot() {
 function clampCount(count) {
   const parsed = Number(count)
   if (!Number.isFinite(parsed)) return SIDE_BANNER_DEFAULT_COUNT
-  return Math.max(SIDE_BANNER_MIN_COUNT, Math.min(SIDE_BANNER_MAX_COUNT, Math.floor(parsed)))
+  const rounded = Math.floor(parsed)
+  if (rounded <= 0) return 0
+  return Math.max(SIDE_BANNER_MIN_COUNT, Math.min(SIDE_BANNER_MAX_COUNT, rounded))
 }
 
 // Chức năng normalizeSideBannerSlot: chuẩn hóa một slot, cắt title/note, chuẩn hóa màu thành chữ hoa.
@@ -67,7 +70,7 @@ function normalizeSideList(raw) {
 }
 
 // Chức năng parseSideBanners: nhận chuỗi JSON hoặc object, trả cấu hình đã chuẩn hóa.
-// Slot không có productId hợp lệ bị bỏ, mỗi bên tối đa 30 slot, không khử trùng lặp sản phẩm.
+// Slot không có productId hợp lệ bị bỏ, mỗi bên tối đa 20 slot, không khử trùng lặp sản phẩm.
 export function parseSideBanners(value) {
   let parsed = value
   if (typeof value === 'string') {
@@ -80,16 +83,24 @@ export function parseSideBanners(value) {
     }
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { version: 1, left: [], right: [] }
-  return {
+  const result = {
     version: 1,
     left: normalizeSideList(parsed.left),
     right: normalizeSideList(parsed.right),
   }
+  if (parsed.count === 0) {
+    result.count = 0
+  }
+  return result
 }
 
 // Chức năng serializeSideBanners: biến cấu hình thành chuỗi JSON để lưu vào form.sideBanners.
 // Nếu truyền catalog, các ô chưa chọn sản phẩm sẽ được tự động điền để không bị trống.
 export function serializeSideBanners(value, catalog) {
+  const isZero = value && (value.count === 0 || (Array.isArray(value.left) && value.left.length === 0 && Array.isArray(value.right) && value.right.length === 0 && value.count === 0))
+  if (isZero) {
+    return JSON.stringify({ version: 1, count: 0, left: [], right: [] })
+  }
   if (Array.isArray(catalog) && catalog.length > 0) {
     const filled = autoFillSideBanners(value, catalog)
     return JSON.stringify(parseSideBanners(filled))
@@ -98,29 +109,40 @@ export function serializeSideBanners(value, catalog) {
 }
 
 // Chức năng padSideBannerList: đệm ô cho trạng thái chỉnh sửa.
-// Không có count thì giữ số ô đã có, kẹp trong khoảng 5-30; có count thì đổi đúng số ô đó.
+// Không có count thì giữ số ô đã có, kẹp trong khoảng 10-20; count = 0 trả mảng rỗng; có count thì đổi đúng số ô đó.
 export function padSideBannerList(list, count) {
   const slots = Array.isArray(list) ? list.map((slot) => normalizeSideBannerSlot(slot)) : []
+  if (count === 0) return []
   const target = count === undefined ? clampCount(slots.length || SIDE_BANNER_DEFAULT_COUNT) : clampCount(count)
+  if (target === 0) return []
   const next = slots.slice(0, target)
   while (next.length < target) next.push(emptySideBannerSlot())
   return next
 }
 
 // Chức năng commonSideBannerCount: số lượng banner CHUNG cho cả 2 bên.
-// Lấy bên nhiều slot hơn làm số chung (kẹp 5-30); cấu hình cũ 2 bên lệch nhau
+// Lấy bên nhiều slot hơn làm số chung (kẹp 10-20, hoặc 0 nếu count = 0); cấu hình cũ 2 bên lệch nhau
 // thì bên ít hơn được đệm ô trống tới số chung khi mở editor.
 export function commonSideBannerCount(value) {
   const parsed = parseSideBanners(value)
+  if (parsed.count === 0 || (value && typeof value === 'object' && value.count === 0)) return 0
   return clampCount(Math.max(parsed.left.length, parsed.right.length, SIDE_BANNER_DEFAULT_COUNT))
 }
 
 // Chức năng editorSideBanners: trạng thái chỉnh sửa cho ThemeEditor.
-// 2 bên LUÔN cùng số ô (số lượng chung): chưa có cấu hình thì 5 ô mỗi bên;
-// kẹp trong khoảng 5-30.
+// 2 bên LUÔN cùng số ô (số lượng chung): chưa có cấu hình thì 10 ô mỗi bên;
+// hỗ trợ 0 banner hoặc kẹp trong khoảng 10-20.
 export function editorSideBanners(value) {
   const parsed = parseSideBanners(value)
   const count = commonSideBannerCount(parsed)
+  if (count === 0) {
+    return {
+      version: 1,
+      count: 0,
+      left: [],
+      right: [],
+    }
+  }
   return {
     version: 1,
     left: padSideBannerList(parsed.left, count),
@@ -196,10 +218,19 @@ export function filterCatalogProducts(catalog, query) {
 // Chức năng autoFillSideBanners: tự động custom hàng loạt banner khi chưa chọn sản phẩm riêng
 // Giữ nguyên các banner đã được custom riêng, chỉ tự động điền các ô trống
 export function autoFillSideBanners(config, catalog, count) {
+  if (count === 0) {
+    return { version: 1, count: 0, left: [], right: [] }
+  }
   const parsed = config && typeof config === 'object' ? config : editorSideBanners(config)
+  if (count === undefined && (parsed.count === 0 || (config && config.count === 0))) {
+    return { version: 1, count: 0, left: [], right: [] }
+  }
   const currentCount = count !== undefined
     ? clampCount(count)
     : clampCount(Math.max(parsed.left?.length || 0, parsed.right?.length || 0, SIDE_BANNER_DEFAULT_COUNT))
+  if (currentCount === 0) {
+    return { version: 1, count: 0, left: [], right: [] }
+  }
   const leftSlots = padSideBannerList(parsed.left || [], currentCount)
   const rightSlots = padSideBannerList(parsed.right || [], currentCount)
   const candidates = sortCatalogForBanners(catalog)

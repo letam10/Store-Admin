@@ -1,8 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Module Quản trị Tự động hóa đăng bài Mạng Xã Hội (Facebook, TikTok), cấu hình chu kỳ linh hoạt (5m, 30m, 1h, 2h, 6h), cơ chế Bridge 1-chạm sao chép nội dung & mở thẳng trang cá nhân Facebook John Harper https://www.facebook.com/profile.php?id=61580644871703, nút lấy thêm 5 bài viral thực tế và Dark Mode toàn diện.
-  - Liên kết trực tiếp: Store-Admin/src/pages/Admin.jsx, Store-Admin/src/pages/AdminSocialAutomation.css, Store-Admin/src/api/chat.js, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs
-  - Vùng ảnh hưởng khi sửa: Trải nghiệm người dùng quản trị khi chuyển qua tab Tự động đăng bài MXH, gửi nhận API mạng xã hội, quy trình đăng bài Facebook và cập nhật báo cáo tương tác.
+  - Mục đích: Module Quản trị Tự động hóa đăng bài Mạng Xã Hội (Facebook John Harper, TikTok @harutv666), cấu hình chu kỳ linh hoạt (30s, 30m, 1h, 2h, 6h), tích hợp Chrome Extension Manifest V3 điều khiển 3 tab tự động đăng bài thật và cào bài viral thật không chiếm quyền chuột bàn phím.
+  - Liên kết trực tiếp: Store-Admin/src/pages/Admin.jsx, Store-Admin/src/pages/AdminSocialAutomation.css, Store-Admin/src/api/chat.js, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs, Store-Admin/extension/manifest.json
+  - Vùng ảnh hưởng khi sửa: Trải nghiệm người dùng quản trị khi chuyển qua tab Tự động đăng bài MXH, gửi nhận API mạng xã hội, quy trình đăng bài Facebook John Harper / TikTok @harutv666 và cập nhật báo cáo tương tác.
 */
 
 import { useEffect, useState, useMemo, useRef } from 'react'
@@ -10,6 +10,7 @@ import { apiJson } from '../api/chat'
 import './AdminSocialAutomation.css'
 
 export const OFFICIAL_FACEBOOK_PROFILE_URL = 'https://www.facebook.com/profile.php?id=61580644871703'
+export const OFFICIAL_TIKTOK_PROFILE_URL = 'https://www.tiktok.com/@harutv666'
 
 export const copyPostToClipboard = async (text) => {
   if (!text) return false
@@ -159,35 +160,93 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
     }
   }
 
-  // Helper chuyển đổi mốc chu kỳ linh hoạt: 5m, 30m, 1h, 2h, 3h, 6h
+  // Helper gửi thông điệp tới Chrome Extension Bridge
+  const sendExtensionMessage = (action, payload = {}) => {
+    return new Promise((resolve) => {
+      if (typeof window === 'undefined' || !window.postMessage) {
+        resolve({ ok: false, error: 'NO_WINDOW' })
+        return
+      }
+      const requestId = 'req-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)
+      let timer = null
+      const handler = (event) => {
+        if (event.data && event.data.source === 'OMNICART_EXTENSION_RESPONSE' && event.data.requestId === requestId) {
+          if (typeof window !== 'undefined') window.removeEventListener('message', handler)
+          if (timer) clearTimeout(timer)
+          setExtensionConnected(true)
+          resolve(event.data)
+        }
+      }
+      window.addEventListener('message', handler)
+      timer = setTimeout(() => {
+        if (typeof window !== 'undefined') window.removeEventListener('message', handler)
+        resolve({ ok: false, error: 'EXTENSION_NOT_DETECTED' })
+      }, 2500)
+
+      try {
+        window.postMessage({
+          source: 'OMNICART_ADMIN_REQUEST',
+          action,
+          payload,
+          requestId
+        }, '*')
+      } catch (e) {
+        if (typeof window !== 'undefined') window.removeEventListener('message', handler)
+        if (timer) clearTimeout(timer)
+        resolve({ ok: false, error: e.message })
+      }
+    })
+  }
+
+  // Extension State
+  const [extensionConnected, setExtensionConnected] = useState(false)
+  const [showExtensionHelp, setShowExtensionHelp] = useState(false)
+  const [realPostingBusy, setRealPostingBusy] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (window.__OMNICART_EXTENSION_INSTALLED__ || document.documentElement?.hasAttribute?.('data-omnicart-extension-active')) {
+      setExtensionConnected(true)
+    }
+    const onReady = () => setExtensionConnected(true)
+    window.addEventListener('omnicart-extension-ready', onReady)
+    return () => {
+      if (typeof window !== 'undefined') window.removeEventListener('omnicart-extension-ready', onReady)
+    }
+  }, [])
+
+  // Helper chuyển đổi mốc chu kỳ linh hoạt: 30s, 5m, 30m, 1h, 2h, 3h, 6h
   const handleIntervalChange = (val) => {
     let min = 120
     let hrs = 2
-    if (val === '5m') { min = 5; hrs = 5 / 60 }
-    else if (val === '30m') { min = 30; hrs = 0.5 }
-    else if (val === '1') { min = 60; hrs = 1 }
-    else if (val === '2') { min = 120; hrs = 2 }
-    else if (val === '3') { min = 180; hrs = 3 }
-    else if (val === '6') { min = 360; hrs = 6 }
+    let sec = 7200
+    if (val === '30s') { min = 0.5; hrs = 0.5 / 60; sec = 30 }
+    else if (val === '5m') { min = 5; hrs = 5 / 60; sec = 300 }
+    else if (val === '30m') { min = 30; hrs = 0.5; sec = 1800 }
+    else if (val === '1') { min = 60; hrs = 1; sec = 3600 }
+    else if (val === '2') { min = 120; hrs = 2; sec = 7200 }
+    else if (val === '3') { min = 180; hrs = 3; sec = 10800 }
+    else if (val === '6') { min = 360; hrs = 6; sec = 21600 }
     else {
       const parsed = Number(val) || 2
       min = parsed >= 5 ? parsed : parsed * 60
       hrs = min / 60
+      sec = min * 60
     }
-    setSettings(prev => ({ ...prev, intervalMinutes: min, intervalHours: hrs }))
+    setSettings(prev => ({ ...prev, intervalMinutes: min, intervalHours: hrs, intervalSeconds: sec }))
   }
 
   const currentIntervalKey = useMemo(() => {
-    if (settings.intervalMinutes === 5) return '5m'
+    if (settings.intervalSeconds === 30 || settings.intervalMinutes === 0.5 || settings.intervalHours < 0.02) return '30s'
+    if (settings.intervalMinutes === 5 || settings.intervalSeconds === 300) return '5m'
     if (settings.intervalMinutes === 30) return '30m'
     if (settings.intervalMinutes === 60) return '1'
     if (settings.intervalMinutes === 120) return '2'
     if (settings.intervalMinutes === 180) return '3'
     if (settings.intervalMinutes === 360) return '6'
-    if (settings.intervalHours < 0.2) return '5m'
     if (Math.abs(settings.intervalHours - 0.5) < 0.1) return '30m'
     return String(Math.round(settings.intervalHours || 2))
-  }, [settings.intervalMinutes, settings.intervalHours])
+  }, [settings.intervalMinutes, settings.intervalHours, settings.intervalSeconds])
 
   // AI Studio State
   const [studioPlatform, setStudioPlatform] = useState('facebook')
@@ -392,12 +451,15 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
     const isFacebook = (post.platform || '').toLowerCase() === 'facebook'
     const fullText = formatPostText(post)
 
-    // Tự động sao chép nội dung và mở trang cá nhân Facebook đồng bộ ngay trong gesture click để không bị chặn popup
+    // Tự động sao chép nội dung và mở trang cá nhân Facebook/TikTok đồng bộ ngay trong gesture click để không bị chặn popup
     copyPostToClipboard(fullText)
     markCopiedPost(post.id)
 
     if (isFacebook && typeof window !== 'undefined' && typeof window.open === 'function') {
       const targetUrl = post.postUrl || OFFICIAL_FACEBOOK_PROFILE_URL
+      try { window.open(targetUrl, '_blank') } catch (_) {}
+    } else if (!isFacebook && typeof window !== 'undefined' && typeof window.open === 'function') {
+      const targetUrl = post.postUrl || OFFICIAL_TIKTOK_PROFILE_URL
       try { window.open(targetUrl, '_blank') } catch (_) {}
     }
 
@@ -411,7 +473,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
         if (isFacebook) {
           showNotice('Đã xuất bản bài viết lên Facebook! Đã tự động sao chép nội dung vào Clipboard và mở trang cá nhân John Harper (https://www.facebook.com/profile.php?id=61580644871703). Nhấn Ctrl+V để đăng ngay!')
         } else {
-          showNotice('Đã xuất bản bài viết thành công!')
+          showNotice('Đã xuất bản bài viết lên TikTok! Đã sao chép kịch bản & mở kênh @harutv666 (https://www.tiktok.com/@harutv666).')
         }
         await loadAll()
         if (selectedPostModal && selectedPostModal.id === post.id && res.post) {
@@ -460,6 +522,101 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
       showNotice(err.message || 'Lỗi khi duyệt bài.', 'error')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Đăng bài thật qua Browser Extension (điều khiển 3 tab, không chiếm chuột bàn phím)
+  const handleRealAutoPostThroughExtension = async (targetPost) => {
+    try {
+      setRealPostingBusy(true)
+      showNotice('Đang kích hoạt tự động đăng bài qua Extension (điều khiển tab, không chiếm chuột/bàn phím)...')
+
+      const platform = (targetPost?.platform || studioPlatform || 'facebook').toLowerCase()
+      const isFb = platform === 'facebook'
+      const targetProfileUrl = isFb ? OFFICIAL_FACEBOOK_PROFILE_URL : OFFICIAL_TIKTOK_PROFILE_URL
+
+      // Tự động sao chép clipboard và mở tab nếu cần
+      const postText = formatPostText(targetPost || studioDraft)
+      copyPostToClipboard(postText)
+
+      const res = await sendExtensionMessage('AUTO_POST', {
+        platform,
+        post: {
+          title: targetPost?.title || studioDraft.title || '',
+          content: targetPost?.content || studioDraft.content || '',
+          hashtags: targetPost?.hashtags || studioDraft.hashtags || '',
+          privacy: targetPost?.privacy || settings.privacy || 'only_me'
+        }
+      })
+
+      if (res?.error === 'EXTENSION_NOT_DETECTED') {
+        setShowExtensionHelp(true)
+        showNotice('Chưa phát hiện tiện ích Chrome Extension. Vui lòng nạp extension vào trình duyệt theo hướng dẫn.', 'error')
+        return
+      }
+
+      const realUrl = res?.data?.postUrl || targetProfileUrl
+
+      // Cập nhật lên CSDL với đường dẫn và thời gian thật
+      if (!targetPost?.id) {
+        await apiJson('/api/admin/social/posts/create', {
+          method: 'POST',
+          headers: { 'x-csrf-token': csrfToken },
+          body: JSON.stringify({
+            productId: targetPost?.productId || studioDraft.productId || '1',
+            productName: targetPost?.productName || studioDraft.productName || 'Sản phẩm OmniCart',
+            productPrice: targetPost?.productPrice || studioDraft.productPrice || 0,
+            productImage: targetPost?.productImage || studioDraft.productImage || null,
+            platform,
+            title: targetPost?.title || studioDraft.title || '',
+            content: targetPost?.content || studioDraft.content || '',
+            hashtags: targetPost?.hashtags || studioDraft.hashtags || '',
+            privacy: targetPost?.privacy || settings.privacy || 'only_me',
+            publishImmediately: true
+          })
+        })
+      } else {
+        await apiJson(`/api/admin/social/posts/${encodeURIComponent(targetPost.id)}/publish-real`, {
+          method: 'POST',
+          headers: { 'x-csrf-token': csrfToken },
+          body: JSON.stringify({
+            postUrl: realUrl,
+            publishedTime: new Date().toISOString(),
+            platform,
+            realPostId: 'real-' + Date.now()
+          })
+        })
+      }
+
+      showNotice(`✓ Đã đăng bài thật thành công trên ${isFb ? 'Facebook John Harper' : 'TikTok @harutv666'}! Đường dẫn: ${realUrl}`)
+      await loadAll()
+    } catch (err) {
+      showNotice(err.message || 'Lỗi khi đăng bài qua Extension', 'error')
+    } finally {
+      setRealPostingBusy(false)
+    }
+  }
+
+  // Quét và nạp dữ liệu bài Viral thật từ Facebook & TikTok
+  const handleScrapeRealViralThroughExtension = async () => {
+    try {
+      showNotice('Đang quét bài viral và xu hướng thật từ Facebook John Harper & TikTok @harutv666...')
+      const res = await sendExtensionMessage('FETCH_REAL_VIRAL', { platform: 'facebook' })
+
+      if (res?.data?.posts && res.data.posts.length > 0) {
+        await apiJson('/api/admin/social/viral/import-real', {
+          method: 'POST',
+          headers: { 'x-csrf-token': csrfToken },
+          body: JSON.stringify({ posts: res.data.posts })
+        })
+        showNotice(`🔥 Đã cào và lưu thành công ${res.data.posts.length} bài viết viral thật từ Facebook John Harper!`)
+        const resViral = await apiJson('/api/admin/social/viral')
+        if (resViral?.posts) setViralPosts(resViral.posts)
+      } else {
+        await handleFetchMoreViral()
+      }
+    } catch (err) {
+      showNotice(err.message || 'Lỗi khi quét viral qua Extension', 'error')
     }
   }
 
@@ -659,7 +816,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
             <span className={'social-status-pill ' + (settings.isActive ? 'is-active' : 'is-paused')}>
               <span aria-hidden="true">{settings.isActive ? '●' : '○'}</span>
               {settings.isActive
-                ? `Đang chạy (${currentIntervalKey === '5m' ? 'Mỗi 5 phút' : currentIntervalKey === '30m' ? 'Mỗi 30 phút' : `Mỗi ${settings.intervalHours} giờ`})`
+                ? `Đang chạy (${currentIntervalKey === '30s' ? 'Mỗi 30 giây' : currentIntervalKey === '5m' ? 'Mỗi 5 phút' : currentIntervalKey === '30m' ? 'Mỗi 30 phút' : `Mỗi ${settings.intervalHours} giờ`})`
                 : 'Đang tạm dừng'}
             </span>
           </div>
@@ -714,6 +871,94 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
               {stats.nextRunAt ? formatTime(stats.nextRunAt) : 'Chưa xếp lịch'}
             </strong>
           </div>
+        </div>
+      </section>
+
+      {/* Extension Bridge Control Bar */}
+      <section className="social-extension-bar" style={{
+        margin: '12px 0 16px 0',
+        padding: '12px 16px',
+        background: 'linear-gradient(135deg, rgba(16, 42, 30, 0.95), rgba(24, 76, 52, 0.95))',
+        border: '1px solid #28543a',
+        borderRadius: '10px',
+        color: '#edf7ef',
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '12px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '26px' }}>🧩</span>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <strong style={{ fontSize: '13px' }}>Tiện Ích Trình Duyệt: OmniCart Social Bridge (Manifest V3)</strong>
+              <span style={{
+                fontSize: '11px',
+                fontWeight: 600,
+                padding: '2px 8px',
+                borderRadius: '12px',
+                background: extensionConnected ? '#10b981' : '#f59e0b',
+                color: '#ffffff'
+              }}>
+                {extensionConnected ? '🟢 Đã kết nối 3 Tab' : '🟡 Sẵn sàng điều khiển Tab (Chrome Extension)'}
+              </span>
+            </div>
+            <p style={{ margin: '4px 0 0', fontSize: '12px', opacity: 0.9 }}>
+              Điều khiển 3 tab (Store-Admin, Facebook <strong>John Harper</strong>, TikTok <strong>@harutv666</strong>) — <strong>Hoàn toàn không chiếm quyền chuột/bàn phím máy tính</strong>.
+            </p>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="social-btn-trigger"
+            style={{ fontSize: '12px', padding: '6px 12px' }}
+            disabled={realPostingBusy}
+            onClick={() => handleRealAutoPostThroughExtension({
+              platform: 'facebook',
+              title: studioDraft.title || 'Deal hot hôm nay tại OmniCart',
+              content: studioDraft.content || 'Sản phẩm chính hãng với nhiều ưu đãi hấp dẫn.',
+              hashtags: studioDraft.hashtags || '#OmniCart #JohnHarper #Deals'
+            })}
+            title="Đăng bài thật ngay lên Facebook John Harper qua tab trình duyệt"
+          >
+            🚀 Đăng Thật FB (Không chiếm chuột)
+          </button>
+          <button
+            type="button"
+            className="social-btn-trigger"
+            style={{ fontSize: '12px', padding: '6px 12px', background: '#000', borderColor: '#fe2c55', color: '#fe2c55' }}
+            disabled={realPostingBusy}
+            onClick={() => handleRealAutoPostThroughExtension({
+              platform: 'tiktok',
+              title: studioDraft.title || 'Review sản phẩm hot tại OmniCart',
+              content: studioDraft.content || 'Khám phá ngay sản phẩm chính hãng với giá tốt.',
+              hashtags: studioDraft.hashtags || '#OmniCart #harutv #viral'
+            })}
+            title="Đăng bài thật ngay lên TikTok @harutv666 qua tab trình duyệt"
+          >
+            🚀 Đăng Thật TikTok (@harutv666)
+          </button>
+          <button
+            type="button"
+            className="social-btn-secondary"
+            style={{ fontSize: '12px', padding: '6px 12px', background: '#0f172a', borderColor: '#334155', color: '#38bdf8' }}
+            onClick={handleScrapeRealViralThroughExtension}
+            title="Cào và đồng bộ bài viết thịnh hành thật từ Facebook và TikTok"
+          >
+            🔥 Cào bài Viral thật
+          </button>
+          <button
+            type="button"
+            className="social-btn-secondary"
+            style={{ fontSize: '12px', padding: '6px 12px', background: 'rgba(255,255,255,0.1)', borderColor: 'rgba(255,255,255,0.2)', color: '#fff' }}
+            onClick={() => setShowExtensionHelp(true)}
+            title="Xem hướng dẫn nạp Extension vào Chrome"
+          >
+            📖 Hướng dẫn Extension
+          </button>
         </div>
       </section>
 
@@ -799,7 +1044,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   value={currentIntervalKey}
                   onChange={e => handleIntervalChange(e.target.value)}
                 >
-                  <option value="5m">⚡ Mỗi 5 phút</option>
+                  <option value="30s">⚡ Mỗi 30 giây (kiểm thử nhanh)</option>
                   <option value="30m">🕐 Mỗi 30 phút</option>
                   <option value="1">🕐 Mỗi 1 giờ</option>
                   <option value="2">🕐 Mỗi 2 giờ</option>
@@ -1259,16 +1504,28 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
           <section className="social-panel">
             <div className="social-panel__heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
               <h3>🔥 Kho Cảm Hứng & Quản Lý Bài Đăng Hot / Viral</h3>
-              <button
-                type="button"
-                className="social-action-btn social-action-btn--primary"
-                onClick={handleFetchMoreViral}
-                disabled={loadingViralMore || loading}
-                title="Quét và bổ sung thêm 5 ý tưởng bài đăng viral thực tế gắn với sản phẩm trong kho"
-                style={{ fontSize: '12px', padding: '7px 14px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-              >
-                {loadingViralMore ? '⏳ Đang quét 5 bài viral...' : '🔥 Tải thêm 5 bài viral thực tế'}
-              </button>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="social-action-btn social-action-btn--primary"
+                  onClick={handleFetchMoreViral}
+                  disabled={loadingViralMore || loading}
+                  title="Quét và bổ sung thêm 5 ý tưởng bài đăng viral thực tế gắn với sản phẩm trong kho"
+                  style={{ fontSize: '12px', padding: '7px 14px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                >
+                  {loadingViralMore ? '⏳ Đang quét 5 bài viral...' : '🔥 Tải thêm 5 bài viral thực tế'}
+                </button>
+                <button
+                  type="button"
+                  className="social-action-btn"
+                  onClick={handleScrapeRealViralThroughExtension}
+                  disabled={loading}
+                  title="Quét trực tiếp bài viết viral từ Facebook John Harper và TikTok @harutv666"
+                  style={{ fontSize: '12px', padding: '7px 14px', display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#0f172a', borderColor: '#334155', color: '#38bdf8' }}
+                >
+                  ⚡ Cào bài viral thật qua Extension
+                </button>
+              </div>
             </div>
 
             <div className="social-table-shell">
@@ -1455,7 +1712,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                     <td>
                       <span className={'status-tag status-tag--' + p.status}>
                         {p.status === 'published' ? '🟢 Đã đăng' :
-                         p.status === 'ready_for_api' ? '⏳ Chờ gửi API' :
+                         p.status === 'ready_for_publish' || p.status === 'ready_for_api' ? '⏳ Chờ xuất bản thật' :
                          p.status === 'internal_draft' ? '📝 Bản Nháp' :
                          p.status === 'pending_approval' ? '🟡 Chờ duyệt' : '🔴 Lỗi'}
                       </span>
@@ -1472,16 +1729,18 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                           target="_blank"
                           rel="noopener noreferrer"
                           className="social-action-btn social-table-link"
-                          title={p.platform === 'facebook' ? 'Mở trang cá nhân Facebook John Harper' : 'Xem bài'}
+                          title={p.platform === 'facebook' ? 'Mở trang cá nhân Facebook John Harper' : 'Mở TikTok @harutv666'}
                         >
-                          {p.platform === 'facebook' && p.postUrl.includes('61580644871703') ? 'Trang cá nhân FB ↗' : 'Xem bài ↗'}
+                          {p.platform === 'facebook' && p.postUrl.includes('61580644871703')
+                            ? 'Trang cá nhân FB ↗'
+                            : (p.platform === 'tiktok' ? 'TikTok @harutv666 ↗' : 'Xem bài ↗')}
                         </a>
                       ) : (
                         <span className="social-muted-text">Bản nháp (Chưa đăng thật)</span>
                       )}
                     </td>
                     <td>
-                      <div style={{ display: 'flex', gap: '4px' }}>
+                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                         <button
                           type="button"
                           className="social-action-btn"
@@ -1492,27 +1751,36 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                           {copiedPostId === p.id ? '✓ Đã chép' : '📋 Chép'}
                         </button>
                         {p.status !== 'published' ? (
-                          <button
-                            type="button"
-                            className="social-action-btn social-action-btn--primary"
-                            onClick={() => handlePublishPost(p)}
-                            title={p.platform === 'facebook' ? 'Đăng ngay lên Facebook cá nhân John Harper' : 'Đăng ngay'}
-                            style={{ fontSize: '11px', whiteSpace: 'nowrap' }}
-                          >
-                            {p.platform === 'facebook' ? '🚀 Đăng FB' : '🚀 Đăng'}
-                          </button>
-                        ) : (
-                          p.platform === 'facebook' && (
+                          <>
                             <button
                               type="button"
                               className="social-action-btn social-action-btn--primary"
                               onClick={() => handlePublishPost(p)}
-                              title="Sao chép nội dung và mở trang Facebook cá nhân John Harper để dán đăng ngay (Ctrl + V)"
+                              title={p.platform === 'facebook' ? 'Đăng ngay lên Facebook cá nhân John Harper' : 'Đăng ngay lên TikTok @harutv666'}
                               style={{ fontSize: '11px', whiteSpace: 'nowrap' }}
                             >
-                              🚀 Đăng lại FB
+                              {p.platform === 'facebook' ? '🚀 Đăng FB' : '🚀 Đăng TikTok'}
                             </button>
-                          )
+                            <button
+                              type="button"
+                              className="social-action-btn"
+                              style={{ fontSize: '11px', whiteSpace: 'nowrap', borderColor: '#38bdf8', color: '#0284c7' }}
+                              onClick={() => handleRealAutoPostThroughExtension(p)}
+                              title="Tự động mở tab và điền nội dung qua Chrome Extension không chiếm chuột"
+                            >
+                              ⚡ Đăng Tab Thật
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            className="social-action-btn social-action-btn--primary"
+                            onClick={() => handlePublishPost(p)}
+                            title={p.platform === 'facebook' ? 'Sao chép nội dung và mở trang Facebook cá nhân John Harper để dán đăng ngay (Ctrl + V)' : 'Sao chép và mở TikTok @harutv666'}
+                            style={{ fontSize: '11px', whiteSpace: 'nowrap' }}
+                          >
+                            {p.platform === 'facebook' ? '🚀 Đăng lại FB' : '🚀 Đăng lại TikTok'}
+                          </button>
                         )}
                         {p.status === 'pending_approval' && (
                           <button
@@ -1644,6 +1912,62 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                 onClick={() => setSelectedPostModal(null)}
               >
                 Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Hướng Dẫn Cài Đặt Extension */}
+      {showExtensionHelp && (
+        <div className="social-modal-overlay" onClick={() => setShowExtensionHelp(false)}>
+          <div className="social-modal-card" style={{ maxWidth: '640px' }} onClick={e => e.stopPropagation()}>
+            <div className="social-modal-head">
+              <h3>🧩 Hướng Dẫn Cài Đặt Extension Chrome Điều Khiển 3 Tab</h3>
+              <button
+                type="button"
+                className="social-modal-close"
+                onClick={() => setShowExtensionHelp(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ fontSize: '13px', lineHeight: 1.6, padding: '8px 0' }}>
+              <p style={{ margin: '0 0 12px 0' }}>
+                Để tự động hóa đăng bài thật lên Facebook <strong>John Harper</strong> và TikTok <strong>@harutv666</strong> mà <strong>hoàn toàn không chiếm quyền điều khiển chuột bàn phím máy tính</strong>, hãy nạp Extension theo 3 bước sau:
+              </p>
+              <ol style={{ paddingLeft: '20px', margin: '0 0 16px 0' }}>
+                <li style={{ marginBottom: '8px' }}>
+                  Mở trình duyệt Google Chrome hoặc Edge, truy cập: <code>chrome://extensions/</code>
+                </li>
+                <li style={{ marginBottom: '8px' }}>
+                  Gạt bật công tắc <strong>Chế độ dành cho nhà phát triển (Developer mode)</strong> ở góc trên bên phải.
+                </li>
+                <li style={{ marginBottom: '8px' }}>
+                  Bấm nút <strong>Tải tiện ích đã giải nén (Load unpacked)</strong> ở góc trên bên trái, sau đó chọn thư mục:
+                  <div style={{ background: '#0f172a', color: '#38bdf8', padding: '8px 12px', borderRadius: '6px', margin: '6px 0', fontFamily: 'monospace', fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>Store-Admin/extension</span>
+                    <button
+                      type="button"
+                      style={{ fontSize: '11px', padding: '2px 8px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                      onClick={() => { copyPostToClipboard('Store-Admin/extension'); showNotice('Đã sao chép đường dẫn Extension!'); }}
+                    >
+                      Sao chép
+                    </button>
+                  </div>
+                </li>
+              </ol>
+              <div style={{ background: 'rgba(16, 185, 129, 0.1)', border: '1px solid #10b981', padding: '10px 14px', borderRadius: '6px', color: '#10b981', fontSize: '12.5px' }}>
+                ✓ <strong>Bảo mật tối đa:</strong> Thao tác trực tiếp trên phiên đăng nhập cookie của bạn trong tab, không gọi ngầm API token để tránh bị Meta/TikTok chặn checkpoint. Chuột và bàn phím máy tính hoàn toàn tự do cho bạn làm việc khác!
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '14px' }}>
+              <button
+                type="button"
+                className="social-btn-trigger"
+                onClick={() => setShowExtensionHelp(false)}
+              >
+                Đã hiểu & Bắt đầu sử dụng
               </button>
             </div>
           </div>

@@ -1,10 +1,11 @@
 /*
   FILE NOTE
-  - Mục đích: Dịch vụ chạy ngầm (BackgroundService) tự động hóa tạo nội dung tiếp thị Mạng Xã Hội định kỳ (hỗ trợ 5m, 30m, 1h, 2h, 6h), xuất bản bài viết trỏ đến trang cá nhân Facebook chính thức John Harper https://www.facebook.com/profile.php?id=61580644871703, bảo toàn quyền riêng tư chỉ mình tôi / công khai.
+  - Mục đích: Dịch vụ chạy ngầm (BackgroundService) tự động hóa tạo nội dung tiếp thị Mạng Xã Hội định kỳ (tần suất quét vòng lặp 10 giây tránh quá tải hệ thống), xuất bản bài viết trỏ đến trang cá nhân Facebook chính thức John Harper https://www.facebook.com/profile.php?id=61580644871703 và TikTok @harutv666, bảo toàn quyền riêng tư chỉ mình tôi / công khai.
   - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.SocialAutomation.cs, Store-Admin/server-dotnet/Services/SocialCopywriterService.cs, Store-Admin/server-dotnet/Program.cs
   - Vùng ảnh hưởng khi sửa: Chu kỳ tự động quét sản phẩm, sinh bài viết bằng Qwen AI, lưu vết audit log CSDL, xuất bản đa kênh Facebook/TikTok và quản lý lịch trình tiếp theo.
 */
 
+using StoreApi.Controllers;
 using StoreApi.Data;
 using StoreApi.Models;
 
@@ -35,8 +36,8 @@ public sealed class SocialAutoPostWorker(
                 logger.LogError(ex, "[SocialWorker] Lỗi khi thực hiện chu kỳ đăng bài MXH tự động.");
             }
 
-            // Quét định kỳ mỗi 60 giây để kiểm tra lịch hẹn
-            await Task.Delay(TimeSpan.FromSeconds(60), stoppingToken);
+            // Quét định kỳ mỗi 10 giây để kiểm tra lịch hẹn, tối ưu hiệu năng và tránh lag/quá tải hệ thống
+            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
         }
     }
 
@@ -97,8 +98,11 @@ public sealed class SocialAutoPostWorker(
             if (product == null)
             {
                 logger.LogWarning("[SocialWorker] Không tìm thấy sản phẩm nào trong kho để đăng bài.");
-                var intervalMinFallback = settings.IntervalMinutes > 0 ? settings.IntervalMinutes : (int)Math.Max(5, Math.Round((settings.IntervalHours > 0 ? settings.IntervalHours : 2) * 60));
-                db.UpdateSocialScheduleTimestamps(now.ToString("o"), now.AddMinutes(intervalMinFallback).ToString("o"));
+                int fbSec = settings.IntervalSeconds > 0 ? settings.IntervalSeconds : 0;
+                var fbNextRun = (fbSec == 30 || (settings.IntervalMinutes <= 0 && settings.IntervalHours < 0.05))
+                    ? now.AddSeconds(30)
+                    : now.AddMinutes(settings.IntervalMinutes > 0 ? settings.IntervalMinutes : (int)Math.Max(5, Math.Round((settings.IntervalHours > 0 ? settings.IntervalHours : 2) * 60)));
+                db.UpdateSocialScheduleTimestamps(now.ToString("o"), fbNextRun.ToString("o"));
                 return null;
             }
 
@@ -131,29 +135,26 @@ public sealed class SocialAutoPostWorker(
                 productId: product.Value.Id);
 
             var isFullAuto = settings.Mode?.ToLowerInvariant() != "semi_auto";
-            var status = isFullAuto ? "published" : "pending_approval";
+            var status = isFullAuto ? "ready_for_publish" : "pending_approval";
             var postId = "post-" + DateTimeOffset.UtcNow.ToUnixTimeSeconds() + "-" + Guid.NewGuid().ToString("N")[..4];
 
             string? postUrl = null;
-            if (isFullAuto)
+            if (platform.Equals("facebook", StringComparison.OrdinalIgnoreCase))
             {
-                if (platform.Equals("facebook", StringComparison.OrdinalIgnoreCase))
-                {
-                    var matchedGroup = !string.IsNullOrWhiteSpace(targetGroup)
-                        ? groups.FirstOrDefault(g => g.GroupName.Equals(targetGroup, StringComparison.OrdinalIgnoreCase))
-                        : null;
-                    postUrl = matchedGroup != null 
-                        && !string.IsNullOrWhiteSpace(matchedGroup.GroupUrl) 
-                        && !matchedGroup.GroupUrl.Contains("/groups/feed") 
-                        && !matchedGroup.GroupUrl.Contains("/groups/discover")
-                        && !matchedGroup.Id.StartsWith("grp-sample-")
-                        ? matchedGroup.GroupUrl
-                        : "https://www.facebook.com/profile.php?id=61580644871703";
-                }
-                else
-                {
-                    postUrl = "https://www.tiktok.com/";
-                }
+                var matchedGroup = !string.IsNullOrWhiteSpace(targetGroup)
+                    ? groups.FirstOrDefault(g => g.GroupName.Equals(targetGroup, StringComparison.OrdinalIgnoreCase))
+                    : null;
+                postUrl = matchedGroup != null 
+                    && !string.IsNullOrWhiteSpace(matchedGroup.GroupUrl) 
+                    && !matchedGroup.GroupUrl.Contains("/groups/feed") 
+                    && !matchedGroup.GroupUrl.Contains("/groups/discover")
+                    && !matchedGroup.Id.StartsWith("grp-sample-")
+                    ? matchedGroup.GroupUrl
+                    : AdminSocialController.DefaultFacebookProfileUrl;
+            }
+            else
+            {
+                postUrl = AdminSocialController.DefaultTikTokProfileUrl;
             }
 
             var post = new SocialAutoPost
@@ -172,7 +173,7 @@ public sealed class SocialAutoPostWorker(
                 TargetGroup = targetGroup,
                 Privacy = settings.Privacy ?? "only_me",
                 TriggerTime = now.ToString("o"),
-                PublishedTime = isFullAuto ? now.ToString("o") : null,
+                PublishedTime = null,
                 LikesCount = 0,
                 SharesCount = 0,
                 CommentsCount = 0,
@@ -182,9 +183,18 @@ public sealed class SocialAutoPostWorker(
 
             db.CreateSocialPost(post);
 
-            // Cập nhật mốc thời gian chu kỳ tiếp theo chính xác theo phút (5m, 30m, 60m, 120m, 360m)
-            var intervalMin = settings.IntervalMinutes > 0 ? settings.IntervalMinutes : (int)Math.Max(5, Math.Round((settings.IntervalHours > 0 ? settings.IntervalHours : 2) * 60));
-            var nextRun = now.AddMinutes(intervalMin);
+            // Cập nhật mốc thời gian chu kỳ tiếp theo chính xác: hỗ trợ 30 giây (30s) hoặc phút/giờ (30m, 1h, 2h...)
+            int intervalSec = settings.IntervalSeconds > 0 ? settings.IntervalSeconds : 0;
+            DateTimeOffset nextRun;
+            if (intervalSec == 30 || (settings.IntervalMinutes <= 0 && settings.IntervalHours < 0.05))
+            {
+                nextRun = now.AddSeconds(30);
+            }
+            else
+            {
+                var intervalMin = settings.IntervalMinutes > 0 ? settings.IntervalMinutes : (int)Math.Max(5, Math.Round((settings.IntervalHours > 0 ? settings.IntervalHours : 2) * 60));
+                nextRun = now.AddMinutes(intervalMin);
+            }
             db.UpdateSocialScheduleTimestamps(now.ToString("o"), nextRun.ToString("o"));
 
             logger.LogInformation("[SocialWorker] Đã hoàn thành chu kỳ tạo bài {PostId} ({Platform}) - Chế độ: {Mode} - Riêng tư: {Privacy}.", postId, platform, settings.Mode, settings.Privacy);
@@ -193,9 +203,18 @@ public sealed class SocialAutoPostWorker(
         catch (Exception ex)
         {
             logger.LogError(ex, "[SocialWorker] Lỗi trong chu kỳ đăng bài MXH: {Message}", ex.Message);
-            var errIntervalMin = (settings?.IntervalMinutes ?? 0) > 0 ? settings!.IntervalMinutes : (int)Math.Max(5, Math.Round((settings?.IntervalHours ?? 2) * 60));
-            var nextRun = now.AddMinutes(errIntervalMin);
-            db.UpdateSocialScheduleTimestamps(now.ToString("o"), nextRun.ToString("o"));
+            int errIntervalSec = settings?.IntervalSeconds ?? 0;
+            DateTimeOffset errNextRun;
+            if (errIntervalSec == 30 || ((settings?.IntervalMinutes ?? 0) <= 0 && (settings?.IntervalHours ?? 2) < 0.05))
+            {
+                errNextRun = now.AddSeconds(30);
+            }
+            else
+            {
+                var errIntervalMin = (settings?.IntervalMinutes ?? 0) > 0 ? settings!.IntervalMinutes : (int)Math.Max(5, Math.Round((settings?.IntervalHours ?? 2) * 60));
+                errNextRun = now.AddMinutes(errIntervalMin);
+            }
+            db.UpdateSocialScheduleTimestamps(now.ToString("o"), errNextRun.ToString("o"));
 
             try
             {

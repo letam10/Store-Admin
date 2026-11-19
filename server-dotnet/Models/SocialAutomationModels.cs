@@ -1,7 +1,7 @@
 /*
   FILE NOTE
-  - Mục đích: Khai báo các mô hình dữ liệu (Models & DTOs) cho tính năng Tự động hóa đăng bài Mạng Xã Hội (Facebook, TikTok, Group targets, Viral posts, Post audit logs), hỗ trợ chu kỳ phút/giờ linh hoạt và quyền riêng tư chỉ mình tôi / công khai.
-  - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.SocialAutomation.cs, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs, Store-Admin/server-dotnet/Services/SocialCopywriterService.cs
+  - Mục đích: Khai báo các mô hình dữ liệu (Models & DTOs) cho tính năng Tự động hóa đăng bài Mạng Xã Hội (Facebook, TikTok, Group targets, Viral posts, Post audit logs), hỗ trợ chu kỳ 30 giây / phút / giờ linh hoạt, quyền riêng tư chỉ mình tôi / công khai và API đăng bài/viral thật.
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.SocialAutomation.cs, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs, Store-Admin/server-dotnet/Services/SocialAutoPostWorker.cs
   - Vùng ảnh hưởng khi sửa: Cấu trúc dữ liệu lưu trữ cấu hình chiến dịch, lịch sử bài đăng MXH, nhóm mục tiêu và thống kê tương tác.
 */
 
@@ -14,6 +14,7 @@ public sealed class SocialCampaignSettings
     public string Mode { get; set; } = "full_auto"; // full_auto | semi_auto
     public double IntervalHours { get; set; } = 2; // 0.0833 (5m), 0.5 (30m), 1, 2, 3, 6...
     public int IntervalMinutes { get; set; } = 120; // 5, 30, 60, 120, 180, 360
+    public int IntervalSeconds { get; set; } = 30; // 30s, 300s (5m), 1800s (30m)...
     public string Privacy { get; set; } = "only_me"; // only_me (Chỉ mình tôi) | public (Công khai)
     public string Channels { get; set; } = "facebook,tiktok";
     public string PreferredCategory { get; set; } = "all";
@@ -99,6 +100,7 @@ public sealed class SocialSummaryStats
     public bool IsActive { get; set; }
     public double IntervalHours { get; set; }
     public int IntervalMinutes { get; set; }
+    public int IntervalSeconds { get; set; } = 30;
     public string Privacy { get; set; } = "only_me";
     public string Mode { get; set; } = "full_auto";
 }
@@ -149,4 +151,20 @@ public sealed class AddViralPostRequest
     public int SharesCount { get; set; } = 340;
     public int CommentsCount { get; set; } = 185;
     public string TrendingTopic { get; set; } = "Mẹo hay cuộc sống";
+}
+
+public sealed class PublishRealPostRequest
+{
+    public string? PostUrl { get; set; }
+    public string? PublishedTime { get; set; }
+    public string? Platform { get; set; }
+    public string? RealPostId { get; set; }
+    public int LikesCount { get; set; }
+    public int SharesCount { get; set; }
+    public int CommentsCount { get; set; }
+}
+
+public sealed class ImportRealViralRequest
+{
+    public List<SocialViralPost>? Posts { get; set; }
 }

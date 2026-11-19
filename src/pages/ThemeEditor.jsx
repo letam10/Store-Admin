@@ -1,6 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Giao diện quản lý chủ đề và banner hai bên trang chủ (ThemeEditor), cho phép chọn 10-30 banner mỗi bên, tìm kiếm sản phẩm mượt mà, tùy chỉnh riêng từng banner và tự động điền banner khi lưu/thay đổi.
+  - Mục đích: Giao diện quản lý chủ đề và banner hai bên trang chủ (ThemeEditor), hỗ trợ cấu hình 0 banner hoặc từ 10 đến 20 banner mỗi bên, tìm kiếm sản phẩm mượt mà, tùy chỉnh riêng từng banner và tự động điền banner khi lưu/thay đổi.
   - Liên kết trực tiếp: Store-Admin/src/services/sideBanners.js, Store-Admin/src/pages/ThemeEditor.css, Store-Admin/src/api/chat.js.
   - Vùng ảnh hưởng khi sửa: Trang Quản trị > Giao diện (Theme Editor) trong Store-Admin, cấu hình banner của hệ thống.
 */
@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
 import { DEFAULT_THEME, THEME_MODES, THEME_PRESET_IDS, normalizeTheme, presetTheme, themeVariables } from '../../shared/theme.js'
 import {
+  SIDE_BANNER_COUNT_OPTIONS,
   SIDE_BANNER_MAX_COUNT,
   SIDE_BANNER_MIN_COUNT,
   autoFillSideBanners,
@@ -523,7 +524,7 @@ function SideBannerPanel({
     <div className="side-banner-panel">
       <h3>Banner hai bên trang chủ</h3>
       <p>
-        Mỗi bên có thể chọn từ 10 đến 30 banner (tổng cộng 20 đến 60 banner). Mỗi banner được tùy chỉnh sản phẩm, tiêu đề, ghi chú và màu sắc riêng.
+        Số lượng banner mỗi bên hỗ trợ: <strong>0 banner</strong> (ẩn hoàn toàn) hoặc từ <strong>10 đến 20 banner mỗi bên</strong> (tổng cộng 20 đến 40 banner). Mỗi banner được tùy chỉnh sản phẩm, tiêu đề, ghi chú và màu sắc riêng.
         Nếu bạn chưa custom riêng cho từng banner, hệ thống sẽ <strong>tự động gán sản phẩm phù hợp khi lưu</strong> để không bao giờ bị lỗi để trống.
       </p>
 
@@ -536,12 +537,11 @@ function SideBannerPanel({
             onChange={(event) => onCountChange(Number(event.target.value))}
             aria-label="Số lượng banner mỗi bên"
           >
-            {Array.from(
-              { length: SIDE_BANNER_MAX_COUNT - SIDE_BANNER_MIN_COUNT + 1 },
-              (_, offset) => SIDE_BANNER_MIN_COUNT + offset,
-            ).map((value) => (
+            {SIDE_BANNER_COUNT_OPTIONS.map((value) => (
               <option key={value} value={value}>
-                {value} banner mỗi bên (Tổng 2 bên: {value * 2} banner)
+                {value === 0
+                  ? '0 banner mỗi bên (Tổng 2 bên: 0 banner)'
+                  : `${value} banner mỗi bên (Tổng 2 bên: ${value * 2} banner)`}
               </option>
             ))}
           </select>
@@ -552,7 +552,7 @@ function SideBannerPanel({
             type="button"
             className="side-banner-action-btn side-banner-action-btn--primary"
             onClick={onAutoFillEmpty}
-            disabled={!catalogReady}
+            disabled={!catalogReady || count === 0}
             title="Tự động gán sản phẩm cho tất cả banner đang để trống"
           >
             ⚡ Tự động điền banner trống
@@ -561,7 +561,7 @@ function SideBannerPanel({
             type="button"
             className="side-banner-action-btn"
             onClick={onAutoFillAll}
-            disabled={!catalogReady}
+            disabled={!catalogReady || count === 0}
             title="Làm mới và tự động gán toàn bộ banner từ danh mục"
           >
             ↻ Điền tự động lại tất cả
@@ -592,13 +592,22 @@ function SideBannerPanel({
       )}
 
       {/* Xem trước đồng bộ hai bên */}
-      <div className="side-banner-sync" aria-label="Xem trước đồng bộ hai bên">
-        <SideBannerSyncColumn sideLabel="Bên trái" slots={config.left} catalog={catalog} />
-        <div className="side-banner-sync-sale" aria-label="Khe giảm giá ở giữa">
-          <span>Đang giảm giá</span>
+      {count === 0 ? (
+        <div className="side-banner-empty-preview" role="status" style={{ padding: '24px', textAlign: 'center', background: 'var(--surfaceAlt, #f0f4f1)', borderRadius: '8px', border: '1px dashed var(--border, #ccc)', margin: '16px 0' }}>
+          <p style={{ margin: 0, fontWeight: 600 }}>🚫 Đang chọn: 0 banner mỗi bên (Tổng 2 bên: 0 banner)</p>
+          <p style={{ margin: '8px 0 0', color: 'var(--muted, #666)', fontSize: '0.9rem' }}>
+            Banner hai bên trang chủ sẽ được ẩn hoàn toàn trên giao diện cửa hàng khi bạn bấm Lưu cấu hình banner.
+          </p>
         </div>
-        <SideBannerSyncColumn sideLabel="Bên phải" slots={config.right} catalog={catalog} />
-      </div>
+      ) : (
+        <div className="side-banner-sync" aria-label="Xem trước đồng bộ hai bên">
+          <SideBannerSyncColumn sideLabel="Bên trái" slots={config.left} catalog={catalog} />
+          <div className="side-banner-sync-sale" aria-label="Khe giảm giá ở giữa">
+            <span>Đang giảm giá</span>
+          </div>
+          <SideBannerSyncColumn sideLabel="Bên phải" slots={config.right} catalog={catalog} />
+        </div>
+      )}
       <p className="side-banner-sync-note">
         Xem trước đồng bộ: 2 cột trái/phải luôn cùng {count} ô. Khe ở giữa là khu vực “Đang giảm giá” ở trang chủ.
       </p>
@@ -782,6 +791,12 @@ export default function ThemeEditor({ csrfToken }) {
 
   async function save(event) {
     event?.preventDefault?.()
+    if (sideBanners.count === 0 || sideBanners.left.length === 0) {
+      const zeroBanners = { version: 1, count: 0, left: [], right: [] }
+      setSideBanners(zeroBanners)
+      await saveWithData(zeroBanners)
+      return
+    }
     const autoFilled = autoFillSideBanners(sideBanners, catalog, sideBanners.left.length)
     setSideBanners(autoFilled)
     await saveWithData(autoFilled)
@@ -798,6 +813,10 @@ export default function ThemeEditor({ csrfToken }) {
   }
 
   function changeSideBannerCount(count) {
+    if (count === 0) {
+      setSideBanners({ version: 1, count: 0, left: [], right: [] })
+      return
+    }
     setSideBanners((current) => {
       if (catalog && catalog.length > 0) {
         return autoFillSideBanners(current, catalog, count)
@@ -811,13 +830,13 @@ export default function ThemeEditor({ csrfToken }) {
   }
 
   function handleAutoFillEmpty() {
-    if (!catalog || catalog.length === 0) return
+    if (!catalog || catalog.length === 0 || sideBanners.left.length === 0) return
     setSideBanners((current) => autoFillSideBanners(current, catalog, current.left.length))
     setStatus('Đã tự động điền sản phẩm cho các ô banner đang trống.')
   }
 
   function handleAutoFillAll() {
-    if (!catalog || catalog.length === 0) return
+    if (!catalog || catalog.length === 0 || sideBanners.left.length === 0) return
     const resetLeft = padSideBannerList([], sideBanners.left.length)
     const resetRight = padSideBannerList([], sideBanners.right.length)
     setSideBanners(autoFillSideBanners({ version: 1, left: resetLeft, right: resetRight }, catalog, sideBanners.left.length))
@@ -825,6 +844,12 @@ export default function ThemeEditor({ csrfToken }) {
   }
 
   function saveBanners() {
+    if (sideBanners.count === 0 || sideBanners.left.length === 0) {
+      const zeroBanners = { version: 1, count: 0, left: [], right: [] }
+      setSideBanners(zeroBanners)
+      saveWithData(zeroBanners)
+      return
+    }
     const autoFilled = autoFillSideBanners(sideBanners, catalog, sideBanners.left.length)
     setSideBanners(autoFilled)
     saveWithData(autoFilled)

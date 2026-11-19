@@ -1,8 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Controller API quản trị cho module Tự động hóa tiếp thị Mạng Xã Hội (chu kỳ phút/giờ, quyền riêng tư chỉ mình tôi/công khai, liên kết Facebook chính thức John Harper https://www.facebook.com/profile.php?id=61580644871703, API tải thêm 5 bài viral thực tế /api/admin/social/viral/fetch-more).
+  - Mục đích: Controller API quản trị cho module Tự động hóa tiếp thị Mạng Xã Hội (chu kỳ 30 giây / phút / giờ, quyền riêng tư chỉ mình tôi/công khai, liên kết Facebook chính thức John Harper https://www.facebook.com/profile.php?id=61580644871703, TikTok @harutv666, API đăng bài thật /publish-real và nạp bài viral thật /viral/import-real).
   - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.SocialAutomation.cs, Store-Admin/server-dotnet/Services/SocialCopywriterService.cs, Store-Admin/server-dotnet/Services/SocialAutoPostWorker.cs
-  - Vùng ảnh hưởng khi sửa: Toàn bộ API mạng xã hội cung cấp dữ liệu cho tab "Tự động đăng bài Mạng Xã Hội" trên giao diện Admin và đăng bài Facebook.
+  - Vùng ảnh hưởng khi sửa: Toàn bộ API mạng xã hội cung cấp dữ liệu cho tab "Tự động đăng bài Mạng Xã Hội" trên giao diện Admin, đăng bài Facebook John Harper và TikTok @harutv666.
 */
 
 using Microsoft.AspNetCore.Mvc;
@@ -23,6 +23,7 @@ public sealed class AdminSocialController(
 {
     private const string Cookie = "store_admin_session";
     public const string DefaultFacebookProfileUrl = "https://www.facebook.com/profile.php?id=61580644871703";
+    public const string DefaultTikTokProfileUrl = "https://www.tiktok.com/@harutv666";
 
     private bool CsrfValid()
     {
@@ -53,7 +54,7 @@ public sealed class AdminSocialController(
             }
             return DefaultFacebookProfileUrl;
         }
-        return "https://www.tiktok.com/";
+        return DefaultTikTokProfileUrl;
     }
 
     [HttpGet("settings")]
@@ -186,6 +187,23 @@ public sealed class AdminSocialController(
         return Ok(new { ok = true, post = updated });
     }
 
+    [HttpPost("posts/{id}/publish-real")]
+    public IActionResult PublishRealPost(string id, [FromBody] PublishRealPostRequest request)
+    {
+        if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        if (string.IsNullOrWhiteSpace(request?.PostUrl))
+        {
+            return BadRequest(new { error = "INVALID_URL", message = "Cần đường dẫn bài viết thật trên Facebook hoặc TikTok." });
+        }
+
+        var post = db.GetSocialPostById(id);
+        if (post == null) return NotFound(new { error = "POST_NOT_FOUND" });
+
+        var success = db.PublishRealSocialPost(id, request.PostUrl, request.PublishedTime, request.Platform ?? post.Platform, request.RealPostId, request.LikesCount, request.SharesCount, request.CommentsCount);
+        var updated = db.GetSocialPostById(id);
+        return Ok(new { ok = success, post = updated });
+    }
+
     [HttpDelete("posts/{id}")]
     public IActionResult DeletePost(string id)
     {
@@ -282,6 +300,19 @@ public sealed class AdminSocialController(
         if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
         var added = db.FetchMoreRealisticViralPosts(5);
         return Ok(new { ok = true, addedCount = added.Count, posts = added });
+    }
+
+    [HttpPost("viral/import-real")]
+    public IActionResult ImportRealViralPosts([FromBody] ImportRealViralRequest request)
+    {
+        if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        if (request?.Posts == null || request.Posts.Count == 0)
+        {
+            return BadRequest(new { error = "NO_POSTS", message = "Danh sách bài viết viral trống." });
+        }
+
+        var imported = db.ImportRealViralPosts(request.Posts);
+        return Ok(new { ok = true, count = imported });
     }
 
     [HttpDelete("viral/{id}")]

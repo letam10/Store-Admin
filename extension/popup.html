@@ -1,0 +1,174 @@
+<!--
+  FILE NOTE
+  - Mục đích: Giao diện Popup của Chrome Extension OmniCart Social Bridge, hiển thị trạng thái kết nối 3 tab, thông tin tài khoản Facebook John Harper / TikTok @harutv666 và nút kích hoạt nhanh.
+  - Liên kết trực tiếp: Store-Admin/extension/manifest.json, Store-Admin/extension/popup.js, Store-Admin/extension/background.js.
+  - Vùng ảnh hưởng khi sửa: Menu popup khi bấm vào icon Extension trên thanh công cụ trình duyệt.
+-->
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>OmniCart Social Bridge</title>
+  <style>
+    body {
+      width: 320px;
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 13px;
+      color: #1e293b;
+      background: #f8fafc;
+    }
+    .header {
+      background: #102a1e;
+      color: #edf7ef;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .header h2 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .badge-mv3 {
+      font-size: 10px;
+      background: #28543a;
+      color: #9fe2bf;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: auto;
+    }
+    .content {
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .card-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #64748b;
+      margin-bottom: 6px;
+    }
+    .profile-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .profile-item:last-child {
+      margin-bottom: 0;
+    }
+    .profile-name {
+      font-weight: 600;
+      color: #0f172a;
+    }
+    .profile-sub {
+      font-size: 11px;
+      color: #64748b;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10b981;
+      margin-right: 4px;
+    }
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    button {
+      background: #102a1e;
+      color: #ffffff;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    button:hover {
+      background: #163e2c;
+    }
+    button.btn-secondary {
+      background: #f1f5f9;
+      color: #334155;
+      border: 1px solid #cbd5e1;
+    }
+    button.btn-secondary:hover {
+      background: #e2e8f0;
+    }
+    .log-box {
+      font-family: monospace;
+      font-size: 11px;
+      background: #0f172a;
+      color: #38bdf8;
+      padding: 8px;
+      border-radius: 6px;
+      max-height: 80px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span>🤖</span>
+    <h2>OmniCart Social Bridge</h2>
+    <span class="badge-mv3">Tab Controller</span>
+  </div>
+
+  <div class="content">
+    <div class="card">
+      <div class="card-title">Tài khoản đích chính chủ</div>
+      <div class="profile-item">
+        <div>
+          <div class="profile-name">📘 John Harper</div>
+          <div class="profile-sub">ID: 61580644871703</div>
+        </div>
+        <div><span class="status-dot"></span>Sẵn sàng</div>
+      </div>
+      <div class="profile-item" style="margin-top: 6px;">
+        <div>
+          <div class="profile-name">🎵 harutv</div>
+          <div class="profile-sub">@harutv666</div>
+        </div>
+        <div><span class="status-dot"></span>Sẵn sàng</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Trạng thái điều khiển 3 Tab</div>
+      <div id="tabs-status" style="font-size: 12px; color: #475569;">
+        Đang kiểm tra tab trình duyệt…
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="btn-post-fb">🚀 Đăng Thật Facebook (John Harper)</button>
+      <button id="btn-post-tiktok" style="background: #000; color: #fe2c55; border: 1px solid #fe2c55;">🚀 Đăng Thật TikTok (@harutv666)</button>
+      <button id="btn-scrape-viral" class="btn-secondary">🔥 Quét cảm hứng Viral thật</button>
+      <button id="btn-open-admin" class="btn-secondary">⚙️ Mở Quản trị Store-Admin</button>
+    </div>
+
+    <div class="log-box" id="log-output">Hệ thống sẵn sàng điều khiển 3 tab tự động.</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
