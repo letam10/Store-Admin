@@ -5,6 +5,7 @@
 using System.Diagnostics;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using Microsoft.AspNetCore.Builder;
 using StoreApi.Security;
 using StoreApi.Services;
@@ -438,7 +439,7 @@ public static class ConsoleMenu
             Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = $"/k title API :5000 && dotnet run --project \"{proj}\" -- --no-menu --urls http://127.0.0.1:5000",
+                Arguments = $"/c title API :5000 && dotnet run --project \"{proj}\" -- --no-menu --urls http://127.0.0.1:5000",
                 UseShellExecute = true
             });
             Console.WriteLine("Da mo cua so API moi cho http://127.0.0.1:5000.");
@@ -451,6 +452,120 @@ public static class ConsoleMenu
         }
     }
 
+    private static void SavePidToFile(string filename, int pid)
+    {
+        try
+        {
+            var path = Path.Combine(Path.GetTempPath(), filename);
+            File.WriteAllText(path, pid.ToString());
+        }
+        catch { }
+    }
+
+    private static int? ReadPidFromFile(string filename)
+    {
+        try
+        {
+            var path = Path.Combine(Path.GetTempPath(), filename);
+            if (File.Exists(path) && int.TryParse(File.ReadAllText(path).Trim(), out int pid))
+            {
+                return pid;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static void DeletePidFile(string filename)
+    {
+        try
+        {
+            var path = Path.Combine(Path.GetTempPath(), filename);
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch { }
+    }
+
+    private static void KillByWindowTitle(string titlePattern)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "taskkill",
+                Arguments = $"/F /T /FI \"WINDOWTITLE eq {titlePattern}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var p = Process.Start(psi);
+            p?.WaitForExit(2000);
+        }
+        catch { }
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool Process32First(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    private const uint TH32CS_SNAPPROCESS = 0x00000002;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private struct PROCESSENTRY32
+    {
+        public uint dwSize;
+        public uint cntUsage;
+        public uint th32ProcessID;
+        public IntPtr th32DefaultHeapID;
+        public uint th32ModuleID;
+        public uint cntThreads;
+        public uint th32ParentProcessID;
+        public int pcPriClassBase;
+        public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string szExeFile;
+    }
+
+    private static Dictionary<int, (int ParentPid, string Name)> GetProcessHierarchy()
+    {
+        var dict = new Dictionary<int, (int, string)>();
+        if (!OperatingSystem.IsWindows()) return dict;
+
+        IntPtr handle = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (handle == IntPtr.Zero || handle == new IntPtr(-1)) return dict;
+
+        try
+        {
+            var pe = new PROCESSENTRY32();
+            pe.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
+
+            if (Process32First(handle, ref pe))
+            {
+                do
+                {
+                    dict[(int)pe.th32ProcessID] = ((int)pe.th32ParentProcessID, pe.szExeFile);
+                }
+                while (Process32Next(handle, ref pe));
+            }
+        }
+        catch { }
+        finally
+        {
+            CloseHandle(handle);
+        }
+
+        return dict;
+    }
+
     private static void LaunchStoreProcess()
     {
         try
@@ -460,10 +575,14 @@ public static class ConsoleMenu
             var cmd = Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = $"/k title Cửa hàng :5173 && cd /d \"{dir}\" && npm.cmd run dev",
+                Arguments = $"/c title Cửa hàng :5173 && cd /d \"{dir}\" && npm.cmd run dev",
                 UseShellExecute = true
             });
-            if (cmd != null) _storeFrontendCmdPid = cmd.Id;
+            if (cmd != null)
+            {
+                _storeFrontendCmdPid = cmd.Id;
+                SavePidToFile("omnicart_store_vite.pid", cmd.Id);
+            }
         }
         catch (Exception ex)
         {
@@ -482,10 +601,14 @@ public static class ConsoleMenu
             var cmd = Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = $"/k title Quản trị :5174 && cd /d \"{dir}\" && npm.cmd run dev",
+                Arguments = $"/c title Quản trị :5174 && cd /d \"{dir}\" && npm.cmd run dev",
                 UseShellExecute = true
             });
-            if (cmd != null) _adminFrontendCmdPid = cmd.Id;
+            if (cmd != null)
+            {
+                _adminFrontendCmdPid = cmd.Id;
+                SavePidToFile("omnicart_admin_vite.pid", cmd.Id);
+            }
         }
         catch (Exception ex)
         {
@@ -505,36 +628,106 @@ public static class ConsoleMenu
         try
         {
             var pidsToKill = new HashSet<int>();
+            int selfPid = Environment.ProcessId;
 
+            // 1. Thêm PID lưu trong memory
             if (_storeFrontendCmdPid is > 0) pidsToKill.Add(_storeFrontendCmdPid.Value);
             if (_adminFrontendCmdPid is > 0) pidsToKill.Add(_adminFrontendCmdPid.Value);
             _storeFrontendCmdPid = null;
             _adminFrontendCmdPid = null;
 
+            // 2. Thêm PID lưu trong temp file (phòng khi VS khởi động lại hoặc chạy session mới)
+            var savedStorePid = ReadPidFromFile("omnicart_store_vite.pid");
+            if (savedStorePid is > 0) pidsToKill.Add(savedStorePid.Value);
+            DeletePidFile("omnicart_store_vite.pid");
+
+            var savedAdminPid = ReadPidFromFile("omnicart_admin_vite.pid");
+            if (savedAdminPid is > 0) pidsToKill.Add(savedAdminPid.Value);
+            DeletePidFile("omnicart_admin_vite.pid");
+
+            // 3. Quét port listening (node.exe hoặc process đang chiếm port)
             var portPids = GetPidsByPorts(ports);
             foreach (var pid in portPids)
             {
                 pidsToKill.Add(pid);
             }
 
-            if (pidsToKill.Count == 0) return;
-
-            var args = "/F /T " + string.Join(" ", pidsToKill.Select(p => $"/PID {p}"));
-            var psi = new ProcessStartInfo
+            // 4. Lần ngược cây tiến trình cha để gom cả cửa sổ CMD/Terminal bao ngoài
+            var hierarchy = GetProcessHierarchy();
+            foreach (var pid in portPids)
             {
-                FileName = "taskkill",
-                Arguments = args,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var p = Process.Start(psi);
-            p?.WaitForExit(3000);
+                int current = pid;
+                int depth = 0;
+                while (depth++ < 10 && hierarchy.TryGetValue(current, out var parentInfo))
+                {
+                    int parentPid = parentInfo.ParentPid;
+                    if (parentPid <= 4 || parentPid == selfPid || pidsToKill.Contains(parentPid))
+                        break;
+
+                    string name = parentInfo.Name?.ToLowerInvariant() ?? "";
+                    if (name.Contains("cmd") || name.Contains("node") || name.Contains("powershell") || name.Contains("conhost"))
+                    {
+                        pidsToKill.Add(parentPid);
+                        current = parentPid;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+            }
+
+            // 5. Quét qua tiêu đề cửa sổ đang mở để không sót bất kỳ cửa sổ nào
+            try
+            {
+                foreach (var proc in Process.GetProcesses())
+                {
+                    try
+                    {
+                        string title = proc.MainWindowTitle;
+                        if (!string.IsNullOrEmpty(title) && (
+                            title.Contains("Cửa hàng :5173", StringComparison.OrdinalIgnoreCase) ||
+                            title.Contains("Quản trị :5174", StringComparison.OrdinalIgnoreCase) ||
+                            title.Contains("API :5000", StringComparison.OrdinalIgnoreCase) ||
+                            (title.Contains("5173") || title.Contains("5174")) && (proc.ProcessName.Equals("cmd", StringComparison.OrdinalIgnoreCase) || proc.ProcessName.Equals("node", StringComparison.OrdinalIgnoreCase))))
+                        {
+                            pidsToKill.Add(proc.Id);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            pidsToKill.Remove(selfPid);
+
+            // 6. Thực thi taskkill toàn bộ cây tiến trình gom được
+            if (pidsToKill.Count > 0)
+            {
+                var args = "/F /T " + string.Join(" ", pidsToKill.Select(p => $"/PID {p}"));
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "taskkill",
+                    Arguments = args,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using var p = Process.Start(psi);
+                p?.WaitForExit(3000);
+            }
+
+            // 7. Dùng taskkill filter tiêu đề cửa sổ làm lớp bảo vệ thứ 2
+            KillByWindowTitle("Cửa hàng :5173*");
+            KillByWindowTitle("Quản trị :5174*");
+            KillByWindowTitle("API :5000*");
+            KillByWindowTitle("*5173*");
+            KillByWindowTitle("*5174*");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"  Loi khi tat tien trinh: {ex.Message}");
+            Console.WriteLine($"  Lỗi khi tắt tiến trình: {ex.Message}");
         }
     }
 
