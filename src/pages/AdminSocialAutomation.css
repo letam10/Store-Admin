@@ -179,12 +179,16 @@
   color: #ffffff;
 }
 
-/* Thanh điều hướng Module phụ bên trong */
+/* Thanh điều hướng Module phụ bên trong - Dạng Pill hiện đại không thanh kẻ ngang */
 .social-subnav {
   display: flex;
-  gap: 6px;
-  border-bottom: 1px solid var(--admin-border-light, #dce7df);
-  padding-bottom: 2px;
+  gap: 8px;
+  border: none !important;
+  border-bottom: none !important;
+  padding: 6px;
+  background: rgba(18, 50, 35, 0.06);
+  border-radius: 12px;
+  margin-bottom: 18px;
   overflow-x: auto;
 }
 
@@ -192,10 +196,11 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
-  border: 0;
+  padding: 9px 18px;
+  border: 0 !important;
+  border-bottom: none !important;
+  border-radius: 9px;
   background: transparent;
-  border-bottom: 3px solid transparent;
   color: var(--admin-muted-dark, #5c7767);
   font-size: 13px;
   font-weight: 700;
@@ -205,12 +210,15 @@
 }
 
 .social-subnav-btn:hover {
+  background: rgba(255, 255, 255, 0.7);
   color: var(--admin-text-dark, #123223);
 }
 
 .social-subnav-btn.is-active {
-  color: #1b4d36;
-  border-bottom-color: #2e8658;
+  background: #184230 !important;
+  color: #ffffff !important;
+  border-bottom: none !important;
+  box-shadow: 0 4px 12px rgba(24, 66, 48, 0.25);
 }
 
 /* Thông báo Alert trạng thái */
@@ -877,20 +885,28 @@ html[data-admin-theme="dark"] .admin-ai-tab-btn.is-active {
 }
 
 html[data-admin-theme="dark"] .social-subnav {
-  border-bottom-color: #28543a !important;
+  background: #0d2218 !important;
+  border: none !important;
+  border-bottom: none !important;
 }
 
 html[data-admin-theme="dark"] .social-subnav-btn {
   color: #8bb39a !important;
+  border: 0 !important;
+  border-bottom: none !important;
+  border-radius: 9px !important;
 }
 
 html[data-admin-theme="dark"] .social-subnav-btn:hover {
+  background: rgba(74, 222, 128, 0.08) !important;
   color: #edf7ef !important;
 }
 
 html[data-admin-theme="dark"] .social-subnav-btn.is-active {
-  color: #4ade80 !important;
-  border-bottom-color: #4ade80 !important;
+  background: #1b4d36 !important;
+  color: #ffffff !important;
+  border-bottom: none !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
 }
 
 html[data-admin-theme="dark"] .social-field label {

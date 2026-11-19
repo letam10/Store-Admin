@@ -4,7 +4,6 @@
   - Liên kết trực tiếp: Store-Admin/src/pages/Admin.jsx, Store-Admin/src/pages/AdminPolish.css
   - Vùng ảnh hưởng khi sửa: Toàn bộ màu sắc, thẻ, nút bấm và sidebar admin.
 */
-
 :root{--admin-page:var(--theme-page,#f1f5f1);--admin-surface:var(--theme-surface,#fff);--admin-surface-alt:var(--theme-surface-alt,#edf4ed);--admin-text:var(--theme-text,#183227);--admin-muted:var(--theme-muted,#617268);--admin-border:var(--theme-border,#d6e3d8);--admin-accent:var(--theme-accent,#4f8b67);--admin-accent-strong:var(--theme-accent-strong,#2f6949);--admin-accent-soft:var(--theme-accent-soft,#e0eee2);--admin-control:var(--theme-control,#fff);--admin-control-active:var(--theme-control-active,#eaf4eb);--admin-danger:var(--theme-danger,#b33f3f);--admin-success:var(--theme-success,#3d8a59)}.admin-shell{background:var(--admin-page);color:var(--admin-text)}.admin-main{background:var(--admin-page)}.admin-module-card,.admin-panel,.admin-login,.admin-kpi-grid article,.admin-meta>div,.admin-search-results{background:var(--admin-surface);border-color:var(--admin-border);color:var(--admin-text)}.admin-module-card>p,.admin-module-head p,.admin-muted,.admin-source,.admin-kpi-grid article>span,.admin-kpi-grid article>small{color:var(--admin-muted)}.admin-module-card h2,.admin-panel h2,.admin-login h1,.admin-header h1,.admin-kpi-grid article>strong{color:var(--admin-text)}.admin-kpi-grid article{box-shadow:0 10px 24px rgb(24 54 42 / calc(var(--theme-shadow-strength) * .35))}.admin-module-card button,
 .admin-login button,
 .admin-editor-actions button,
