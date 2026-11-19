@@ -113,7 +113,46 @@ public sealed partial class StoreDb
             END;
             """);
 
-        // 6. Xóa bỏ dứt điểm số liệu mock ảo, gỡ hội nhóm fake và bài viral giả mạo
+        // 6. Tạo bảng nhóm và bài viết viral nếu chưa có
+        ExecuteNonQuery(db, """
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'social_group_targets')
+            BEGIN
+                CREATE TABLE social_group_targets (
+                    id NVARCHAR(100) PRIMARY KEY,
+                    group_name NVARCHAR(255) NOT NULL,
+                    group_url NVARCHAR(500) NOT NULL,
+                    category NVARCHAR(100) NOT NULL,
+                    members_count INT NOT NULL DEFAULT 0,
+                    interaction_rate NVARCHAR(50) NOT NULL DEFAULT 'Cao',
+                    status NVARCHAR(50) NOT NULL DEFAULT 'active',
+                    is_auto_share BIT NOT NULL DEFAULT 1,
+                    notes NVARCHAR(500) NULL,
+                    created_at NVARCHAR(100) NOT NULL
+                );
+            END;
+            """);
+
+        ExecuteNonQuery(db, """
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'social_viral_posts')
+            BEGIN
+                CREATE TABLE social_viral_posts (
+                    id NVARCHAR(100) PRIMARY KEY,
+                    title NVARCHAR(500) NOT NULL,
+                    platform NVARCHAR(50) NOT NULL,
+                    category NVARCHAR(100) NOT NULL,
+                    post_url NVARCHAR(500) NOT NULL,
+                    summary NVARCHAR(MAX) NOT NULL,
+                    virality_score INT NOT NULL DEFAULT 95,
+                    likes_count INT NOT NULL DEFAULT 0,
+                    shares_count INT NOT NULL DEFAULT 0,
+                    comments_count INT NOT NULL DEFAULT 0,
+                    trending_topic NVARCHAR(255) NOT NULL,
+                    created_at NVARCHAR(100) NOT NULL
+                );
+            END;
+            """);
+
+        // 7. Xóa bỏ dứt điểm số liệu mock ảo, gỡ hội nhóm fake và bài viral giả mạo (an toàn sau khi các bảng đã tạo)
         ExecuteNonQuery(db, """
             -- Xóa các bài demo cũ và bài có liên kết giả mạo
             DELETE FROM social_auto_posts
@@ -141,24 +180,8 @@ public sealed partial class StoreDb
                OR likes_count > 1000;
             """);
 
-        // 7. Tạo bảng nhóm và bài viết viral nếu chưa có hoặc khởi tạo mẫu trung thực khi bảng trống
+        // 8. Khởi tạo mẫu trung thực khi bảng trống
         ExecuteNonQuery(db, """
-            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'social_group_targets')
-            BEGIN
-                CREATE TABLE social_group_targets (
-                    id NVARCHAR(100) PRIMARY KEY,
-                    group_name NVARCHAR(255) NOT NULL,
-                    group_url NVARCHAR(500) NOT NULL,
-                    category NVARCHAR(100) NOT NULL,
-                    members_count INT NOT NULL DEFAULT 0,
-                    interaction_rate NVARCHAR(50) NOT NULL DEFAULT 'Cao',
-                    status NVARCHAR(50) NOT NULL DEFAULT 'active',
-                    is_auto_share BIT NOT NULL DEFAULT 1,
-                    notes NVARCHAR(500) NULL,
-                    created_at NVARCHAR(100) NOT NULL
-                );
-            END;
-
             IF NOT EXISTS (SELECT 1 FROM social_group_targets)
             BEGIN
                 INSERT INTO social_group_targets (
@@ -166,26 +189,6 @@ public sealed partial class StoreDb
                 ) VALUES
                 ('grp-sample-01', N'Nhóm Facebook Khách Hàng Thân Thiết (Mẫu)', 'https://www.facebook.com/groups/feed/', N'Đồ gia dụng & Gia đình', 0, N'Bình thường', 'active', 1, N'Nhóm mẫu ban đầu - Hãy cập nhật link nhóm Facebook thật của bạn', CONVERT(NVARCHAR(30), GETUTCDATE(), 126)),
                 ('grp-sample-02', N'Cộng Đồng Mua Sắm Tiện Ích & Săn Ưu Đãi (Mẫu)', 'https://www.facebook.com/groups/discover/', N'Khuyến mãi & Mua sắm', 0, N'Bình thường', 'active', 1, N'Nhóm mẫu ban đầu - Hãy cập nhật link nhóm Facebook thật của bạn', CONVERT(NVARCHAR(30), GETUTCDATE(), 126));
-            END;
-            """);
-
-        ExecuteNonQuery(db, """
-            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'social_viral_posts')
-            BEGIN
-                CREATE TABLE social_viral_posts (
-                    id NVARCHAR(100) PRIMARY KEY,
-                    title NVARCHAR(500) NOT NULL,
-                    platform NVARCHAR(50) NOT NULL,
-                    category NVARCHAR(100) NOT NULL,
-                    post_url NVARCHAR(500) NOT NULL,
-                    summary NVARCHAR(MAX) NOT NULL,
-                    virality_score INT NOT NULL DEFAULT 95,
-                    likes_count INT NOT NULL DEFAULT 0,
-                    shares_count INT NOT NULL DEFAULT 0,
-                    comments_count INT NOT NULL DEFAULT 0,
-                    trending_topic NVARCHAR(255) NOT NULL,
-                    created_at NVARCHAR(100) NOT NULL
-                );
             END;
 
             IF NOT EXISTS (SELECT 1 FROM social_viral_posts)
