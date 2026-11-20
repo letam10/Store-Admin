@@ -1,29 +1,63 @@
 /*
   FILE NOTE
-  - Mục đích: Lõi nhận thức thị giác (OmniVision Engine) cho content script trên Facebook & TikTok.
-  - Tính năng chính:
-    1. Quét DOM sâu xuyên Shadow DOM & same-origin iframe, kiểm tra độ hiển thị hình học thực tế.
-    2. Neo không gian (Spatial Grounding): định vị ô nhập / dropdown dựa trên vị trí tương đối với nhãn hiển thị như mắt người.
-    3. Set-of-Mark (SoM): đánh số trực quan các phần tử tương tác và gọi Vision AI qua background.js khi cần.
-    4. Nhập liệu đa chiến lược có tự kiểm chứng (Lexical / Draft.js / Slate / React input) chạy được cả ở tab nền.
-    5. Lớp phủ HUD trực quan (pointer-events: none) giúp quan sát mắt extension theo thời gian thực.
+  - Mục đích: Lõi nhận thức thị giác & hành vi giống người thật (OmniVision Engine v2.1.0).
+  - Nâng cấp v2.1.0:
+    1. Hệ thống delay phân phối chuẩn (Gaussian Jitter) & tốc độ pacingMode ('normal' | 'careful' | 'fast') tránh bị quét bot.
+    2. humanClick với tọa độ lệch tự nhiên trong vùng giữa nút + hover + thời gian nhấn giữ như người thật.
+    3. formatPostText() bảo toàn toàn bộ xuống dòng (\n\n), emoji, bullet, CTA và khối #hashtag.
+    4. smartTypeText() 6 chiến lược (gõ nhịp người cho input ngắn + Synthetic Paste + beforeinput + TextEvent('textInput') + execCommand + Clipboard API) kèm verifyFn bắt buộc.
+    5. getDeepActiveElement() hỗ trợ Click-to-Discover tìm chính xác editor Draft.js / Lexical dù chiều cao ban đầu nhỏ.
 */
 
 ;(() => {
-  if (globalThis.__OMNICART_VISION_VERSION__ === '2.0.0' && globalThis.OmniVision) {
+  if (globalThis.__OMNICART_VISION_VERSION__ === '2.1.0' && globalThis.OmniVision) {
     return
   }
-  globalThis.__OMNICART_VISION_VERSION__ = '2.0.0'
+  globalThis.__OMNICART_VISION_VERSION__ = '2.1.0'
 
   const HUD_HOST_ID = 'omnicart-vision-hud-host'
   const MARK_LAYER_ID = 'omnicart-vision-som-layer'
   const HIGHLIGHT_ID = 'omnicart-vision-target-box'
 
   let hudEnabled = true
+  let pacingMode = 'normal' // 'normal' | 'careful' | 'fast'
   let currentMarkLookup = new Map()
 
   function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms))
+    return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)))
+  }
+
+  function getPacingMultiplier() {
+    if (pacingMode === 'careful') return 1.55
+    if (pacingMode === 'fast') return 0.45
+    return 1.0
+  }
+
+  // Thời gian trễ ngẫu nhiên theo phân phối chuẩn (tránh khoảng thời gian máy móc lặp đều)
+  function randomGaussianBetween(minMs, maxMs) {
+    const low = Math.min(minMs, maxMs)
+    const high = Math.max(minMs, maxMs)
+    const u = (Math.random() + Math.random() + Math.random()) / 3
+    return Math.round(low + u * (high - low))
+  }
+
+  async function humanDelay(minMs = 600, maxMs = 1400) {
+    const mult = getPacingMultiplier()
+    const ms = Math.max(80, Math.round(randomGaussianBetween(minMs, maxMs) * mult))
+    await sleep(ms)
+    return ms
+  }
+
+  async function humanMicroPause() {
+    return humanDelay(180, 420)
+  }
+
+  async function humanReadPause() {
+    return humanDelay(1100, 2200)
+  }
+
+  async function humanReviewPause() {
+    return humanDelay(1600, 2900)
   }
 
   function normalizeText(value) {
@@ -35,12 +69,91 @@
       .trim()
   }
 
+  // Giữ nguyên định dạng bài viết bóng bẩy: đoạn văn (\n\n), gạch đầu dòng, emoji và khối hashtag
+  function formatPostText(value, maxLen = 4000) {
+    let text = String(value || '')
+      .normalize('NFC')
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .replace(/\u00A0/g, ' ')
+      .replace(/\r\n?/g, '\n')
+      .split('\n')
+      .map((line) => line.replace(/[ \t]+$/g, ''))
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+
+    if (text.length > maxLen) {
+      const sliced = text.slice(0, maxLen)
+      const cutAt = Math.max(sliced.lastIndexOf('\n'), sliced.lastIndexOf(' '))
+      text = (cutAt > maxLen * 0.7 ? sliced.slice(0, cutAt) : sliced).trim()
+    }
+    return text
+  }
+
   function truncateClean(text, maxLen) {
     const clean = normalizeText(text)
     if (clean.length <= maxLen) return clean
     const slice = clean.slice(0, maxLen)
     const lastSpace = slice.lastIndexOf(' ')
     return (lastSpace > maxLen * 0.6 ? slice.slice(0, lastSpace) : slice).trim()
+  }
+
+  function formatHashtags(rawHashtags) {
+    if (!rawHashtags) return ''
+    const list = Array.isArray(rawHashtags)
+      ? rawHashtags
+      : String(rawHashtags).split(/[\s,;]+/)
+    const seen = new Set()
+    const cleanTags = []
+
+    for (const item of list) {
+      const stripped = normalizeText(item).replace(/^#+/, '').replace(/[^\p{L}\p{N}_]/gu, '')
+      if (!stripped) continue
+      const key = stripped.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      cleanTags.push(`#${stripped}`)
+    }
+    return cleanTags.join(' ')
+  }
+
+  // Ghép nội dung + khối hashtag mượt mà, tránh lặp lại hashtag đã nằm sẵn trong nội dung
+  function composeBodyAndHashtags(rawBody, rawHashtags, maxLen = 3900) {
+    const body = formatPostText(rawBody || '', maxLen)
+    const tags = formatHashtags(rawHashtags)
+    if (!tags) return body
+    if (!body) return formatPostText(tags, maxLen)
+
+    const bodyLower = body.toLowerCase()
+    const missingTags = tags
+      .split(' ')
+      .filter((tag) => tag && !bodyLower.includes(tag.toLowerCase()))
+
+    if (!missingTags.length) return body
+    const combined = `${body}\n\n${missingTags.join(' ')}`
+    return formatPostText(combined, maxLen)
+  }
+
+  function getDeepActiveElement(rootDoc = document) {
+    let active = rootDoc?.activeElement || null
+    let guard = 0
+    while (active && guard < 8) {
+      guard++
+      if (active.shadowRoot?.activeElement) {
+        active = active.shadowRoot.activeElement
+        continue
+      }
+      if (active.tagName === 'IFRAME') {
+        try {
+          if (active.contentDocument?.activeElement) {
+            active = active.contentDocument.activeElement
+            continue
+          }
+        } catch (_) {}
+      }
+      break
+    }
+    return active
   }
 
   // Duyệt DOM sâu qua open ShadowRoot và same-origin iframe
@@ -162,23 +275,38 @@
   async function scrollIntoViewSafely(el, block = 'center') {
     if (!el) return
     try {
-      el.scrollIntoView({ behavior: 'instant', block, inline: 'nearest' })
-      await sleep(180)
-    } catch (_) {}
+      el.scrollIntoView({ behavior: 'smooth', block, inline: 'nearest' })
+      await humanDelay(320, 620)
+    } catch (_) {
+      try { el.scrollIntoView({ block }) } catch (_) {}
+      await sleep(250)
+    }
   }
 
+  // Cuộn mượt từng bước giống con lăn chuột của người thật thay vì nhảy cóc tức thì
   async function scrollContainerToBottom(referenceEl) {
     const scroller = referenceEl ? getScrollableAncestor(referenceEl) : (document.scrollingElement || document.documentElement)
     try {
-      scroller.scrollTop = scroller.scrollHeight
-      window.scrollTo(0, document.body.scrollHeight)
-    } catch (_) {}
-    await sleep(350)
+      const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+      const current = scroller.scrollTop || 0
+      const remaining = maxTop - current
+      if (remaining > 60) {
+        const steps = Math.min(5, Math.max(2, Math.ceil(remaining / 380)))
+        for (let i = 1; i <= steps; i++) {
+          const nextTop = current + (remaining * i) / steps
+          scroller.scrollTo ? scroller.scrollTo({ top: nextTop, behavior: 'smooth' }) : (scroller.scrollTop = nextTop)
+          await humanDelay(240, 480)
+        }
+      }
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
+    } catch (_) {
+      try { window.scrollTo(0, document.body.scrollHeight) } catch (_) {}
+    }
+    await humanDelay(420, 780)
   }
 
-  // Tìm nhãn chữ hiển thị trên màn hình (ưu tiên lá text nhỏ gọn nhất)
   function findLabelElement(pattern, options = {}) {
-    const { root = document, minTop = 0, minLeft = 0, maxLength = 120 } = options
+    const { root = document, minTop = 0, minLeft = 0, maxLength = 140 } = options
     const candidates = queryAllDeep(root, 'label, span, div, p, h1, h2, h3, h4, strong, b, legend')
     let best = null
     let bestScore = Infinity
@@ -191,8 +319,7 @@
       if (!text || text.length > maxLength) continue
       if (!pattern.test(text)) continue
 
-      // Ưu tiên node gọn nhất (ít ký tự nhất & diện tích nhỏ nhất)
-      const score = text.length * 10 + Math.round(rect.width * rect.height / 500)
+      const score = text.length * 10 + Math.round((rect.width * rect.height) / 500)
       if (score < bestScore) {
         bestScore = score
         best = el
@@ -201,12 +328,11 @@
     return best
   }
 
-  // Tìm điều khiển tương tác theo vị trí hình học tương đối với nhãn (giống mắt người đọc form)
   function findControlNearLabel(labelEl, selector, options = {}) {
     if (!labelEl) return null
     const {
       root = document,
-      direction = 'below', // 'below' | 'right' | 'any'
+      direction = 'below',
       maxVertical = 140,
       maxHorizontal = 260
     } = options
@@ -258,15 +384,17 @@
     return best
   }
 
-  // Click giả lập đầy đủ chuỗi sự kiện pointer + mouse như người thật
+  // Click mô phỏng hành vi tay người thật: cuộn mượt -> di chuột vào điểm lệch tự nhiên -> hover -> nhấn giữ -> thả -> click
   async function humanClick(el, label = '') {
     if (!el) return false
     await scrollIntoViewSafely(el, 'center')
     highlightTarget(el, label || getAccessibleLabel(el).slice(0, 32), '#10b981')
 
     const rect = el.getBoundingClientRect()
-    const cx = Math.round(rect.left + rect.width / 2)
-    const cy = Math.round(rect.top + rect.height / 2)
+    const offsetX = rect.width * (0.3 + Math.random() * 0.4)
+    const offsetY = rect.height * (0.3 + Math.random() * 0.4)
+    const cx = Math.round(rect.left + offsetX)
+    const cy = Math.round(rect.top + offsetY)
 
     const common = {
       bubbles: true,
@@ -279,20 +407,29 @@
       buttons: 1
     }
 
-    try { el.dispatchEvent(new PointerEvent('pointerover', common)) } catch (_) {}
-    try { el.dispatchEvent(new PointerEvent('pointerenter', { ...common, bubbles: false })) } catch (_) {}
-    try { el.dispatchEvent(new MouseEvent('mouseover', common)) } catch (_) {}
+    try { el.dispatchEvent(new PointerEvent('pointermove', { ...common, buttons: 0 })) } catch (_) {}
+    try { el.dispatchEvent(new PointerEvent('pointerover', { ...common, buttons: 0 })) } catch (_) {}
+    try { el.dispatchEvent(new PointerEvent('pointerenter', { ...common, bubbles: false, buttons: 0 })) } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent('mousemove', { ...common, buttons: 0 })) } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent('mouseover', { ...common, buttons: 0 })) } catch (_) {}
+
+    // Độ trễ hover tự nhiên như mắt người vừa rê chuột tới nút
+    await humanDelay(110, 260)
+
     try { el.dispatchEvent(new PointerEvent('pointerdown', common)) } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mousedown', common)) } catch (_) {}
     try { el.focus({ preventScroll: true }) } catch (_) {}
-    await sleep(45)
+
+    // Thời gian ngón tay giữ chuột trái trước khi nhả (65-145ms)
+    await sleep(randomGaussianBetween(65, 145))
+
     try { el.dispatchEvent(new PointerEvent('pointerup', { ...common, buttons: 0 })) } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mouseup', { ...common, buttons: 0 })) } catch (_) {}
     try { el.click() } catch (_) {
       try { el.dispatchEvent(new MouseEvent('click', { ...common, buttons: 0 })) } catch (_) {}
     }
 
-    await sleep(120)
+    await humanDelay(240, 520)
     return true
   }
 
@@ -304,17 +441,20 @@
     return el.innerText || el.textContent || ''
   }
 
-  function isTextMatched(actualRaw, expectedRaw) {
+  function isTextMatched(actualRaw, expectedRaw, placeholderRe = null) {
     const actual = normalizeText(actualRaw)
     const expected = normalizeText(expectedRaw)
     if (!actual || !expected) return false
-    const probe = expected.slice(0, Math.min(18, expected.length))
-    if (actual.includes(probe) && actual.length >= Math.min(expected.length * 0.5, 25)) {
+    if (placeholderRe && placeholderRe.test(actual) && actual.length < 110) return false
+
+    const probe = expected.slice(0, Math.min(20, expected.length))
+    if (actual.includes(probe) && actual.length >= Math.min(expected.length * 0.45, 22)) {
       return true
     }
+
     const cleanA = actual.replace(/\s+/g, '')
     const cleanE = expected.replace(/\s+/g, '')
-    return cleanA.includes(cleanE.slice(0, Math.min(16, cleanE.length)))
+    return cleanA.includes(cleanE.slice(0, Math.min(18, cleanE.length))) && cleanA.length >= Math.min(cleanE.length * 0.45, 20)
   }
 
   function placeCaretAtEnd(el) {
@@ -323,7 +463,11 @@
       const sel = window.getSelection()
       if (!sel) return
       const range = document.createRange()
-      const target = el.querySelector('p, span[data-text="true"], div') || el
+      const target =
+        el.querySelector('[data-text="true"]') ||
+        el.querySelector('[data-block="true"]') ||
+        el.querySelector('p') ||
+        el
       range.selectNodeContents(target)
       range.collapse(false)
       sel.removeAllRanges()
@@ -339,6 +483,7 @@
       else el.value = ''
       el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }))
       el.dispatchEvent(new Event('change', { bubbles: true }))
+      await sleep(90)
       return
     }
 
@@ -354,43 +499,99 @@
       document.execCommand('selectAll', false, null)
       document.execCommand('delete', false, null)
       el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' }))
-      await sleep(80)
+      await sleep(120)
     } catch (_) {}
   }
 
-  // Nhập văn bản đa chiến lược có tự kiểm chứng — hoạt động ổn định trên Lexical, Draft.js, Slate, React Input cả khi ở tab nền
+  // Gõ theo từng cụm ngắn giống người thật cho input ngắn (< 100 ký tự, ví dụ Tiêu đề TikTok)
+  async function typeNativeInputHumanLike(el, targetText) {
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+    let built = ''
+    let idx = 0
+
+    while (idx < targetText.length) {
+      const step = Math.min(targetText.length - idx, randomGaussianBetween(2, 6))
+      const chunk = targetText.slice(idx, idx + step)
+      built += chunk
+      idx += step
+
+      if (setter) setter.call(el, built)
+      else el.value = built
+
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: chunk }))
+      await sleep(Math.round(randomGaussianBetween(35, 90) * getPacingMultiplier()))
+    }
+
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  }
+
+  // Nhập liệu 6 chiến lược có tự kiểm chứng — tương thích Facebook Lexical, TikTok Draft.js/Lexical & React Input kể cả tab nền
   async function smartTypeText(el, text, options = {}) {
     if (!el) return { ok: false, method: 'none', actual: '' }
-    const { clearFirst = true, label = 'Nhập văn bản', dismissPopover = false } = options
-    const targetText = String(text || '').trim()
+    const {
+      clearFirst = true,
+      label = 'Nhập văn bản',
+      dismissPopover = false,
+      humanBurst = false,
+      placeholderRe = null,
+      verifyFn = null
+    } = options
+
+    const targetText = formatPostText(text, 4000)
     if (!targetText) return { ok: false, method: 'empty', actual: '' }
+
+    const verifySuccess = () => {
+      const actual = readEditorValue(el)
+      const textOk = isTextMatched(actual, targetText, placeholderRe)
+      const customOk = typeof verifyFn === 'function' ? Boolean(verifyFn(el, actual)) : true
+      return { ok: textOk && customOk, actual }
+    }
 
     await scrollIntoViewSafely(el, 'center')
     highlightTarget(el, label, '#38bdf8')
 
-    // Case 1: Native <input> / <textarea> (React controlled input)
+    // === CASE 1: Native <input> / <textarea> ===
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
       await humanClick(el, label)
       if (clearFirst) await clearEditable(el)
-      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
-      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
-      if (setter) setter.call(el, targetText)
-      else el.value = targetText
 
-      el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: targetText }))
-      el.dispatchEvent(new Event('change', { bubbles: true }))
-      await sleep(250)
+      if (humanBurst && targetText.length <= 110) {
+        await typeNativeInputHumanLike(el, targetText)
+      } else {
+        const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+        if (setter) setter.call(el, targetText)
+        else el.value = targetText
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: targetText }))
+        el.dispatchEvent(new Event('change', { bubbles: true }))
+      }
 
-      const actual = readEditorValue(el)
-      return { ok: isTextMatched(actual, targetText), method: 'native-setter', actual }
+      await humanDelay(320, 620)
+      const res = verifySuccess()
+      return { ok: res.ok, method: humanBurst ? 'human-native-burst' : 'native-setter', actual: res.actual }
     }
 
-    // Case 2: ContentEditable (Facebook Lexical / TikTok Draft.js / Slate)
-    await humanClick(el, label)
-    if (clearFirst) await clearEditable(el)
-    placeCaretAtEnd(el)
+    // === CASE 2: Rich ContentEditable (Facebook Lexical / TikTok Draft.js / Slate) ===
+    // Chọn đúng phần tử contenteditable sâu nhất bên trong nếu el là khung bao ngoài
+    const editableEl = el.isContentEditable
+      ? (el.querySelector('[contenteditable="true"]') || el)
+      : (el.querySelector('[contenteditable="true"], [contenteditable="plaintext-only"]') || el)
 
-    // Chiến lược 1: Synthetic ClipboardEvent('paste') — Tốt nhất cho Lexical & Draft.js kể cả tab nền!
+    await humanClick(editableEl, label)
+    if (clearFirst) await clearEditable(editableEl)
+    placeCaretAtEnd(editableEl)
+    // Nhịp dừng chuẩn bị dán nội dung như người thật
+    await humanDelay(450, 950)
+
+    const checkEditable = () => {
+      const actual = readEditorValue(editableEl)
+      const textOk = isTextMatched(actual, targetText, placeholderRe)
+      const customOk = typeof verifyFn === 'function' ? Boolean(verifyFn(editableEl, actual)) : true
+      return { ok: textOk && customOk, actual }
+    }
+
+    // Chiến lược 1: Synthetic ClipboardEvent('paste') — Giữ nguyên mọi đoạn văn \n\n trên Lexical & Draft.js kể cả tab nền!
     try {
       const dt = new DataTransfer()
       dt.setData('text/plain', targetText)
@@ -400,105 +601,141 @@
         composed: true,
         clipboardData: dt
       })
-      el.dispatchEvent(pasteEvt)
-      await sleep(380)
-      const actual1 = readEditorValue(el)
-      if (isTextMatched(actual1, targetText)) {
-        if (dismissPopover) dispatchEscape(el)
-        return { ok: true, method: 'synthetic-paste', actual: actual1 }
+      editableEl.dispatchEvent(pasteEvt)
+      await humanDelay(550, 900)
+      const check1 = checkEditable()
+      if (check1.ok) {
+        if (dismissPopover) dispatchEscape(editableEl)
+        return { ok: true, method: 'synthetic-paste', actual: check1.actual }
       }
     } catch (_) {}
 
-    // Chiến lược 2: InputEvent('beforeinput') với insertFromPaste (Lexical bắt trực tiếp)
+    // Chiến lược 2: InputEvent('beforeinput', insertFromPaste)
     try {
-      if (clearFirst) await clearEditable(el)
-      placeCaretAtEnd(el)
+      if (clearFirst) await clearEditable(editableEl)
+      placeCaretAtEnd(editableEl)
       const dt = new DataTransfer()
       dt.setData('text/plain', targetText)
-      const beforeInput = new InputEvent('beforeinput', {
+      editableEl.dispatchEvent(new InputEvent('beforeinput', {
         bubbles: true,
         cancelable: true,
         composed: true,
         inputType: 'insertFromPaste',
         data: targetText,
         dataTransfer: dt
-      })
-      el.dispatchEvent(beforeInput)
-      await sleep(350)
-      const actual2 = readEditorValue(el)
-      if (isTextMatched(actual2, targetText)) {
-        if (dismissPopover) dispatchEscape(el)
-        return { ok: true, method: 'beforeinput-paste', actual: actual2 }
+      }))
+      await humanDelay(500, 850)
+      const check2 = checkEditable()
+      if (check2.ok) {
+        if (dismissPopover) dispatchEscape(editableEl)
+        return { ok: true, method: 'beforeinput-paste', actual: check2.actual }
       }
     } catch (_) {}
 
-    // Chiến lược 3: document.execCommand('insertText')
+    // Chiến lược 3: Legacy Chromium TextEvent('textInput') từng đoạn — Cực mạnh cho Draft.js & Lexical trên tab nền!
     try {
-      if (clearFirst) await clearEditable(el)
-      placeCaretAtEnd(el)
-      document.execCommand('insertText', false, targetText)
-      el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: targetText }))
-      await sleep(350)
-      const actual3 = readEditorValue(el)
-      if (isTextMatched(actual3, targetText)) {
-        if (dismissPopover) dispatchEscape(el)
-        return { ok: true, method: 'execCommand-insertText', actual: actual3 }
-      }
-    } catch (_) {}
-
-    // Chiến lược 4: InputEvent('beforeinput', insertText) từng dòng
-    try {
-      if (clearFirst) await clearEditable(el)
-      placeCaretAtEnd(el)
+      if (clearFirst) await clearEditable(editableEl)
+      placeCaretAtEnd(editableEl)
       const lines = targetText.split('\n')
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i]
         if (line) {
-          el.dispatchEvent(new InputEvent('beforeinput', {
-            bubbles: true,
-            cancelable: true,
-            inputType: 'insertText',
-            data: line
-          }))
-          document.execCommand('insertText', false, line)
+          const textEvent = document.createEvent('TextEvent')
+          textEvent.initTextEvent('textInput', true, true, window, line)
+          editableEl.dispatchEvent(textEvent)
         }
         if (i < lines.length - 1) {
-          el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }))
+          editableEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }))
           document.execCommand('insertLineBreak', false, null)
-          el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }))
+          editableEl.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }))
         }
-        await sleep(35)
+        await sleep(Math.round(randomGaussianBetween(75, 175) * getPacingMultiplier()))
       }
-      await sleep(350)
-      const actual4 = readEditorValue(el)
-      if (isTextMatched(actual4, targetText)) {
-        if (dismissPopover) dispatchEscape(el)
-        return { ok: true, method: 'line-by-line', actual: actual4 }
+      await humanDelay(550, 900)
+      const check3 = checkEditable()
+      if (check3.ok) {
+        if (dismissPopover) dispatchEscape(editableEl)
+        return { ok: true, method: 'chromium-textInput', actual: check3.actual }
       }
     } catch (_) {}
 
-    // Chiến lược 5: Clipboard API thật (chỉ chạy nếu tab đang focus để không báo lỗi NotAllowedError)
+    // Chiến lược 4: document.execCommand('insertText') từng đoạn
+    try {
+      if (clearFirst) await clearEditable(editableEl)
+      placeCaretAtEnd(editableEl)
+      const lines = targetText.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
+        if (line) {
+          document.execCommand('insertText', false, line)
+        }
+        if (i < lines.length - 1) {
+          editableEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }))
+          document.execCommand('insertLineBreak', false, null)
+          editableEl.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }))
+        }
+        await sleep(Math.round(randomGaussianBetween(60, 140) * getPacingMultiplier()))
+      }
+      editableEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: targetText }))
+      await humanDelay(500, 850)
+      const check4 = checkEditable()
+      if (check4.ok) {
+        if (dismissPopover) dispatchEscape(editableEl)
+        return { ok: true, method: 'execCommand-lines', actual: check4.actual }
+      }
+    } catch (_) {}
+
+    // Chiến lược 5: InputEvent('beforeinput', insertText) từng đoạn
+    try {
+      if (clearFirst) await clearEditable(editableEl)
+      placeCaretAtEnd(editableEl)
+      const lines = targetText.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i]) {
+          editableEl.dispatchEvent(new InputEvent('beforeinput', {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            inputType: 'insertText',
+            data: lines[i]
+          }))
+        }
+        if (i < lines.length - 1) {
+          editableEl.dispatchEvent(new InputEvent('beforeinput', {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            inputType: 'insertParagraph'
+          }))
+        }
+        await sleep(Math.round(randomGaussianBetween(55, 120) * getPacingMultiplier()))
+      }
+      await humanDelay(500, 800)
+      const check5 = checkEditable()
+      if (check5.ok) {
+        if (dismissPopover) dispatchEscape(editableEl)
+        return { ok: true, method: 'beforeinput-lines', actual: check5.actual }
+      }
+    } catch (_) {}
+
+    // Chiến lược 6: Clipboard API thật (chỉ dùng nếu tab đang focus)
     if (document.hasFocus()) {
       try {
-        if (clearFirst) await clearEditable(el)
-        placeCaretAtEnd(el)
+        if (clearFirst) await clearEditable(editableEl)
+        placeCaretAtEnd(editableEl)
         await navigator.clipboard.writeText(targetText)
         document.execCommand('paste')
-        await sleep(350)
-        const actual5 = readEditorValue(el)
-        if (isTextMatched(actual5, targetText)) {
-          if (dismissPopover) dispatchEscape(el)
-          return { ok: true, method: 'clipboard-api', actual: actual5 }
+        await humanDelay(500, 800)
+        const check6 = checkEditable()
+        if (check6.ok) {
+          if (dismissPopover) dispatchEscape(editableEl)
+          return { ok: true, method: 'clipboard-api', actual: check6.actual }
         }
       } catch (_) {}
     }
 
-    const finalActual = readEditorValue(el)
-    return {
-      ok: isTextMatched(finalActual, targetText),
-      method: 'failed',
-      actual: finalActual
-    }
+    const finalCheck = checkEditable()
+    return { ok: finalCheck.ok, method: 'failed', actual: finalCheck.actual }
   }
 
   function dispatchEscape(target = document.activeElement || document.body) {
@@ -508,7 +745,6 @@
     } catch (_) {}
   }
 
-  // Chụp danh sách ảnh hiện có trước khi upload để phân biệt chính xác ảnh sản phẩm mới (không nhầm với avatar)
   function captureVisualImageSnapshot(root = document) {
     const knownSrcs = new Set()
     const knownNodes = new WeakSet()
@@ -536,10 +772,9 @@
       const rect = el.getBoundingClientRect()
       if (rect.top < minTop) continue
 
-      // Loại trừ ảnh avatar tròn nhỏ ở góc hoặc class avatar
       if (excludeAvatar) {
         const meta = `${el.className || ''} ${el.getAttribute('alt') || ''} ${el.getAttribute('data-e2e') || ''}`
-        if (/avatar|profile-icon/i.test(meta) && rect.width < 90 && rect.height < 90) continue
+        if (/avatar|profile-icon/i.test(meta) && rect.width < 95 && rect.height < 95) continue
       }
 
       const src = el.getAttribute?.('src') || el.currentSrc || ''
@@ -561,7 +796,6 @@
     return null
   }
 
-  // Xây dựng bản đồ Set-of-Mark (SoM) toàn bộ nút/ô tương tác đang hiển thị trên màn hình
   function buildInteractiveMap(root = document, maxItems = 75) {
     currentMarkLookup = new Map()
     const selector = [
@@ -588,7 +822,7 @@
     for (const el of raw) {
       if (id > maxItems) break
       if (el.closest?.(`#${HUD_HOST_ID}, #${MARK_LAYER_ID}`)) continue
-      if (!isReallyVisible(el, { minWidth: 16, minHeight: 16 })) continue
+      if (!isReallyVisible(el, { minWidth: 14, minHeight: 14 })) continue
 
       const rect = el.getBoundingClientRect()
       if (!isInViewport(rect)) continue
@@ -643,26 +877,15 @@
     for (const item of somMap.items) {
       const box = document.createElement('div')
       box.style.cssText = `
-        position:fixed;
-        left:${item.rect.x}px;
-        top:${item.rect.y}px;
-        width:${item.rect.w}px;
-        height:${item.rect.h}px;
-        border:2px solid #ef4444;
-        border-radius:4px;
-        box-sizing:border-box;
+        position:fixed;left:${item.rect.x}px;top:${item.rect.y}px;
+        width:${item.rect.w}px;height:${item.rect.h}px;
+        border:2px solid #ef4444;border-radius:4px;box-sizing:border-box;
       `
       const badge = document.createElement('span')
       badge.textContent = String(item.id)
       badge.style.cssText = `
-        position:absolute;
-        top:-10px;
-        left:-2px;
-        background:#ef4444;
-        color:#fff;
-        font:700 11px/14px monospace;
-        padding:0 4px;
-        border-radius:3px;
+        position:absolute;top:-10px;left:-2px;background:#ef4444;color:#fff;
+        font:700 11px/14px monospace;padding:0 4px;border-radius:3px;
       `
       box.appendChild(badge)
       layer.appendChild(box)
@@ -679,14 +902,13 @@
     return currentMarkLookup.get(Number(markId)) || null
   }
 
-  // Gọi Multimodal Vision AI (thông qua background.js) khi DOM cần hỗ trợ thị giác thực
   async function askVisionAI(goal, context = {}) {
     try {
       const somMap = buildInteractiveMap(context.root || document)
       if (!somMap.items.length) return { ok: false, reason: 'NO_INTERACTIVE_ELEMENTS' }
 
       showVisualMarks(somMap)
-      await sleep(100)
+      await sleep(120)
 
       const response = await new Promise((resolve) => {
         try {
@@ -699,11 +921,8 @@
               somMap
             },
             (res) => {
-              if (chrome.runtime.lastError) {
-                resolve({ ok: false, error: chrome.runtime.lastError.message })
-              } else {
-                resolve(res || { ok: false, error: 'NO_VISION_RESPONSE' })
-              }
+              if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message })
+              else resolve(res || { ok: false, error: 'NO_VISION_RESPONSE' })
             }
           )
         } catch (err) {
@@ -712,10 +931,8 @@
       })
 
       clearVisualMarks()
-
       if (response?.ok && response.targetMarkId) {
-        const el = getElementByMarkId(response.targetMarkId)
-        return { ...response, element: el }
+        return { ...response, element: getElementByMarkId(response.targetMarkId) }
       }
       return response
     } catch (err) {
@@ -724,7 +941,6 @@
     }
   }
 
-  // Báo tiến độ bước thực hiện về background -> Store-Admin Live Dock
   function reportStep(platform, step, message, level = 'info', extra = {}) {
     try {
       showHudStatus(`[${platform.toUpperCase()}] ${message}`, level)
@@ -740,7 +956,6 @@
     } catch (_) {}
   }
 
-  // Lớp phủ HUD trực quan góc màn hình (pointer-events: none — không cản thao tác)
   function ensureHudHost() {
     let host = document.getElementById(HUD_HOST_ID)
     if (host) return host
@@ -765,16 +980,9 @@
       host.innerHTML = `
         <div style="
           display:flex;align-items:center;gap:8px;
-          background:${theme.bg};
-          border:1px solid ${theme.border};
-          color:#f8fafc;
-          padding:8px 12px;
-          border-radius:10px;
-          box-shadow:0 8px 24px rgba(0,0,0,0.35);
-          font-size:12px;
-          font-weight:600;
-          max-width:340px;
-          backdrop-filter:blur(6px);
+          background:${theme.bg};border:1px solid ${theme.border};color:#f8fafc;
+          padding:8px 12px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.35);
+          font-size:12px;font-weight:600;max-width:360px;backdrop-filter:blur(6px);
         ">
           <span style="width:8px;height:8px;border-radius:50%;background:${theme.dot};flex-shrink:0;"></span>
           <span>👁️ ${String(text).replace(/[<>&]/g, '')}</span>
@@ -783,7 +991,7 @@
     } catch (_) {}
   }
 
-  function clearHud(delayMs = 4000) {
+  function clearHud(delayMs = 4500) {
     setTimeout(() => {
       try { document.getElementById(HUD_HOST_ID)?.remove() } catch (_) {}
       try { document.getElementById(HIGHLIGHT_ID)?.remove() } catch (_) {}
@@ -800,64 +1008,57 @@
       const box = document.createElement('div')
       box.id = HIGHLIGHT_ID
       box.style.cssText = `
-        position:fixed;
-        left:${Math.max(0, rect.left - 3)}px;
-        top:${Math.max(0, rect.top - 3)}px;
-        width:${rect.width + 6}px;
-        height:${rect.height + 6}px;
-        border:2px solid ${color};
-        background:${color}1a;
-        border-radius:6px;
-        z-index:2147483645;
-        pointer-events:none;
-        box-sizing:border-box;
-        transition:all 0.15s ease;
+        position:fixed;left:${Math.max(0, rect.left - 3)}px;top:${Math.max(0, rect.top - 3)}px;
+        width:${rect.width + 6}px;height:${rect.height + 6}px;
+        border:2px solid ${color};background:${color}1a;border-radius:6px;
+        z-index:2147483645;pointer-events:none;box-sizing:border-box;transition:all 0.15s ease;
       `
       if (label) {
         const tag = document.createElement('div')
         tag.textContent = `👁️ ${label}`
         tag.style.cssText = `
-          position:absolute;
-          top:-20px;
-          left:0;
-          background:${color};
-          color:#04130c;
-          font:700 10px/16px system-ui,sans-serif;
-          padding:1px 6px;
-          border-radius:4px;
-          white-space:nowrap;
+          position:absolute;top:-20px;left:0;background:${color};color:#04130c;
+          font:700 10px/16px system-ui,sans-serif;padding:1px 6px;border-radius:4px;white-space:nowrap;
         `
         box.appendChild(tag)
       }
       document.documentElement.appendChild(box)
-      setTimeout(() => {
-        try { box.remove() } catch (_) {}
-      }, 2200)
+      setTimeout(() => { try { box.remove() } catch (_) {} }, 2200)
     } catch (_) {}
   }
 
-  function setHudEnabled(enabled) {
-    hudEnabled = enabled !== false
-    if (!hudEnabled) {
-      try { document.getElementById(HUD_HOST_ID)?.remove() } catch (_) {}
-      try { document.getElementById(HIGHLIGHT_ID)?.remove() } catch (_) {}
+  function applyConfig(cfg = {}) {
+    if (typeof cfg.showHud === 'boolean') {
+      hudEnabled = cfg.showHud
+      if (!hudEnabled) {
+        try { document.getElementById(HUD_HOST_ID)?.remove() } catch (_) {}
+        try { document.getElementById(HIGHLIGHT_ID)?.remove() } catch (_) {}
+      }
+    }
+    if (cfg.pacingMode && ['normal', 'careful', 'fast'].includes(cfg.pacingMode)) {
+      pacingMode = cfg.pacingMode
     }
   }
 
-  // Đọc cấu hình HUD từ storage nếu có
   try {
     chrome.storage?.local?.get('visionConfig', (res) => {
-      if (res?.visionConfig && typeof res.visionConfig.showHud === 'boolean') {
-        hudEnabled = res.visionConfig.showHud
-      }
+      if (res?.visionConfig) applyConfig(res.visionConfig)
     })
   } catch (_) {}
 
   globalThis.OmniVision = {
-    version: '2.0.0',
+    version: '2.1.0',
     sleep,
+    humanDelay,
+    humanMicroPause,
+    humanReadPause,
+    humanReviewPause,
     normalizeText,
+    formatPostText,
     truncateClean,
+    formatHashtags,
+    composeBodyAndHashtags,
+    getDeepActiveElement,
     queryAllDeep,
     isReallyVisible,
     isElementDisabled,
@@ -885,6 +1086,7 @@
     showHudStatus,
     highlightTarget,
     clearHud,
-    setHudEnabled
+    applyConfig,
+    setHudEnabled: (enabled) => applyConfig({ showHud: enabled })
   }
 })()

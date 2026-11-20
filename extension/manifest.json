@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "OmniCart Social Auto-Poster & OmniVision Bridge",
-  "version": "2.0.0",
-  "description": "Tự động đăng bài có ảnh lên Facebook Hoàng Thái HT và TikTok @harutv666 bằng OmniVision (mắt hình học + Multimodal Vision AI) kết nối thời gian thực với Store-Admin.",
+  "version": "2.1.0",
+  "description": "Tự động đăng bài có ảnh lên Facebook Hoàng Thái HT và TikTok @harutv666 bằng OmniVision v2.1 (mắt hình học + Vision AI + thao tác delay tự nhiên như người).",
   "permissions": [
     "tabs",
     "scripting",
@@ -58,7 +58,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "OmniCart OmniVision Bridge",
+    "default_title": "OmniCart OmniVision Bridge v2.1",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

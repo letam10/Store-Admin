@@ -1,18 +1,17 @@
 /*
   FILE NOTE
   - Mục đích: Chuẩn hóa ảnh sản phẩm và gắn an toàn vào input tải ảnh hoặc dropzone của Facebook/TikTok.
-  - Liên kết trực tiếp: manifest.json, vision-engine.js, background.js, content-facebook.js, content-tiktok.js.
-  - Nâng cấp v2.0.0:
-    1. Quét xuyên Shadow DOM & same-origin iframe nhờ OmniVision.queryAllDeep.
-    2. Phân biệt rạch ròi input nhận ảnh với input chỉ nhận video (tránh gán ảnh vào input video/* của TikTok).
-    3. Hỗ trợ đính kèm dự phòng bằng DragEvent('drop') vào dropzone nếu React bắt sự kiện kéo-thả.
+  - Sửa lỗi quan trọng v2.1.0:
+    1. Kiểm tra input.files TRƯỚC khi bắn sự kiện 'change'!
+       (Trên Facebook, React onChange xử lý ảnh xong sẽ lập tức reset input.value = '' làm input.files.length về 0 — kiểm tra sau 'change' gây lỗi giả FACEBOOK_IMAGE_NOT_ATTACHED dù ảnh đã tải lên thành công!)
+    2. Quét xuyên Shadow DOM & same-origin iframe, phân biệt chặt input ảnh với input chỉ nhận video.
 */
 
 ;(() => {
-  if (globalThis.__OMNICART_MEDIA_VERSION__ === '2.0.0' && globalThis.OmniCartMedia) {
+  if (globalThis.__OMNICART_MEDIA_VERSION__ === '2.1.0' && globalThis.OmniCartMedia) {
     return
   }
-  globalThis.__OMNICART_MEDIA_VERSION__ = '2.0.0'
+  globalThis.__OMNICART_MEDIA_VERSION__ = '2.1.0'
 
   function deepQueryFiles(root) {
     if (globalThis.OmniVision?.queryAllDeep) {
@@ -83,11 +82,9 @@
       while (Date.now() < deadline) {
         const inputs = deepQueryFiles(root)
 
-        // Ưu tiên 1: input khai báo rõ accept chứa image (hoặc .jpg/.png/.webp)
         const strictMatch = inputs.find((el) => isImageAccept(el.getAttribute('accept'), false))
         if (strictMatch) return strictMatch
 
-        // Ưu tiên 2: input không ghi accept (nếu được phép)
         if (allowUnspecified) {
           const fallbackMatch = inputs.find((el) => isImageAccept(el.getAttribute('accept'), true))
           if (fallbackMatch) return fallbackMatch
@@ -98,15 +95,22 @@
       return null
     },
 
+    // Gắn file vào input[type="file"] an toàn với React (kiểm tra files TRƯỚC khi dispatch change!)
     attachFile(input, file) {
       if (!input || !file) return false
       try {
         const transfer = new DataTransfer()
         transfer.items.add(file)
         input.files = transfer.files
+
+        // Xác nhận trình duyệt đã gán file thành công TRƯỚC khi bắn sự kiện change
+        // (vì React onChange trên Facebook lập tức xóa input.value = '' sau khi đọc file!)
+        const assignedOk = Boolean(input.files && input.files.length >= 1 && input.files[0].name === file.name)
+        if (!assignedOk) return false
+
         input.dispatchEvent(new Event('input', { bubbles: true, composed: true }))
         input.dispatchEvent(new Event('change', { bubbles: true, composed: true }))
-        return input.files.length >= 1 && input.files[0].name === file.name
+        return true
       } catch (_) {
         return false
       }
@@ -127,7 +131,7 @@
       }
     },
 
-    async waitFor(predicate, timeoutMs = 10000, intervalMs = 250) {
+    async waitFor(predicate, timeoutMs = 10000, intervalMs = 280) {
       const deadline = Date.now() + timeoutMs
       while (Date.now() < deadline) {
         try {

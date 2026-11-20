@@ -1,6 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Xử lý giao diện Popup OmniVision v2.0 — kiểm tra 3 tab, soi trạng thái màn hình FB/TikTok, cấu hình & kiểm thử Vision AI.
+  - Mục đích: Xử lý giao diện Popup OmniVision v2.1 — kiểm tra 3 tab, soi màn hình FB/TikTok, cấu hình delay giống người & Vision AI.
   - Liên kết trực tiếp: popup.html, background.js.
 */
 
@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const visionLogEl = document.getElementById('vision-log')
 
   const cfgShowHud = document.getElementById('cfg-show-hud')
+  const cfgPacing = document.getElementById('cfg-pacing')
   const cfgAiMode = document.getElementById('cfg-ai-mode')
   const cfgProvider = document.getElementById('cfg-provider')
   const cfgEndpoint = document.getElementById('cfg-endpoint')
@@ -35,7 +36,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     })
   }
 
-  // Chuyển tab trong Popup
   document.querySelectorAll('.tab-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'))
@@ -45,7 +45,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     })
   })
 
-  // Gợi ý endpoint & model mặc định khi đổi provider
   cfgProvider.addEventListener('change', () => {
     if (cfgProvider.value === 'ollama') {
       cfgEndpoint.value = 'http://localhost:11434/api/chat'
@@ -59,6 +58,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   })
 
+  function collectConfig() {
+    return {
+      showHud: cfgShowHud.checked,
+      pacingMode: cfgPacing.value || 'normal',
+      aiMode: cfgAiMode.value,
+      provider: cfgProvider.value,
+      endpoint: cfgEndpoint.value.trim(),
+      model: cfgModel.value.trim(),
+      apiKey: cfgApiKey.value.trim()
+    }
+  }
+
   async function refreshStatus() {
     const res = await sendBg({ type: 'CHECK_STATUS' })
     if (!res?.ok) {
@@ -67,11 +78,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     const t = res.tabs || {}
     const jobs = (res.activeJobs || []).map((j) => j.platform).join(', ')
+    const pacingLabel = { normal: 'Tự nhiên', careful: 'Cẩn trọng', fast: 'Nhanh' }[res.vision?.pacingMode || 'normal']
     tabsStatusEl.innerHTML = `
       <div>${t.admin ? '🟢' : '⚪'} Tab 1: Store-Admin (${t.admin ? 'Đang mở' : 'Chưa mở'})</div>
       <div>${t.facebook ? '🟢' : '⚪'} Tab 2: FB Hoàng Thái HT (${t.facebook ? 'Sẵn sàng' : 'Tự mở khi đăng'})</div>
       <div>${t.tiktok ? '🟢' : '⚪'} Tab 3: TikTok @harutv666 (${t.tiktok ? 'Sẵn sàng' : 'Tự mở khi đăng'})</div>
-      <div style="margin-top:4px;color:#86efac;">👁️ Vision AI: <b>${res.vision?.aiMode || 'layout'}</b> (${res.vision?.provider || 'ollama'})${jobs ? ` • Đang chạy: ${jobs}` : ''}</div>
+      <div style="margin-top:4px;color:#86efac;">⏱️ Nhịp người: <b>${pacingLabel}</b> • 👁️ AI: <b>${res.vision?.aiMode || 'layout'}</b>${jobs ? ` • Chạy: ${jobs}` : ''}</div>
     `
   }
 
@@ -80,6 +92,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!res?.ok || !res.config) return
     const c = res.config
     cfgShowHud.checked = c.showHud !== false
+    cfgPacing.value = c.pacingMode || 'normal'
     cfgAiMode.value = c.aiMode || 'layout'
     cfgProvider.value = c.provider || 'ollama'
     cfgEndpoint.value = c.endpoint || ''
@@ -105,7 +118,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const res = await sendBg({ type: 'INSPECT_TAB', platform: 'facebook' })
     if (res?.ok) {
       const i = res.inspection || {}
-      log(`FB Vision → Profile đúng: ${i.isOnTargetProfile ? 'CÓ' : 'KHÔNG'} | Khung đăng: ${i.hasComposerTrigger ? 'THẤY' : 'CHƯA'} | Hộp thoại mở: ${i.hasOpenComposerDialog ? 'CÓ' : 'KHÔNG'} | Nút nhìn thấy: ${i.somCount}`)
+      log(`FB Vision → Profile đúng: ${i.isOnTargetProfile ? 'CÓ' : 'KHÔNG'} | Khung đăng: ${i.hasComposerTrigger ? 'THẤY' : 'CHƯA'} | Hộp thoại mở: ${i.hasOpenComposerDialog ? 'CÓ' : 'KHÔNG'} | Có ảnh cũ: ${i.hasExistingMediaInDialog ? 'CÓ' : 'KHÔNG'}`)
     } else {
       log('⚠️ Soi FB lỗi: ' + (res?.error || 'Không rõ'))
     }
@@ -116,7 +129,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const res = await sendBg({ type: 'INSPECT_TAB', platform: 'tiktok' })
     if (res?.ok) {
       const i = res.inspection || {}
-      log(`TikTok Vision → Màn hình: ${i.screenState} | Tiêu đề: ${i.hasTitleInput ? 'THẤY' : '—'} | Mô tả: ${i.hasDescriptionEditor ? 'THẤY' : '—'} | Quyền: "${i.privacyControlText || '—'}" | Nút Đăng: ${i.hasPublishButton ? (i.publishButtonEnabled ? 'SẴN SÀNG' : 'BỊ KHÓA') : 'CHƯA'}`)
+      log(`TikTok Vision → ${i.screenState} | Tiêu đề: ${i.titleCounter ?? '—'}/90 | Mô tả: ${i.descriptionCounter ?? '—'}/4000 | Quyền: "${i.privacyControlText || '—'}" | Đăng: ${i.publishButtonEnabled ? 'SẴN SÀNG' : 'CHƯA'}`)
     } else {
       log('⚠️ Soi TikTok lỗi: ' + (res?.error || 'Không rõ'))
     }
@@ -139,19 +152,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   })
 
   document.getElementById('btn-save-vision')?.addEventListener('click', async () => {
-    const res = await sendBg({
-      type: 'SAVE_VISION_CONFIG',
-      config: {
-        showHud: cfgShowHud.checked,
-        aiMode: cfgAiMode.value,
-        provider: cfgProvider.value,
-        endpoint: cfgEndpoint.value.trim(),
-        model: cfgModel.value.trim(),
-        apiKey: cfgApiKey.value.trim()
-      }
-    })
+    const res = await sendBg({ type: 'SAVE_VISION_CONFIG', config: collectConfig() })
     if (res?.ok) {
-      log('✅ Đã lưu cấu hình OmniVision!', visionLogEl)
+      log('✅ Đã lưu cấu hình Delay & OmniVision!', visionLogEl)
       await refreshStatus()
     } else {
       log('⚠️ Lỗi lưu cấu hình: ' + res?.error, visionLogEl)
@@ -160,17 +163,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('btn-test-vision')?.addEventListener('click', async () => {
     log('🧪 Đang kiểm tra kết nối Vision AI...', visionLogEl)
-    await sendBg({
-      type: 'SAVE_VISION_CONFIG',
-      config: {
-        showHud: cfgShowHud.checked,
-        aiMode: cfgAiMode.value,
-        provider: cfgProvider.value,
-        endpoint: cfgEndpoint.value.trim(),
-        model: cfgModel.value.trim(),
-        apiKey: cfgApiKey.value.trim()
-      }
-    })
+    await sendBg({ type: 'SAVE_VISION_CONFIG', config: collectConfig() })
     const res = await sendBg({ type: 'TEST_VISION_AI' })
     log((res?.ok ? '✅ ' : '⚠️ ') + (res?.message || res?.error || 'Hoàn tất'), visionLogEl)
   })

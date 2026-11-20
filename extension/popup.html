@@ -1,6 +1,6 @@
 <!--
   FILE NOTE
-  - Mục đích: Trung tâm điều khiển OmniVision v2.0 trên Popup Chrome Extension.
+  - Mục đích: Trung tâm điều khiển OmniVision v2.1 trên Popup Chrome Extension (có chỉnh tốc độ delay như người).
   - Liên kết trực tiếp: manifest.json, popup.js, background.js.
 -->
 <!DOCTYPE html>
@@ -11,7 +11,7 @@
   <style>
     * { box-sizing: border-box; }
     body {
-      width: 356px;
+      width: 360px;
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       font-size: 12.5px;
@@ -165,6 +165,7 @@
       justify-content: space-between;
       gap: 8px;
       font-size: 12px;
+      margin-bottom: 8px;
     }
     .log-box {
       font-family: ui-monospace, monospace;
@@ -190,12 +191,12 @@
   <div class="header">
     <span>👁️</span>
     <h2>OmniCart OmniVision</h2>
-    <span class="badge">v2.0 Vision</span>
+    <span class="badge">v2.1 Human-Pace</span>
   </div>
 
   <div class="tabs">
     <button class="tab-btn active" data-tab="control">🎛️ Điều khiển & Tab</button>
-    <button class="tab-btn" data-tab="vision">🧠 Cấu hình Mắt AI</button>
+    <button class="tab-btn" data-tab="vision">🧠 Mắt AI & Delay</button>
   </div>
 
   <!-- TAB 1: ĐIỀU KHIỂN -->
@@ -212,7 +213,7 @@
       <div class="profile-item">
         <div>
           <div class="profile-name">🎵 harutv</div>
-          <div class="profile-sub">@harutv666 • Photo Mode</div>
+          <div class="profile-sub">@harutv666 • Photo + Mô tả + Hashtag</div>
         </div>
         <div><span class="dot"></span>OmniVision</div>
       </div>
@@ -235,16 +236,24 @@
       </div>
     </div>
 
-    <div class="log-box" id="log-output">Sẵn sàng quan sát & điều khiển 3 tab.</div>
+    <div class="log-box" id="log-output">Sẵn sàng quan sát & điều khiển 3 tab với nhịp trễ tự nhiên.</div>
   </div>
 
-  <!-- TAB 2: CẤU HÌNH VISION AI -->
+  <!-- TAB 2: CẤU HÌNH VISION AI & DELAY -->
   <div class="panel" id="panel-vision">
     <div class="card">
-      <div class="card-title">Hiển thị mắt trực quan (HUD)</div>
+      <div class="card-title">Hành vi giống người & HUD trực quan</div>
       <div class="toggle-row">
         <span>Hiện khung nhắm & trạng thái trên FB/TikTok</span>
         <input type="checkbox" id="cfg-show-hud" checked>
+      </div>
+      <div class="field">
+        <label for="cfg-pacing">Tốc độ thao tác (Delay chống quét bot)</label>
+        <select id="cfg-pacing">
+          <option value="normal">Tự nhiên như người thật (Khuyên dùng • ~12-18s/bài)</option>
+          <option value="careful">Cẩn trọng chống quét cao (~20-28s/bài)</option>
+          <option value="fast">Nhanh (Chỉ dùng khi kiểm thử)</option>
+        </select>
       </div>
     </div>
 
@@ -266,7 +275,7 @@
           <option value="openai">OpenAI / LM Studio / OpenRouter</option>
         </select>
       </div>
-      <div class="field" id="wrap-endpoint">
+      <div class="field">
         <label for="cfg-endpoint">API Endpoint</label>
         <input type="text" id="cfg-endpoint" placeholder="http://localhost:11434/api/chat">
       </div>
@@ -274,12 +283,12 @@
         <label for="cfg-model">Model Vision</label>
         <input type="text" id="cfg-model" placeholder="qwen2.5vl:7b / llama3.2-vision / gemini-2.5-flash">
       </div>
-      <div class="field" id="wrap-apikey">
+      <div class="field">
         <label for="cfg-apikey">API Key (bỏ trống nếu dùng Ollama Local)</label>
         <input type="password" id="cfg-apikey" placeholder="AIza... hoặc sk-...">
       </div>
       <div class="hint">
-        Mặc định OmniVision Hình học đã tự xử lý được 99% thao tác FB & TikTok kể cả khi tắt AI. Bật Ollama/Gemini giúp tự nhận diện khi giao diện thay đổi đột xuất.
+        Độ trễ Gaussian Jitter giúp mô phỏng khoảng dừng đọc, rê chuột, gõ tiêu đề và rà soát bài trước khi bấm Đăng.
       </div>
     </div>
 

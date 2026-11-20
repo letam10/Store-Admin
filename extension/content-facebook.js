@@ -1,14 +1,12 @@
 /*
   FILE NOTE
-  - Mục đích: Content Script OmniVision v2.0 cho trang cá nhân Facebook Hoàng Thái HT (ID: 100037782653708).
-  - Liên kết trực tiếp: manifest.json, vision-engine.js, content-media.js, background.js.
-  - Sửa triệt để các lỗi cũ:
-    1. Loại bỏ hoàn toàn selector StyleX 'x1i10hfl' gây bấm nhầm vào thanh header.
-    2. Định vị khung soạn bài bằng neo thị giác trong cột chính ("Bạn đang nghĩ gì?" nằm ngay trên "Ảnh/video").
-    3. Không tự đổi location.href bên trong content script — trả needsNavigation để background điều hướng an toàn.
-    4. Nhập liệu vào Lexical Editor bằng Synthetic ClipboardEvent('paste') + tự kiểm chứng chữ thực sự xuất hiện.
-    5. Đổi quyền riêng tư đầy đủ (kể cả bấm "Xem thêm" tìm "Chỉ mình tôi" và bấm nút "Xong"/"Lưu" để lưu hộp thoại).
-    6. Trả đúng quyền riêng tư quan sát thực tế (không hardcode 'public') và kiểm chứng lỗi/đăng thành công thực sự.
+  - Mục đích: Content Script OmniVision v2.1 cho trang cá nhân Facebook Hoàng Thái HT (ID: 100037782653708).
+  - Nâng cấp v2.1.0:
+    1. Sửa lỗi dừng ngay sau bước tải ảnh (phối hợp với content-media.js v2.1.0).
+    2. Tự động dọn hộp thoại "Tạo bài viết" bị sót ảnh/chữ cũ từ lần trước (bấm X -> xác nhận "Bỏ") để không bao giờ bị dính nhiều ảnh sản phẩm vào cùng 1 bài!
+    3. Bảo toàn toàn bộ bố cục bài viết (xuống dòng \n\n, emoji, CTA, hotline, khối #hashtag).
+    4. Loại trừ nút "Nhãn AI đang tắt" cạnh nút "Công khai" khi đọc quyền riêng tư.
+    5. Thêm toàn bộ nhịp trễ tự nhiên như người thật giữa các thao tác chống quét spam.
 */
 
 ;(() => {
@@ -32,8 +30,8 @@
   const handleMessage = (message, sender, sendResponse) => {
     if (!message?.type) return false
 
-    if (message.type === 'VISION_SET_HUD') {
-      V()?.setHudEnabled(message.enabled)
+    if (message.type === 'VISION_SET_CONFIG' || message.type === 'VISION_SET_HUD') {
+      V()?.applyConfig(message.config || { showHud: message.enabled })
       sendResponse({ ok: true })
       return false
     }
@@ -94,7 +92,6 @@
     return rect.top < 62
   }
 
-  // Tìm nút "Bạn đang nghĩ gì?" bằng hình học & neo "Ảnh/video" ngay dưới (tuyệt đối không nhầm navbar)
   function findComposerTrigger() {
     const candidates = V().queryAllDeep(document, '[role="button"], button, span, div')
     let best = null
@@ -104,7 +101,7 @@
       if (!V().isReallyVisible(el, { minWidth: 80, minHeight: 24 })) continue
       if (isInsideTopBarOrNav(el)) continue
       if (el.closest('[role="dialog"]')) continue
-      if (el.closest('[role="article"]')) continue // Tránh ô "Viết bình luận..." trong bài viết
+      if (el.closest('[role="article"]')) continue
 
       const rect = el.getBoundingClientRect()
       if (rect.height > 110 || rect.width < 120) continue
@@ -119,8 +116,8 @@
       if (cRect.width < 140 || cRect.height < 28 || cRect.height > 90) continue
 
       let score = 50
-      if (cRect.left > window.innerWidth * 0.25) score += 25 // Cột nội dung chính bên phải trên trang cá nhân
-      if (cRect.top > 120 && cRect.top < 900) score += 20
+      if (cRect.left > window.innerWidth * 0.25) score += 25
+      if (cRect.top > 120 && cRect.top < 950) score += 20
       if (label.length < 40) score += 15
       if (clickable.getAttribute('role') === 'button') score += 15
 
@@ -132,7 +129,6 @@
     return best
   }
 
-  // Nút "Ảnh/video" nằm ngay dưới khung "Bạn đang nghĩ gì?" (cũng mở thẳng hộp thoại tạo bài viết kèm vùng ảnh!)
   function findProfilePhotoShortcut() {
     const buttons = V().queryAllDeep(document, '[role="button"], button')
     return buttons.find((el) => {
@@ -145,15 +141,13 @@
     }) || null
   }
 
-  // Tìm hộp thoại "Tạo bài viết" hiển thị trên cùng
   function findComposerDialog() {
     const dialogs = V().queryAllDeep(document, 'div[role="dialog"]')
       .filter((d) => V().isReallyVisible(d, { minWidth: 320, minHeight: 220 }))
 
-    // Duyệt từ dialog mới nhất / trên cùng xuống
     for (let i = dialogs.length - 1; i >= 0; i--) {
       const dialog = dialogs[i]
-      const text = V().normalizeText(dialog.innerText || dialog.textContent).slice(0, 300)
+      const text = V().normalizeText(dialog.innerText || dialog.textContent).slice(0, 320)
       const hasHeading = /tạo bài viết|create post/i.test(text)
       const hasEditor = Boolean(findComposerEditor(dialog))
       const hasSubmit = Boolean(findSubmitOrNextButton(dialog))
@@ -164,16 +158,65 @@
     return null
   }
 
+  function hasExistingMediaInDialog(dialog) {
+    if (!dialog) return false
+    const dRect = dialog.getBoundingClientRect()
+    const hasEditBtn = V().queryAllDeep(dialog, '[role="button"], button').some((b) => {
+      if (!V().isReallyVisible(b)) return false
+      const txt = V().normalizeText(b.innerText || b.textContent)
+      return /^(chỉnh sửa|chỉnh sửa tất cả|edit|edit all)$/i.test(txt)
+    })
+    if (hasEditBtn) return true
+
+    return V().queryAllDeep(dialog, 'img').some((img) => {
+      if (!V().isReallyVisible(img, { minWidth: 85, minHeight: 85 })) return false
+      const r = img.getBoundingClientRect()
+      return r.top > dRect.top + 110 && img.complete && img.naturalWidth > 80
+    })
+  }
+
+  // Đóng sạch hộp thoại Tạo bài viết cũ còn dính ảnh/chữ từ phiên lỗi trước
+  async function closeDirtyComposerDialog(dialog, stepLog) {
+    if (!dialog) return
+    const dRect = dialog.getBoundingClientRect()
+    const closeBtn = V().queryAllDeep(dialog, '[role="button"], button').find((btn) => {
+      if (!V().isReallyVisible(btn, { minWidth: 20, minHeight: 20 })) return false
+      const r = btn.getBoundingClientRect()
+      // Nút X đóng hộp thoại nằm ở góc trên bên phải của dialog
+      if (r.top - dRect.top > 90 || dRect.right - r.right > 90) return false
+      const aria = V().normalizeText(`${btn.getAttribute('aria-label') || ''} ${btn.innerText || ''}`)
+      return /^(đóng|close)$/i.test(aria)
+    })
+
+    if (!closeBtn) return
+    stepLog('cleanup', 'Phát hiện hộp thoại bài viết cũ còn mở, đang đóng để bắt đầu bài mới sạch...', 'warn')
+    await V().humanClick(closeBtn, 'Đóng hộp thoại cũ')
+    await V().humanDelay(650, 1100)
+
+    // Nếu Facebook hỏi "Bỏ bài viết?" / "Rời khỏi trang?" -> bấm "Bỏ" / "Discard"
+    const discardBtn = V().queryAllDeep(document, '[role="dialog"] [role="button"], [role="dialog"] button').find((btn) => {
+      if (!V().isReallyVisible(btn)) return false
+      const txt = V().normalizeText(btn.innerText || btn.textContent).toLowerCase()
+      return /^(bỏ|bỏ bài viết|xóa bỏ|discard|discard post|leave|rời khỏi)$/.test(txt)
+    })
+    if (discardBtn) {
+      await V().humanClick(discardBtn, 'Xác nhận bỏ bản nháp cũ')
+      await V().humanDelay(800, 1400)
+    }
+
+    await M().waitFor(() => !findComposerDialog(), 6000)
+  }
+
   function findComposerEditor(dialog) {
     if (!dialog) return null
     const candidates = V().queryAllDeep(dialog, 'div[role="textbox"][contenteditable="true"], div[contenteditable="true"]')
       .filter((el) => {
-        if (!V().isReallyVisible(el, { minWidth: 100, minHeight: 20 })) return false
+        if (!V().isReallyVisible(el, { minWidth: 80, minHeight: 16 })) return false
         const lbl = V().getAccessibleLabel(el)
         if (/tìm kiếm|search/i.test(lbl)) return false
         return true
       })
-    // Ưu tiên textbox lớn nhất / có role="textbox"
+
     candidates.sort((a, b) => {
       const ra = a.getBoundingClientRect()
       const rb = b.getBoundingClientRect()
@@ -218,11 +261,12 @@
     return buttons.find((btn) => {
       if (!V().isReallyVisible(btn, { minWidth: 40, minHeight: 20 })) return false
       const r = btn.getBoundingClientRect()
-      // Nút chọn quyền riêng tư luôn nằm ở phần đầu hộp thoại ngay dưới tên tác giả
       if (r.top - dRect.top > 250) return false
       const combined = V().normalizeText(
         `${btn.innerText || btn.textContent || ''} ${btn.getAttribute('aria-label') || ''}`
       )
+      // Loại trừ nút "Nhãn AI đang tắt" nằm ngay cạnh nút Công khai!
+      if (/nhãn ai|ai label|ai info/i.test(combined)) return false
       return (
         combined.length <= 80 &&
         /đối tượng|audience|chỉ mình tôi|only me|công khai|public|bạn bè|friends|chỉnh sửa quyền riêng tư|edit privacy/i.test(combined)
@@ -239,19 +283,21 @@
   }
 
   function inspectFacebookScreen() {
+    const dlg = findComposerDialog()
     return {
       url: location.href,
       isLoginOrCheckpoint: isLoginOrCheckpointScreen(),
       isOnTargetProfile: isOnTargetProfile(),
       hasComposerTrigger: Boolean(findComposerTrigger()),
       hasPhotoShortcut: Boolean(findProfilePhotoShortcut()),
-      hasOpenComposerDialog: Boolean(findComposerDialog()),
+      hasOpenComposerDialog: Boolean(dlg),
+      hasExistingMediaInDialog: hasExistingMediaInDialog(dlg),
       somCount: V().buildInteractiveMap(document).items.length
     }
   }
 
   // =========================================================================
-  // LUỒNG ĐĂNG BÀI OMNIVISION (Cảm nhận → Hành động → Kiểm chứng)
+  // LUỒNG ĐĂNG BÀI OMNIVISION (CÓ NHỊP TRỄ TỰ NHIÊN NHƯ NGƯỜI THẬT)
   // =========================================================================
 
   async function executeFacebookPost(payload) {
@@ -271,7 +317,7 @@
     }
 
     if (!isOnTargetProfile()) {
-      stepLog('nav', 'Chưa ở đúng trang cá nhân Hoàng Thái HT, yêu cầu background điều hướng...', 'warn')
+      stepLog('nav', 'Chưa ở đúng trang cá nhân Hoàng Thái HT, chuyển tab từ background...', 'warn')
       return { ok: false, needsNavigation: true, targetUrl: FACEBOOK_PROFILE_URL, visionTrace: trace }
     }
 
@@ -280,20 +326,40 @@
     }
 
     const requestedPrivacy = String(payload.privacy || 'only_me').toLowerCase()
-    const fullText = [
-      payload.title ? `${payload.title}\n\n` : '',
-      payload.content || '',
-      payload.hashtags ? `\n\n${payload.hashtags}` : ''
-    ].join('').trim()
+    const rawTitle = V().formatPostText(payload.title || '', 260)
+    const rawContent = payload.content || payload.description || payload.caption || payload.body || ''
+    const rawHashtags = payload.hashtags || payload.tags || ''
+
+    // Giữ nguyên định dạng đẹp: Tiêu đề + xuống dòng + Nội dung + xuống dòng + Khối #Hashtag
+    const bodyWithoutDupTitle =
+      rawTitle && V().normalizeText(rawContent).startsWith(V().normalizeText(rawTitle))
+        ? rawContent
+        : [rawTitle, rawContent].filter(Boolean).join('\n\n')
+    const fullText = V().composeBodyAndHashtags(bodyWithoutDupTitle, rawHashtags, 6000)
+
     if (!fullText) return { ok: false, error: 'POST_TEXT_REQUIRED', visionTrace: trace }
+    stepLog('prepare', `Đã sẵn sàng nội dung Facebook (${fullText.length} ký tự, có giữ nguyên xuống dòng & hashtag).`)
+
+    // Nhịp đọc trang tự nhiên trước khi thao tác
+    await V().humanDelay(750, 1450)
 
     const existingPermalinks = new Set(collectPostPermalinks())
 
-    // --- BƯỚC 1: Mở hộp thoại Tạo bài viết ---
-    stepLog('open_composer', 'Đang định vị khung "Bạn đang nghĩ gì?" trên trang cá nhân...')
+    // --- BƯỚC 0: Dọn hộp thoại cũ nếu còn ảnh/chữ sót lại từ phiên trước ---
     let dialog = findComposerDialog()
+    if (dialog) {
+      const existingText = V().normalizeText(V().readEditorValue(findComposerEditor(dialog)))
+      const isDirty = hasExistingMediaInDialog(dialog) || (existingText.length > 0 && !COMPOSER_TEXT_RE.test(existingText))
+      if (isDirty) {
+        await closeDirtyComposerDialog(dialog, stepLog)
+        await V().humanDelay(900, 1600)
+        dialog = null
+      }
+    }
 
+    // --- BƯỚC 1: Mở hộp thoại "Tạo bài viết" ---
     if (!dialog) {
+      stepLog('open_composer', 'Đang định vị khung "Bạn đang nghĩ gì?" trên trang cá nhân...')
       const triggerReady = await M().waitFor(() => Boolean(findComposerTrigger() || findProfilePhotoShortcut()), 20000)
       if (!triggerReady) {
         stepLog('open_composer', 'Không nhìn thấy khung soạn bài trên trang cá nhân.', 'error')
@@ -304,11 +370,10 @@
       const composerTrigger = findComposerTrigger()
       if (composerTrigger) {
         await V().humanClick(composerTrigger, 'Mở khung tạo bài viết')
-        await M().waitFor(() => Boolean(findComposerDialog()), 7000)
+        await M().waitFor(() => Boolean(findComposerDialog()), 8000)
       }
 
       dialog = findComposerDialog()
-      // Dự phòng 1: bấm nút "Ảnh/video" ngay dưới khung soạn bài
       if (!dialog) {
         const photoShortcut = findProfilePhotoShortcut()
         if (photoShortcut) {
@@ -319,7 +384,6 @@
         }
       }
 
-      // Dự phòng 2: hỏi Vision AI nếu bật
       if (!dialog) {
         const ai = await V().askVisionAI(
           'Click the "Bạn đang nghĩ gì?" / "What\'s on your mind?" post composer box on the Facebook profile.',
@@ -338,9 +402,11 @@
       V().clearHud(5000)
       return { ok: false, error: 'FACEBOOK_COMPOSER_DID_NOT_OPEN', visionTrace: trace }
     }
-    stepLog('open_composer', 'Đã mở hộp thoại "Tạo bài viết".')
 
-    // --- BƯỚC 2: Tải ảnh sản phẩm & kiểm chứng ảnh xem trước ---
+    stepLog('open_composer', 'Đã mở hộp thoại "Tạo bài viết".')
+    await V().humanReadPause()
+
+    // --- BƯỚC 2: Tải ảnh sản phẩm & xác nhận ảnh xem trước ---
     stepLog('upload_image', 'Đang nạp ảnh sản phẩm vào bài viết Facebook...')
     const imageSnapshot = V().captureVisualImageSnapshot(dialog)
     const imageFile = await M().createProductImageFile(payload.imageDataUrl, 'omnicart-fb-product.png')
@@ -349,11 +415,10 @@
     if (!imageInput) {
       const photoBtn = findPhotoToolbarButtonInDialog(dialog)
       if (photoBtn) {
-        await V().humanClick(photoBtn, 'Mở vùng tải ảnh')
-        await V().sleep(700)
+        await V().humanClick(photoBtn, 'Mở vùng chọn ảnh')
+        await V().humanDelay(800, 1400)
       }
       imageInput = await M().findImageInput(dialog, 6000, false)
-      // Đôi khi Facebook gắn input[type=file] ở portal ngoài dialog
       if (!imageInput) {
         imageInput = await M().findImageInput(document, 3000, false)
       }
@@ -365,31 +430,33 @@
       return { ok: false, error: 'FACEBOOK_IMAGE_INPUT_NOT_FOUND', visionTrace: trace }
     }
 
-    if (!M().attachFile(imageInput, imageFile)) {
-      stepLog('upload_image', 'Không thể gắn tệp ảnh vào input Facebook.', 'error')
+    const attached = M().attachFile(imageInput, imageFile)
+    if (!attached) {
+      stepLog('upload_image', 'Không thể gán tệp ảnh vào input Facebook.', 'error')
       V().clearHud(5000)
       return { ok: false, error: 'FACEBOOK_IMAGE_NOT_ATTACHED', visionTrace: trace }
     }
 
+    stepLog('upload_image', 'Đã gửi ảnh, đang chờ Facebook dựng ảnh xem trước...')
     const previewConfirmed = await M().waitFor(() => {
       const d = findComposerDialog() || dialog
       const newMedia = V().findNewlyRenderedMedia(imageSnapshot, { root: d, minTop: 80, minWidth: 70, minHeight: 70 })
       if (newMedia) return true
-      // Dấu hiệu phụ: xuất hiện nút "Chỉnh sửa" / "Edit" trên khung ảnh xem trước
-      const btns = V().queryAllDeep(d, '[role="button"], button')
-      return btns.some((b) => V().isReallyVisible(b) && /^(chỉnh sửa|edit|xóa|remove)$/i.test(V().normalizeText(b.innerText || b.textContent)))
-    }, 22000)
+      return hasExistingMediaInDialog(d)
+    }, 24000, 350)
 
     if (!previewConfirmed) {
-      stepLog('upload_image', 'Không xác nhận được ảnh xem trước sau khi tải lên.', 'error')
+      stepLog('upload_image', 'Facebook không hiển thị ảnh xem trước sau khi tải lên.', 'error')
       V().clearHud(5000)
       return { ok: false, error: 'FACEBOOK_IMAGE_PREVIEW_NOT_CONFIRMED', visionTrace: trace }
     }
-    stepLog('upload_image', 'Đã xác nhận ảnh sản phẩm hiển thị trong khung soạn bài.')
-    await V().sleep(500)
 
-    // --- BƯỚC 3: Nhập nội dung vào Lexical Editor & kiểm chứng ---
-    stepLog('fill_text', 'Đang điền nội dung & hashtag vào trình soạn thảo Facebook...')
+    stepLog('upload_image', '✅ Đã xác nhận ảnh sản phẩm hiển thị rõ nét trong bài viết.')
+    // Chờ tự nhiên để Facebook xử lý xong ảnh ở máy chủ trước khi gõ chữ
+    await V().humanDelay(1700, 2900)
+
+    // --- BƯỚC 3: Điền nội dung & hashtag vào Lexical Editor ---
+    stepLog('fill_text', 'Đang điền nội dung bóng bẩy & hashtag vào hộp thoại Facebook...')
     dialog = findComposerDialog() || dialog
     const editorBox = findComposerEditor(dialog)
     if (!editorBox) {
@@ -398,25 +465,32 @@
       return { ok: false, error: 'FACEBOOK_EDITOR_NOT_FOUND', visionTrace: trace }
     }
 
-    const typeResult = await V().smartTypeText(editorBox, fullText, {
+    let typeResult = await V().smartTypeText(editorBox, fullText, {
       clearFirst: true,
-      label: 'Nội dung bài viết Facebook'
+      label: 'Nội dung & Hashtag Facebook',
+      placeholderRe: COMPOSER_TEXT_RE
     })
-    await V().sleep(500)
 
     if (!typeResult.ok) {
-      stepLog('fill_text', `Cảnh báo: kiểm tra lại chữ trong editor (${typeResult.method}). Thử nhập lại lần 2...`, 'warn')
-      const retryType = await V().smartTypeText(editorBox, fullText, { clearFirst: true, label: 'Thử lại nội dung FB' })
-      if (!retryType.ok) {
-        stepLog('fill_text', 'Không thể chèn nội dung vào Lexical Editor của Facebook.', 'error')
-        V().clearHud(5000)
-        return { ok: false, error: 'FACEBOOK_TEXT_NOT_INSERTED', visionTrace: trace }
-      }
+      stepLog('fill_text', `Lần nhập đầu chưa xác nhận (${typeResult.method}), tạm dừng rồi thử lại...`, 'warn')
+      await V().humanDelay(900, 1500)
+      typeResult = await V().smartTypeText(editorBox, fullText, {
+        clearFirst: true,
+        label: 'Thử lại nội dung FB',
+        placeholderRe: COMPOSER_TEXT_RE
+      })
     }
-    stepLog('fill_text', `Đã điền và xác nhận nội dung thành công (${typeResult.method}).`)
 
-    // --- BƯỚC 4: Kiểm tra & thiết lập Quyền riêng tư (Công khai / Chỉ mình tôi) ---
-    stepLog('privacy', `Đang xác nhận quyền riêng tư: ${requestedPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Công khai'}...`)
+    if (!typeResult.ok) {
+      stepLog('fill_text', 'Không thể chèn nội dung vào Lexical Editor của Facebook.', 'error')
+      V().clearHud(5000)
+      return { ok: false, error: 'FACEBOOK_TEXT_NOT_INSERTED', visionTrace: trace }
+    }
+    stepLog('fill_text', `✅ Đã xác nhận nội dung vào Facebook (${typeResult.method}, ${V().normalizeText(typeResult.actual).length} ký tự).`)
+    await V().humanDelay(1000, 1900)
+
+    // --- BƯỚC 4: Kiểm tra & thiết lập Quyền riêng tư ---
+    stepLog('privacy', `Đang kiểm tra quyền riêng tư: ${requestedPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Công khai'}...`)
     dialog = findComposerDialog() || dialog
     const actualPrivacy = await applyAudiencePrivacy(dialog, requestedPrivacy, stepLog)
 
@@ -430,10 +504,13 @@
         visionTrace: trace
       }
     }
-    stepLog('privacy', `Đã xác nhận đúng quyền riêng tư: ${actualPrivacy}.`)
+    stepLog('privacy', `✅ Quyền riêng tư đã chuẩn: ${actualPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Công khai'}.`)
 
-    // --- BƯỚC 5: Nhấn nút "Đăng" (hỗ trợ cả luồng "Tiếp" -> "Đăng") ---
-    stepLog('submit', 'Đang tìm và nhấn nút "Đăng"...')
+    // Nhịp rà soát bài viết trước khi nhấn Đăng (giống người thật đọc lướt lại bài)
+    stepLog('review', 'Đang rà soát lần cuối trước khi đăng (delay tự nhiên)...')
+    await V().humanReviewPause()
+
+    // --- BƯỚC 5: Nhấn nút "Đăng" ---
     dialog = findComposerDialog() || dialog
     let submitInfo = null
 
@@ -458,17 +535,16 @@
     }
 
     if (!submitInfo) {
-      stepLog('submit', 'Nút "Đăng" chưa sẵn sàng hoặc bị vô hiệu hóa.', 'error')
+      stepLog('submit', 'Nút "Đăng" chưa sẵn sàng hoặc đang bị khóa.', 'error')
       V().clearHud(5000)
       return { ok: false, error: 'FACEBOOK_SUBMIT_BUTTON_NOT_READY', visionTrace: trace }
     }
 
+    stepLog('submit', `Đang bấm nút "${submitInfo.kind === 'next' ? 'Tiếp' : 'Đăng'}"...`)
     await V().humanClick(submitInfo.element, submitInfo.kind === 'next' ? 'Tiếp' : 'Đăng bài Facebook')
 
-    // Nếu nút đầu là "Tiếp" (Next), đợi sang màn sau rồi bấm nút "Đăng"
     if (submitInfo.kind === 'next') {
-      stepLog('submit', 'Đã qua bước "Tiếp", đang chờ nút "Đăng" cuối cùng...')
-      await V().sleep(800)
+      await V().humanDelay(900, 1500)
       let finalPostBtn = null
       await M().waitFor(() => {
         const d = findComposerDialog()
@@ -479,14 +555,14 @@
           return true
         }
         return false
-      }, 8000)
+      }, 9000)
       if (finalPostBtn) {
         await V().humanClick(finalPostBtn, 'Đăng bài Facebook')
       }
     }
 
     // --- BƯỚC 6: Chờ kiểm chứng xuất bản thật ---
-    stepLog('verify', 'Đang theo dõi Facebook xác nhận bài đã xuất bản...')
+    stepLog('verify', 'Đang chờ Facebook hoàn tất đăng bài...')
     const result = await waitForFacebookPublishConfirmation(fullText, existingPermalinks, actualPrivacy, stepLog)
     V().clearHud(5000)
     return { ...result, visionTrace: trace }
@@ -497,14 +573,16 @@
     if (!audienceBtn) return null
 
     const currentPrivacy = parsePrivacyFromText(V().getAccessibleLabel(audienceBtn))
-    if (currentPrivacy === requestedPrivacy) return requestedPrivacy
+    if (currentPrivacy === requestedPrivacy) {
+      V().highlightTarget(audienceBtn, `Quyền riêng tư: ${requestedPrivacy}`, '#22c55e')
+      return requestedPrivacy
+    }
 
-    await V().humanClick(audienceBtn, 'Đổi quyền riêng tư')
-    await V().sleep(700)
+    await V().humanClick(audienceBtn, 'Mở chọn đối tượng')
+    await V().humanDelay(750, 1300)
 
     const targetPattern = requestedPrivacy === 'only_me' ? ONLY_ME_RE : PUBLIC_RE
 
-    // Tìm lựa chọn trong hộp thoại Đối tượng của bài viết
     const findOption = () => {
       const candidates = V().queryAllDeep(document, '[role="radio"], [role="menuitem"], [role="option"], [role="listitem"], [role="button"]')
       return candidates.find((el) => {
@@ -516,27 +594,27 @@
     }
 
     let optionEl = findOption()
-    // Nếu chọn "Chỉ mình tôi", đôi khi Facebook giấu sau nút "Xem thêm" / "See more"
     if (!optionEl) {
       const seeMore = V().queryAllDeep(document, '[role="button"], button, span').find((el) => {
         if (!V().isReallyVisible(el)) return false
         return /^(xem thêm|see more|thêm lựa chọn|more options)$/i.test(V().normalizeText(el.innerText || el.textContent))
       })
       if (seeMore) {
-        stepLog('privacy', 'Mở rộng danh sách quyền riêng tư ("Xem thêm")...')
+        stepLog('privacy', 'Mở rộng danh sách đối tượng ("Xem thêm")...')
         await V().humanClick(seeMore, 'Xem thêm')
-        await V().sleep(600)
+        await V().humanDelay(600, 1100)
       }
       await M().waitFor(() => Boolean(findOption()), 5000)
       optionEl = findOption()
     }
 
-    if (!optionEl) return parsePrivacyFromText(V().getAccessibleLabel(findAudienceButton(findComposerDialog() || dialog)))
+    if (!optionEl) {
+      return parsePrivacyFromText(V().getAccessibleLabel(findAudienceButton(findComposerDialog() || dialog)))
+    }
 
     await V().humanClick(optionEl, requestedPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Công khai')
-    await V().sleep(600)
+    await V().humanDelay(650, 1150)
 
-    // QUAN TRỌNG: Bấm nút xác nhận "Xong" / "Done" / "Lưu" / "Save" của modal Đối tượng bài viết
     const confirmBtn = V().queryAllDeep(document, '[role="dialog"] [role="button"], [role="dialog"] button').find((btn) => {
       if (!V().isReallyVisible(btn, { minWidth: 40, minHeight: 26 })) return false
       if (V().isElementDisabled(btn)) return false
@@ -544,11 +622,10 @@
       return /^(xong|done|lưu|save|cập nhật|update)$/.test(txt)
     })
     if (confirmBtn) {
-      await V().humanClick(confirmBtn, 'Lưu quyền riêng tư')
-      await V().sleep(700)
+      await V().humanClick(confirmBtn, 'Lưu đối tượng bài viết')
+      await V().humanDelay(750, 1250)
     }
 
-    // Xác nhận nhãn quyền riêng tư đã cập nhật trên hộp thoại Tạo bài viết
     await M().waitFor(() => {
       const d = findComposerDialog() || dialog
       const btn = findAudienceButton(d)
@@ -561,12 +638,12 @@
   }
 
   async function waitForFacebookPublishConfirmation(fullText, existingPermalinks, actualPrivacy, stepLog) {
-    const deadline = Date.now() + 32000
+    const deadline = Date.now() + 36000
     const textProbe = V().normalizeText(fullText).slice(0, Math.min(28, fullText.length))
     let dialogClosedAt = 0
 
     while (Date.now() < deadline) {
-      // 1. Kiểm tra nếu xuất hiện hộp thoại xác nhận phụ ("Không phải bây giờ" / "Đăng ngay")
+      // Đóng popup gợi ý phụ (nếu có) sau khi composer đã đóng
       const secondaryBtn = V().queryAllDeep(document, '[role="dialog"] [role="button"], [role="dialog"] button').find((btn) => {
         if (!V().isReallyVisible(btn)) return false
         const txt = V().normalizeText(btn.innerText || btn.textContent).toLowerCase()
@@ -574,10 +651,9 @@
       })
       if (secondaryBtn && !findComposerDialog()) {
         await V().humanClick(secondaryBtn, 'Đóng popup phụ')
-        await V().sleep(600)
+        await V().humanDelay(600, 1000)
       }
 
-      // 2. Kiểm tra cảnh báo lỗi thực tế từ Facebook
       const alertText = V().queryAllDeep(document, '[role="alert"], [role="dialog"] [role="status"]')
         .filter((el) => V().isReallyVisible(el))
         .map((el) => V().normalizeText(el.innerText || el.textContent))
@@ -587,10 +663,9 @@
         return { ok: false, error: `FACEBOOK_POST_ERROR: ${alertText.slice(0, 120)}` }
       }
 
-      // 3. Quét bài mới vừa xuất hiện trên dòng thời gian
       const newPost = findNewlyPublishedArticle(textProbe, existingPermalinks)
       if (newPost) {
-        stepLog('verify', `Đã tìm thấy bài đăng mới trên dòng thời gian!`, 'success')
+        stepLog('verify', '✅ Đã thấy bài viết mới xuất hiện trên trang cá nhân!', 'success')
         return {
           ok: true,
           verified: true,
@@ -603,18 +678,16 @@
         }
       }
 
-      // 4. Kiểm tra dialog đã đóng chưa (Facebook ẩn hộp thoại khi gửi thành công)
       const stillOpen = Boolean(findComposerDialog())
       if (!stillOpen) {
         if (!dialogClosedAt) {
           dialogClosedAt = Date.now()
-          stepLog('verify', 'Hộp thoại tạo bài đã đóng, đang chờ bài hiển thị trên tường...')
-        } else if (Date.now() - dialogClosedAt >= 4500) {
-          // Chờ thêm 4.5s sau khi đóng mà không có lỗi -> xác nhận thành công
+          stepLog('verify', 'Hộp thoại tạo bài đã đóng, đang đợi Facebook hiển thị bài lên tường...')
+        } else if (Date.now() - dialogClosedAt >= 4800) {
           const fallbackPost = findNewlyPublishedArticle('', existingPermalinks)
           const postUrl = fallbackPost?.url || `${FACEBOOK_PROFILE_URL}#post-${Date.now()}`
           const realPostId = fallbackPost?.id || `fb-${Date.now()}`
-          stepLog('verify', 'Bài viết đã gửi hoàn tất (hộp thoại đã đóng sạch không có lỗi).', 'success')
+          stepLog('verify', '✅ Đã xác nhận đăng bài Facebook hoàn tất!', 'success')
           return {
             ok: true,
             verified: Boolean(fallbackPost),
@@ -628,7 +701,7 @@
         }
       }
 
-      await V().sleep(600)
+      await V().sleep(650)
     }
 
     stepLog('verify', 'Hết thời gian chờ nhưng hộp thoại Facebook vẫn chưa đóng.', 'error')
@@ -684,18 +757,13 @@
     }
   }
 
-  // =========================================================================
-  // QUÉT BÀI VIRAL THỰC TẾ TỪ FACEBOOK FEED (CÓ TỰ CUỘN NẠP DỮ LIỆU)
-  // =========================================================================
-
   async function scrapeFacebookFeed() {
-    // Cuộn nhẹ 2 nhịp để Facebook nạp bài feed thật
     for (let i = 0; i < 2; i++) {
-      window.scrollBy(0, 700)
-      await V().sleep(700)
+      window.scrollBy({ top: 700, behavior: 'smooth' })
+      await V().humanDelay(850, 1400)
     }
-    window.scrollTo(0, 0)
-    await V().sleep(300)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    await V().humanDelay(400, 700)
 
     const posts = []
     const seenTexts = new Set()

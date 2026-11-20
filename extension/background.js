@@ -1,14 +1,11 @@
 /*
   FILE NOTE
-  - Mục đích: Service Worker nền (Manifest V3) điều phối Store-Admin ↔ Facebook ↔ TikTok, quản lý OmniVision AI (Ollama / Gemini / OpenAI), giữ kết nối Persistent Port và chống ngủ SW giữa chừng.
+  - Mục đích: Service Worker nền (Manifest V3) v2.1.0 điều phối Store-Admin ↔ Facebook ↔ TikTok, quản lý OmniVision AI, nhịp delay như người (pacingMode) và Persistent Port.
   - Liên kết trực tiếp: manifest.json, content-admin-bridge.js, vision-engine.js, content-media.js, content-facebook.js, content-tiktok.js, popup.js.
-  - Tương thích ngược 100%: PING, CHECK_STATUS, AUTO_POST, FETCH_REAL_VIRAL.
-  - Tính năng mới v2.0.0:
-    1. Persistent Port ('omnicart-admin-bridge') phát trực tiếp tiến độ từng bước đăng bài về Admin Live Dock.
-    2. Tự bơm lại content-admin-bridge.js vào tab localhost:5174 ngay khi reload extension (không cần F5).
-    3. Hỗ trợ ảnh sản phẩm từ localhost mọi port, đường dẫn tương đối, https CDN và data:image/*.
-    4. Điều hướng tab từ background.js (không bao giờ để content script tự đổi location làm đứt kết nối).
-    5. Multimodal Vision AI (Set-of-Mark + Screenshot hoặc Layout-Only ngầm 100%).
+  - Nâng cấp v2.1.0:
+    1. Thêm cấu hình pacingMode ('normal' | 'careful' | 'fast') đồng bộ realtime tới mọi tab FB/TikTok.
+    2. Chuẩn hóa payload linh hoạt (nhận đủ title, content/caption/description/body, hashtags dạng string hoặc array) và báo rõ độ dài nội dung lên Live Dock.
+    3. Tự động kết nối lại cầu nối Store-Admin và giữ Service Worker thức xuyên suốt tác vụ đăng bài.
 */
 
 const FB_PROFILE_ID = '100037782653708'
@@ -20,18 +17,16 @@ const MAX_PRODUCT_IMAGE_BYTES = 15 * 1024 * 1024
 
 const DEFAULT_VISION_CONFIG = {
   showHud: true,
-  aiMode: 'layout', // 'off' | 'layout' (ngầm 100% không chiếm tab) | 'screenshot' (chụp ảnh màn hình + AI)
+  pacingMode: 'normal', // 'normal' (tự nhiên) | 'careful' (chậm chống quét) | 'fast' (nhanh kiểm thử)
+  aiMode: 'layout', // 'off' | 'layout' | 'screenshot'
   provider: 'ollama', // 'ollama' | 'gemini' | 'openai'
   endpoint: 'http://localhost:11434/api/chat',
   model: 'qwen2.5vl:7b',
   apiKey: ''
 }
 
-// Tập port đang mở tới Store-Admin & Popup
 const adminPorts = new Set()
-// Khóa tác vụ tránh chạy trùng đồng thời trên cùng 1 nền tảng
 const activeJobs = new Map()
-// Bộ đệm log gần nhất để popup & admin tra cứu
 const recentLogs = []
 let keepAliveTimer = null
 
@@ -87,17 +82,15 @@ async function saveVisionConfig(patch) {
   const next = { ...(await getVisionConfig()), ...(patch || {}) }
   await chrome.storage.local.set({ visionConfig: next })
 
-  // Đồng bộ cờ showHud tới các tab Facebook / TikTok đang mở
   const tabs = await chrome.tabs.query({})
   for (const tab of tabs) {
     if (tab.url && (tab.url.includes('facebook.com') || tab.url.includes('tiktok.com'))) {
-      chrome.tabs.sendMessage(tab.id, { type: 'VISION_SET_HUD', enabled: next.showHud }).catch(() => {})
+      chrome.tabs.sendMessage(tab.id, { type: 'VISION_SET_CONFIG', config: next }).catch(() => {})
     }
   }
   return next
 }
 
-// Tự động kết nối lại cầu nối Store-Admin khi cài đặt/reload extension (hết lỗi EXTENSION_CONTEXT_INVALIDATED)
 async function reinjectAdminBridges() {
   try {
     const tabs = await chrome.tabs.query({})
@@ -122,7 +115,6 @@ chrome.runtime.onStartup.addListener(() => {
   reinjectAdminBridges()
 })
 
-// Kết nối Persistent Port từ content-admin-bridge.js và popup.js
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'omnicart-admin-bridge' && port.name !== 'omnicart-popup') return
   adminPorts.add(port)
@@ -167,7 +159,6 @@ chrome.runtime.onConnect.addListener((port) => {
   })
 })
 
-// Helper đợi tab load hoàn tất
 async function waitForTabComplete(tabId, timeoutMs = 15000) {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
@@ -182,15 +173,13 @@ async function waitForTabComplete(tabId, timeoutMs = 15000) {
   throw new Error('TAB_LOAD_TIMEOUT')
 }
 
-// Điều hướng tab an toàn từ background (không giết content script giữa chừng)
-async function navigateTabAndWait(tabId, url, settleMs = 1800) {
+async function navigateTabAndWait(tabId, url, settleMs = 2000) {
   await chrome.tabs.update(tabId, { url })
   await waitForTabComplete(tabId, 20000)
   await new Promise((r) => setTimeout(r, settleMs))
   return await chrome.tabs.get(tabId)
 }
 
-// Gửi message tới content script kèm tự động bơm đủ bộ script nếu cần
 async function sendTabMessageWithRetry(tabId, message, scriptFiles) {
   await waitForTabComplete(tabId)
   try {
@@ -207,7 +196,7 @@ async function sendTabMessageWithRetry(tabId, message, scriptFiles) {
         target: { tabId },
         files: Array.isArray(scriptFiles) ? scriptFiles : [scriptFiles]
       })
-      await new Promise((r) => setTimeout(r, 900))
+      await new Promise((r) => setTimeout(r, 950))
       const retryRes = await chrome.tabs.sendMessage(tabId, message)
       if (retryRes) return retryRes
       throw new Error('NO_CONTENT_SCRIPT_RESPONSE')
@@ -221,7 +210,6 @@ function resolveProductImageUrl(rawValue, senderTabUrl) {
   if (!value) throw new Error('PRODUCT_IMAGE_REQUIRED')
   if (value.startsWith('data:image/')) return value
 
-  // Hỗ trợ đường dẫn tương đối (/uploads/...) từ website Store-Admin
   if (value.startsWith('/')) {
     const base = senderTabUrl ? new URL(senderTabUrl).origin : ADMIN_DEFAULT_ORIGIN
     return `${base}${value}`
@@ -265,7 +253,6 @@ async function loadProductImageDataUrl(imageUrl, senderTabUrl) {
     .trim()
     .toLowerCase()
   if (!contentType.startsWith('image/')) {
-    // Một số server trả application/octet-stream cho file .jpg/.png
     if (/\.(png|jpe?g|webp|gif)(\?|$)/i.test(resolved)) {
       contentType = resolved.toLowerCase().includes('.png') ? 'image/png' : 'image/jpeg'
     } else {
@@ -282,6 +269,18 @@ async function loadProductImageDataUrl(imageUrl, senderTabUrl) {
   return `data:${contentType};base64,${btoa(binary)}`
 }
 
+function normalizeHashtagsField(raw) {
+  if (!raw) return ''
+  if (Array.isArray(raw)) {
+    return raw
+      .map((t) => String(t || '').trim())
+      .filter(Boolean)
+      .map((t) => (t.startsWith('#') ? t : `#${t}`))
+      .join(' ')
+  }
+  return String(raw).trim()
+}
+
 async function preparePostPayload(postData, senderTabUrl) {
   if (!postData || typeof postData !== 'object') throw new Error('POST_DATA_REQUIRED')
   const rawImage = postData.imageDataUrl || postData.imageUrl
@@ -292,8 +291,15 @@ async function preparePostPayload(postData, senderTabUrl) {
     throw new Error('INVALID_PRIVACY')
   }
 
+  const title = String(postData.title || postData.headline || '').trim()
+  const content = String(postData.content || postData.description || postData.caption || postData.body || '').trim()
+  const hashtags = normalizeHashtagsField(postData.hashtags || postData.tags)
+
   return {
     ...postData,
+    title,
+    content,
+    hashtags,
     privacy,
     imageDataUrl: await loadProductImageDataUrl(rawImage, senderTabUrl)
   }
@@ -301,7 +307,6 @@ async function preparePostPayload(postData, senderTabUrl) {
 
 async function findOrCreateFacebookProfileTab() {
   const tabs = await chrome.tabs.query({})
-  // Ưu tiên tab đã ở đúng profile Hoàng Thái HT
   const exactTab = tabs.find((tab) => {
     try {
       const url = new URL(tab.url || '')
@@ -312,10 +317,9 @@ async function findOrCreateFacebookProfileTab() {
   })
   if (exactTab) return exactTab
 
-  // Nếu chưa có, mở mới tab nền tại đúng profile
   const created = await chrome.tabs.create({ url: FB_PROFILE_URL, active: false })
   await waitForTabComplete(created.id, 20000)
-  await new Promise((r) => setTimeout(r, 2000))
+  await new Promise((r) => setTimeout(r, 2200))
   return created
 }
 
@@ -334,7 +338,7 @@ async function findOrCreateTikTokUploadTab() {
 
   const created = await chrome.tabs.create({ url: TIKTOK_UPLOAD_URL, active: false })
   await waitForTabComplete(created.id, 20000)
-  await new Promise((r) => setTimeout(r, 2200))
+  await new Promise((r) => setTimeout(r, 2400))
   return created
 }
 
@@ -360,10 +364,10 @@ function isConfirmedPostResponse(response, platform, requestedPrivacy) {
 // =========================================================================
 
 async function captureTabScreenshotSafely(tabId, allowFocusSwitch = false) {
+  if (!tabId) return null
   const tab = await chrome.tabs.get(tabId)
   if (!tab) return null
 
-  // Nếu tab đã đang active ở cửa sổ hiện tại -> chụp luôn không gây gián đoạn
   if (tab.active) {
     try {
       return await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 68 })
@@ -372,16 +376,14 @@ async function captureTabScreenshotSafely(tabId, allowFocusSwitch = false) {
     }
   }
 
-  // Nếu người dùng không cho phép chuyển tab chớp nhoáng -> chỉ dùng bản đồ Layout không gian (ngầm 100%)
   if (!allowFocusSwitch) return null
 
   const activeTabs = await chrome.tabs.query({ windowId: tab.windowId, active: true })
   const previousTabId = activeTabs[0]?.id
   try {
     await chrome.tabs.update(tabId, { active: true })
-    await new Promise((r) => setTimeout(r, 240))
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 68 })
-    return dataUrl
+    await new Promise((r) => setTimeout(r, 260))
+    return await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 68 })
   } catch (_) {
     return null
   } finally {
@@ -488,17 +490,13 @@ async function analyzeWithVisionAI({ tabId, goal, platform, step, somMap }) {
         signal: controller.signal,
         body: JSON.stringify({
           contents: [{ parts }],
-          generationConfig: {
-            temperature: 0.1,
-            responseMimeType: 'application/json'
-          }
+          generationConfig: { temperature: 0.1, responseMimeType: 'application/json' }
         })
       })
       if (!res.ok) throw new Error(`GEMINI_HTTP_${res.status}`)
       const data = await res.json()
       rawContent = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
     } else {
-      // OpenAI / LM Studio / OpenRouter compatible
       const endpoint = config.endpoint || 'https://api.openai.com/v1/chat/completions'
       const headers = { 'Content-Type': 'application/json' }
       if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`
@@ -528,7 +526,7 @@ async function analyzeWithVisionAI({ tabId, goal, platform, step, somMap }) {
       platform,
       step: 'vision-ai',
       level: 'info',
-      message: `🧠 Vision AI (${config.provider}): ${parsed.reason || parsed.screenState} [mark=${parsed.targetMarkId ?? 'none'}, conf=${parsed.confidence ?? '?'}]`
+      message: `🧠 Vision AI (${config.provider}): ${parsed.reason || parsed.screenState} [mark=${parsed.targetMarkId ?? 'none'}]`
     })
 
     return {
@@ -577,7 +575,7 @@ async function testVisionAIConnection() {
     ok: false,
     provider: config.provider,
     error: result.error,
-    message: `Không kết nối được Vision AI (${config.provider}): ${result.error}. Hệ thống vẫn chạy tốt bằng OmniVision Hình học.`
+    message: `Không kết nối được Vision AI (${config.provider}): ${result.error}. Hệ thống vẫn chạy ổn định bằng OmniVision Hình học.`
   }
 }
 
@@ -590,32 +588,37 @@ async function executeFacebookPost(postData, senderTabUrl) {
     return { ok: false, error: 'FACEBOOK_JOB_ALREADY_RUNNING' }
   }
 
-  const jobInfo = { platform: 'facebook', startedAt: new Date().toISOString(), step: 'init' }
-  activeJobs.set('facebook', jobInfo)
+  activeJobs.set('facebook', { platform: 'facebook', startedAt: new Date().toISOString(), step: 'init' })
   ensureKeepAlive()
 
   try {
-    pushLog({ platform: 'facebook', step: 'prepare', level: 'info', message: 'Đang chuẩn bị ảnh sản phẩm & nội dung đăng Facebook...' })
+    const config = await getVisionConfig()
+    pushLog({ platform: 'facebook', step: 'prepare', level: 'info', message: `Chuẩn bị ảnh & nội dung Facebook (tốc độ: ${config.pacingMode})...` })
     const preparedPost = await preparePostPayload(postData, senderTabUrl)
 
-    pushLog({ platform: 'facebook', step: 'tab', level: 'info', message: 'Đang kiểm tra tab Facebook Hoàng Thái HT...' })
+    pushLog({
+      platform: 'facebook',
+      step: 'tab',
+      level: 'info',
+      message: `Mở tab Facebook Hoàng Thái HT (tiêu đề ${preparedPost.title.length}c, nội dung ${preparedPost.content.length}c, hashtag ${preparedPost.hashtags.length}c)...`
+    })
     let fbTab = await findOrCreateFacebookProfileTab()
-
-    // Nếu tab bị chuyển trang khác -> điều hướng sạch từ background
     if (!fbTab.url || !fbTab.url.includes(FB_PROFILE_ID)) {
-      fbTab = await navigateTabAndWait(fbTab.id, FB_PROFILE_URL, 2200)
+      fbTab = await navigateTabAndWait(fbTab.id, FB_PROFILE_URL, 2400)
     }
 
     const scripts = ['vision-engine.js', 'content-media.js', 'content-facebook.js']
+    // Đồng bộ cấu hình pacingMode trước khi chạy
+    chrome.tabs.sendMessage(fbTab.id, { type: 'VISION_SET_CONFIG', config }).catch(() => {})
+
     let response = await sendTabMessageWithRetry(fbTab.id, {
       type: 'FB_EXECUTE_POST',
       payload: preparedPost
     }, scripts)
 
-    // Nếu content script yêu cầu điều hướng lại (ví dụ trang đang bị kẹt ở màn khác)
     if (response?.needsNavigation && response.targetUrl) {
-      pushLog({ platform: 'facebook', step: 'navigate', level: 'warn', message: 'Chuyển tab về đúng trang cá nhân Hoàng Thái HT...' })
-      fbTab = await navigateTabAndWait(fbTab.id, response.targetUrl, 2500)
+      pushLog({ platform: 'facebook', step: 'navigate', level: 'warn', message: 'Điều hướng tab về đúng trang cá nhân Hoàng Thái HT...' })
+      fbTab = await navigateTabAndWait(fbTab.id, response.targetUrl, 2600)
       response = await sendTabMessageWithRetry(fbTab.id, {
         type: 'FB_EXECUTE_POST',
         payload: preparedPost
@@ -630,7 +633,7 @@ async function executeFacebookPost(postData, senderTabUrl) {
       return { ok: false, error: errMsg, visionTrace: response?.visionTrace || [] }
     }
 
-    pushLog({ platform: 'facebook', step: 'done', level: 'success', message: `✅ Đã đăng Facebook thành công (${response.privacy})!` })
+    pushLog({ platform: 'facebook', step: 'done', level: 'success', message: `✅ Đã đăng bài Facebook thành công (${response.privacy})!` })
     return response
   } catch (err) {
     pushLog({ platform: 'facebook', step: 'error', level: 'error', message: `Lỗi Facebook: ${err.message}` })
@@ -646,22 +649,28 @@ async function executeTikTokPost(postData, senderTabUrl) {
     return { ok: false, error: 'TIKTOK_JOB_ALREADY_RUNNING' }
   }
 
-  const jobInfo = { platform: 'tiktok', startedAt: new Date().toISOString(), step: 'init' }
-  activeJobs.set('tiktok', jobInfo)
+  activeJobs.set('tiktok', { platform: 'tiktok', startedAt: new Date().toISOString(), step: 'init' })
   ensureKeepAlive()
 
   try {
-    pushLog({ platform: 'tiktok', step: 'prepare', level: 'info', message: 'Đang chuẩn bị ảnh sản phẩm & nội dung đăng TikTok...' })
+    const config = await getVisionConfig()
+    pushLog({ platform: 'tiktok', step: 'prepare', level: 'info', message: `Chuẩn bị ảnh & nội dung TikTok (tốc độ: ${config.pacingMode})...` })
     const preparedPost = await preparePostPayload(postData, senderTabUrl)
 
-    pushLog({ platform: 'tiktok', step: 'tab', level: 'info', message: 'Đang mở / kiểm tra tab TikTok Studio Upload...' })
+    pushLog({
+      platform: 'tiktok',
+      step: 'tab',
+      level: 'info',
+      message: `Mở tab TikTok Studio (tiêu đề ${preparedPost.title.length}c, mô tả ${preparedPost.content.length}c, hashtag ${preparedPost.hashtags.length}c)...`
+    })
     let ttTab = await findOrCreateTikTokUploadTab()
-
     if (!ttTab.url || !/\/(tiktokstudio\/upload|creator-center\/upload|upload)/i.test(ttTab.url)) {
-      ttTab = await navigateTabAndWait(ttTab.id, TIKTOK_UPLOAD_URL, 2400)
+      ttTab = await navigateTabAndWait(ttTab.id, TIKTOK_UPLOAD_URL, 2600)
     }
 
     const scripts = ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
+    chrome.tabs.sendMessage(ttTab.id, { type: 'VISION_SET_CONFIG', config }).catch(() => {})
+
     let response = await sendTabMessageWithRetry(ttTab.id, {
       type: 'TIKTOK_EXECUTE_POST',
       payload: preparedPost
@@ -669,7 +678,7 @@ async function executeTikTokPost(postData, senderTabUrl) {
 
     if (response?.needsNavigation && response.targetUrl) {
       pushLog({ platform: 'tiktok', step: 'navigate', level: 'warn', message: 'Làm mới trang TikTok Studio Upload...' })
-      ttTab = await navigateTabAndWait(ttTab.id, response.targetUrl, 2600)
+      ttTab = await navigateTabAndWait(ttTab.id, response.targetUrl, 2800)
       response = await sendTabMessageWithRetry(ttTab.id, {
         type: 'TIKTOK_EXECUTE_POST',
         payload: preparedPost
@@ -684,7 +693,7 @@ async function executeTikTokPost(postData, senderTabUrl) {
       return { ok: false, error: errMsg, visionTrace: response?.visionTrace || [] }
     }
 
-    pushLog({ platform: 'tiktok', step: 'done', level: 'success', message: `✅ Đã đăng TikTok (@harutv666) thành công (${response.privacy})!` })
+    pushLog({ platform: 'tiktok', step: 'done', level: 'success', message: `✅ Đã đăng bài TikTok (@harutv666) đầy đủ nội dung & hashtag!` })
     return response
   } catch (err) {
     pushLog({ platform: 'tiktok', step: 'error', level: 'error', message: `Lỗi TikTok: ${err.message}` })
@@ -755,10 +764,6 @@ async function inspectPlatformTab(platform) {
   return { ok: true, platform, tabId: tab.id, url: tab.url, inspection: res }
 }
 
-// =========================================================================
-// BỘ ĐỊNH TUYẾN LỆNH CHUNG (Dùng cho cả sendMessage & Persistent Port)
-// =========================================================================
-
 async function dispatchCommand(message, sender = {}) {
   const type = message?.type
   switch (type) {
@@ -770,7 +775,8 @@ async function dispatchCommand(message, sender = {}) {
         version: getExtensionVersion(),
         visionEnabled: true,
         visionAiMode: vision.aiMode,
-        capabilities: ['spatial_vision', 'som_ai_vision', 'persistent_bridge', 'facebook_v2', 'tiktok_photo_v2']
+        pacingMode: vision.pacingMode,
+        capabilities: ['spatial_vision', 'som_ai_vision', 'human_pacing', 'persistent_bridge', 'facebook_v2_1', 'tiktok_photo_v2_1']
       }
     }
 
@@ -836,34 +842,27 @@ async function dispatchCommand(message, sender = {}) {
       return { ok: true }
     }
 
-    case 'GET_VISION_CONFIG': {
+    case 'GET_VISION_CONFIG':
       return { ok: true, config: await getVisionConfig() }
-    }
 
-    case 'SAVE_VISION_CONFIG': {
-      const saved = await saveVisionConfig(message.config || {})
-      return { ok: true, config: saved }
-    }
+    case 'SAVE_VISION_CONFIG':
+      return { ok: true, config: await saveVisionConfig(message.config || {}) }
 
-    case 'TEST_VISION_AI': {
+    case 'TEST_VISION_AI':
       return await testVisionAIConnection()
-    }
 
-    case 'INSPECT_TAB': {
-      const platform = String(message.platform || 'tiktok').toLowerCase()
-      return await inspectPlatformTab(platform)
-    }
+    case 'INSPECT_TAB':
+      return await inspectPlatformTab(String(message.platform || 'tiktok').toLowerCase())
 
-    case 'GET_LIVE_LOGS': {
+    case 'GET_LIVE_LOGS':
       return { ok: true, logs: recentLogs.slice(0, 30), activeJobs: Array.from(activeJobs.values()) }
-    }
 
     case 'CANCEL_JOB': {
       const platform = String(message.platform || '').toLowerCase()
       if (platform) activeJobs.delete(platform)
       else activeJobs.clear()
       ensureKeepAlive()
-      pushLog({ platform: platform || 'system', step: 'cancelled', level: 'warn', message: 'Đã reset khóa tác vụ theo yêu cầu.' })
+      pushLog({ platform: platform || 'system', step: 'cancelled', level: 'warn', message: 'Đã mở khóa hàng đợi tác vụ theo yêu cầu.' })
       return { ok: true }
     }
 
