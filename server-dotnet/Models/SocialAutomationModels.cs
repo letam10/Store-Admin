@@ -165,6 +165,14 @@ public sealed class PublishRealPostRequest
     public int CommentsCount { get; set; }
 }
 
+public sealed class PublishFailureRequest
+{
+    public string? Status { get; set; }
+    public string? ErrorMessage { get; set; }
+    public string? PostUrl { get; set; }
+    public string? RealPostId { get; set; }
+}
+
 public sealed class ImportRealViralRequest
 {
     public List<SocialViralPost>? Posts { get; set; }

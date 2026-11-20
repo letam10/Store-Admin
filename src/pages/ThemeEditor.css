@@ -1,6 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Định kiểu giao diện cho trang ThemeEditor, bao gồm tab Banner hai bên, khung tìm kiếm sản phẩm, modal chọn sản phẩm và xem trước banner.
+  - Mục đích: Định kiểu giao diện cho trang ThemeEditor, bao gồm tab Banner hai bên, lưới banner bằng nhau 1fr, chế độ thu gọn/chi tiết, xem trước đồng bộ theo Store Theme và tương phản Dark/Light mode.
   - Liên kết trực tiếp: Store-Admin/src/pages/ThemeEditor.jsx, Store-Admin/test/side-banners.test.js.
   - Vùng ảnh hưởng khi sửa: Giao diện ThemeEditor và tab Banner hai bên trong Store-Admin.
 */
@@ -30,17 +30,27 @@ html[data-admin-theme] .admin-workspace-card .theme-preview button { color: var(
 .side-banner-count-shared label{display:flex;align-items:center;gap:8px;color:var(--theme-text,#18362a);font-size:13px;font-weight:800;white-space:nowrap}
 .side-banner-count-shared label select{width:auto;box-sizing:border-box;border:1px solid var(--theme-border,#d6e3d8);border-radius:var(--radius-control,10px);padding:9px;background:var(--theme-control,#fff);color:var(--theme-text,#18362a);font:inherit;font-size:12px}
 .side-banner-count-shared p{margin:0;color:var(--theme-muted,#5a6d61);font-size:12px;line-height:1.5}
-.side-banner-sync{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:10px;align-items:stretch;border:1px solid var(--theme-border,#d6e3d8);border-radius:var(--radius-card,16px);padding:12px;background:var(--theme-surface,#fff)}
+.side-banner-sync-wrapper{display:grid;gap:8px}
+.side-banner-sync{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:10px;align-items:stretch;border:1px solid var(--theme-border,#d6e3d8);border-radius:var(--radius-card,16px);padding:12px;background:var(--theme-surface,#fff);max-height:480px;overflow-y:auto;scroll-behavior:smooth;overscroll-behavior:contain}
 .side-banner-sync-column{display:grid;grid-auto-rows:44px;gap:6px;align-content:start}
-.side-banner-sync-column h4{margin:0 0 2px;color:var(--theme-text,#18362a);font-size:12px}
-.side-banner-sync-card{display:flex;align-items:center;gap:8px;height:44px;box-sizing:border-box;padding:0 10px;border:1px solid var(--theme-border,#d6e3d8);border-radius:10px;font-size:11px;overflow:hidden;white-space:nowrap}
+.side-banner-sync-column h4{margin:0 0 2px;color:var(--theme-text,#18362a);font-size:12px;position:sticky;top:0;z-index:2;background:inherit;display:flex;align-items:center;justify-content:space-between}
+.side-banner-sync-card{display:flex;align-items:center;gap:8px;height:44px;box-sizing:border-box;padding:0 10px;border:1px solid var(--theme-border,#d6e3d8);border-radius:10px;font-size:11px;overflow:hidden;white-space:nowrap;cursor:pointer;transition:transform .15s ease,box-shadow .15s ease}
+.side-banner-sync-card:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.12)}
+.side-banner-sync-card:focus-visible{outline:2px solid var(--theme-accent,#4f8b67);outline-offset:2px}
 .side-banner-sync-card.is-empty{opacity:.75;border-style:dashed}
 .side-banner-sync-card-index{flex:0 0 auto;font-weight:800}
+.side-banner-sync-card-thumb{width:28px;height:28px;object-fit:contain;border-radius:6px;background:var(--theme-control,#fff);border:1px solid var(--theme-border,#d6e3d8);flex-shrink:0}
+.side-banner-sync-card-thumb-empty{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:rgba(125,125,125,.12);color:var(--theme-muted,#5a6d61);font-size:11px;font-weight:700;flex-shrink:0}
+.side-banner-sync-count{font-size:10px;font-weight:600;color:var(--theme-muted,#5a6d61)}
 .side-banner-sync-card-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .side-banner-sync-card-price{flex:0 0 auto;font-weight:800}
 .side-banner-sync-sale{display:flex;align-items:stretch;justify-content:center}
 .side-banner-sync-sale span{display:flex;align-items:center;writing-mode:vertical-rl;padding:12px 6px;border:1px dashed var(--theme-accent,#4f8b67);border-radius:10px;color:var(--theme-accent-strong,#2f6847);font-size:11px;font-weight:800;letter-spacing:.08em}
 .side-banner-sync-note{margin:0;color:var(--theme-muted,#5a6d61);font-size:11px;line-height:1.5}
+.side-banner-sync::-webkit-scrollbar{width:6px}
+.side-banner-sync::-webkit-scrollbar-track{background:transparent}
+.side-banner-sync::-webkit-scrollbar-thumb{background:var(--theme-border,#d6e3d8);border-radius:999px}
+.side-banner-sync::-webkit-scrollbar-thumb:hover{background:var(--theme-accent,#4f8b67)}
 .side-banner-warning{margin:0;color:var(--theme-danger,#a33);font-size:12px;line-height:1.5}
 .side-banner-column{min-width:0;border:1px solid var(--theme-border,#d6e3d8);border-radius:var(--radius-card,16px);padding:14px}
 .side-banner-column legend{padding:0 6px;color:var(--theme-muted,#5a6d61);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
@@ -576,4 +586,303 @@ html[data-admin-theme="dark"] .side-banner-modal-head,
 html[data-admin-theme="dark"] .side-banner-modal-controls {
   border-color: #244833;
   background: #0d1e15;
+}
+
+/* Thanh bộ lọc & Tìm kiếm nhanh slot & Chế độ xem (Thu gọn / Mở rộng) */
+.side-banner-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  border: 1px solid var(--theme-border, #d6e3d8);
+  border-radius: var(--radius-card, 16px);
+  padding: 10px 14px;
+  background: var(--theme-surface, #fff);
+  margin: 12px 0 6px;
+}
+.side-banner-filter-search-wrap {
+  position: relative;
+  flex: 1 1 240px;
+  min-width: 200px;
+}
+.side-banner-filter-search {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--theme-border, #d6e3d8);
+  border-radius: var(--radius-control, 10px);
+  padding: 8px 30px 8px 12px;
+  background: var(--theme-control, #fff);
+  color: var(--theme-text, #18362a);
+  font: inherit;
+  font-size: 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.side-banner-filter-search:focus {
+  border-color: var(--theme-accent, #4f8b67);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(79, 139, 103, 0.2);
+}
+.side-banner-filter-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: var(--theme-muted, #5a6d61);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.side-banner-filter-chips {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.side-banner-view-mode-group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.side-banner-filter-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--theme-muted, #5a6d61);
+  background: var(--theme-surface-alt, #f0f7f2);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+/* Chế độ Thu gọn (Compact View): thẻ hàng ngang nhỏ gọn có thumbnail, số thứ tự, tên sản phẩm, giá, trạng thái, nút sửa nhanh */
+.side-banner-slots.is-compact {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: auto;
+  gap: 8px;
+}
+.side-banner-slot--compact {
+  display: flex !important;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  height: auto !important;
+  min-height: 52px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  box-sizing: border-box;
+  transition: all 0.15s ease;
+}
+.side-banner-slot--compact:hover {
+  border-color: var(--theme-accent, #4f8b67);
+  background: var(--theme-surface-alt, #f4faf6);
+}
+.side-banner-compact-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+.side-banner-compact-index {
+  font-weight: 800;
+  font-size: 11px;
+  color: var(--theme-accent-strong, #2f6847);
+  background: var(--theme-surface-alt, #e8f5ec);
+  padding: 3px 6px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.side-banner-compact-thumb {
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+  background: var(--theme-control, #fff);
+  border: 1px solid var(--theme-border, #d6e3d8);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.side-banner-compact-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.side-banner-compact-thumb-empty {
+  font-size: 11px;
+  color: var(--theme-muted, #5a6d61);
+}
+.side-banner-compact-info {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.side-banner-compact-info strong {
+  font-size: 12px;
+  color: var(--theme-text, #18362a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-banner-compact-meta {
+  font-size: 11px;
+  color: var(--theme-muted, #5a6d61);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-banner-compact-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.side-banner-color-indicator {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--theme-border, #d6e3d8);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
+}
+.side-banner-action-btn--sm {
+  padding: 5px 9px;
+  font-size: 11px;
+  border-radius: 8px;
+}
+.side-banner-slot-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Nổi bật và cuộn mượt khi bấm vào thẻ xem trước */
+.side-banner-slot.is-highlighted,
+.side-banner-slot--compact.is-highlighted {
+  animation: sideBannerSlotPulse 2s ease-in-out forwards;
+  border-color: var(--theme-accent, #4f8b67) !important;
+  box-shadow: 0 0 0 3px rgba(79, 139, 103, 0.35), 0 8px 24px rgba(79, 139, 103, 0.2) !important;
+}
+@keyframes sideBannerSlotPulse {
+  0% {
+    transform: scale(1.02);
+    box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.6), 0 10px 28px rgba(74, 222, 128, 0.3);
+  }
+  50% {
+    transform: scale(1.01);
+    box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.4), 0 6px 18px rgba(0, 0, 0, 0.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Tương thích hoàn hảo Dark Mode (Nền tối dịu mắt #14281f / #1c3829, chữ sáng #e2f0e6, viền xanh ngọc tinh tế) */
+html[data-admin-theme="dark"] .side-banner-filter-bar {
+  background: #0f2218;
+  border-color: #244833;
+}
+html[data-admin-theme="dark"] .side-banner-filter-search {
+  background: #091610;
+  border-color: #244d35;
+  color: #eef8f1;
+}
+html[data-admin-theme="dark"] .side-banner-filter-search:focus {
+  border-color: #4ade80;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.22);
+}
+html[data-admin-theme="dark"] .side-banner-filter-summary {
+  background: #14281f;
+  color: #8bbfa0;
+}
+html[data-admin-theme="dark"] .side-banner-slot--compact {
+  background: #0f2218;
+  border-color: #244833;
+}
+html[data-admin-theme="dark"] .side-banner-slot--compact:hover {
+  background: #14281f;
+  border-color: #4ade80;
+}
+html[data-admin-theme="dark"] .side-banner-compact-index {
+  background: #1b3d29;
+  color: #8ce3a8;
+}
+html[data-admin-theme="dark"] .side-banner-compact-thumb {
+  background: #14281f;
+  border-color: #244833;
+}
+html[data-admin-theme="dark"] .side-banner-compact-thumb-empty {
+  color: #8bbfa0;
+}
+html[data-admin-theme="dark"] .side-banner-compact-info strong {
+  color: #daf0e0;
+}
+html[data-admin-theme="dark"] .side-banner-compact-meta {
+  color: #8bbfa0;
+}
+html[data-admin-theme="dark"] .side-banner-sync-card {
+  background: var(--theme-surface, #14281f);
+  color: var(--theme-text, #e2f0e6);
+  border-color: var(--theme-border, #284c37);
+}
+html[data-admin-theme="dark"] .side-banner-sync-card-thumb {
+  background: var(--theme-page, #0f2218);
+  border-color: var(--theme-border, #244833);
+}
+html[data-admin-theme="dark"] .side-banner-sync-card-thumb-empty {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--theme-muted, #8bbfa0);
+}
+html[data-admin-theme="dark"] .side-banner-sync::-webkit-scrollbar-thumb {
+  background: var(--theme-border, #244833);
+}
+html[data-admin-theme="dark"] .side-banner-sync::-webkit-scrollbar-thumb:hover {
+  background: var(--theme-accent, #4ade80);
+}
+html[data-admin-theme="dark"] .side-banner-sync-column h4 {
+  background: var(--theme-page, #0f2218);
+  color: var(--theme-text, #daf0e0);
+}
+html[data-admin-theme="dark"] .side-banner-mini-preview {
+  background: var(--theme-surface, #14281f);
+  color: var(--theme-text, #e2f0e6);
+  border-color: var(--theme-border, #284c37);
+}
+html[data-admin-theme="dark"] .side-banner-badge.is-customized {
+  background: #1b3d29;
+  color: #8ce3a8;
+}
+html[data-admin-theme="dark"] .side-banner-badge.is-empty {
+  background: #162a20;
+  color: #8bbfa0;
+}
+
+@media (max-width: 900px) {
+  .side-banner-slots.is-compact {
+    grid-template-columns: 1fr;
+  }
+  .side-banner-filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+@media (max-width: 560px) {
+  .side-banner-slot--compact {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .side-banner-compact-right {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
 }

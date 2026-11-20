@@ -1,6 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Cung cấp các phương thức truy cập dữ liệu SQL Server cho hệ thống Tự động hóa đăng bài Mạng Xã Hội (cài đặt chu kỳ 30 giây / phút / giờ, quyền riêng tư chỉ mình tôi / công khai, liên kết đích trang cá nhân Facebook chính thức John Harper https://www.facebook.com/profile.php?id=61580644871703, TikTok @harutv666, xuất bản bài thật qua Extension và lưu bài viral thật).
+  - Mục đích: Cung cấp các phương thức truy cập dữ liệu SQL Server cho hệ thống Tự động hóa đăng bài Mạng Xã Hội (cài đặt chu kỳ, quyền riêng tư dùng chung, Facebook Hoàng Thái HT, TikTok @harutv666, lưu trạng thái đăng bài đã xác nhận).
   - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.cs, Store-Admin/server-dotnet/Models/SocialAutomationModels.cs, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs, Store-Admin/server-dotnet/Services/SocialAutoPostWorker.cs
   - Vùng ảnh hưởng khi sửa: Tầng lưu trữ dữ liệu chiến dịch MXH, bảng audit logs đăng bài, nhóm Facebook mục tiêu và bảng theo dõi bài hot.
 */
@@ -180,18 +180,13 @@ public sealed partial class StoreDb
                OR group_url LIKE '%meovat%' 
                OR members_count > 10000;
 
-            -- Cập nhật hoặc chuẩn hóa liên kết nhóm/trang sang trang cá nhân Facebook chính thức John Harper
+            -- Cập nhật hoặc chuẩn hóa nhóm mẫu sang tài khoản Facebook Hoàng Thái HT
             UPDATE social_group_targets
-            SET group_name = N'Trang cá nhân Facebook chính thức (John Harper)',
-                group_url = 'https://www.facebook.com/profile.php?id=61580644871703',
+            SET group_name = N'Trang cá nhân Facebook Hoàng Thái HT',
+                group_url = 'https://www.facebook.com/profile.php?id=100037782653708',
                 category = N'Trang cá nhân',
                 notes = N'Trang cá nhân Facebook chính thức của quản trị viên'
             WHERE group_url LIKE '%facebook.com/groups/%' OR id LIKE 'grp-sample-%';
-
-            -- Đảm bảo tất cả các bài Facebook đã xuất bản trỏ tới trang cá nhân chính thức thay vì link rỗng hoặc fake groups
-            UPDATE social_auto_posts
-            SET post_url = 'https://www.facebook.com/profile.php?id=61580644871703'
-            WHERE platform = 'facebook' AND (post_url IS NULL OR post_url LIKE '%facebook.com/groups/%' OR post_url NOT LIKE '%profile.php?id=61580644871703%');
 
             -- Chuẩn hóa bài viral TikTok về kênh chính thức @harutv666
             UPDATE social_viral_posts
@@ -206,8 +201,8 @@ public sealed partial class StoreDb
                 INSERT INTO social_group_targets (
                     id, group_name, group_url, category, members_count, interaction_rate, status, is_auto_share, notes, created_at
                 ) VALUES
-                ('grp-sample-01', N'Trang cá nhân Facebook chính thức (John Harper)', 'https://www.facebook.com/profile.php?id=61580644871703', N'Trang cá nhân', 0, N'Rất cao', 'active', 1, N'Trang cá nhân Facebook chính thức của quản trị viên kết nối đăng bài', CONVERT(NVARCHAR(30), GETUTCDATE(), 126)),
-                ('grp-sample-02', N'Cộng Đồng Mua Sắm Tiện Ích & Săn Deal Hời', 'https://www.facebook.com/profile.php?id=61580644871703', N'Khuyến mãi & Mua sắm', 0, N'Bình thường', 'active', 1, N'Kênh mục tiêu chia sẻ bài đăng ưu đãi sản phẩm', CONVERT(NVARCHAR(30), GETUTCDATE(), 126));
+                ('grp-sample-01', N'Trang cá nhân Facebook Hoàng Thái HT', 'https://www.facebook.com/profile.php?id=100037782653708', N'Trang cá nhân', 0, N'Rất cao', 'active', 1, N'Trang cá nhân Facebook kết nối đăng bài', CONVERT(NVARCHAR(30), GETUTCDATE(), 126)),
+                ('grp-sample-02', N'Cộng Đồng Mua Sắm Tiện Ích & Săn Deal Hời', 'https://www.facebook.com/profile.php?id=100037782653708', N'Khuyến mãi & Mua sắm', 0, N'Bình thường', 'active', 1, N'Kênh mục tiêu chia sẻ bài đăng ưu đãi sản phẩm', CONVERT(NVARCHAR(30), GETUTCDATE(), 126));
             END;
 
             IF NOT EXISTS (SELECT 1 FROM social_viral_posts)
@@ -215,7 +210,7 @@ public sealed partial class StoreDb
                 INSERT INTO social_viral_posts (
                     id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, created_at
                 ) VALUES
-                ('viral-ref-01', N'Mẹo sắp xếp đồ dùng gia đình gọn gàng trong 15 phút', 'facebook', N'Đồ gia dụng', 'https://www.facebook.com/profile.php?id=61580644871703', N'Mẫu ý tưởng nội dung hữu ích gắn liền với đời sống hàng ngày.', 85, 0, 0, 0, N'Lối sống tiện lợi', CONVERT(NVARCHAR(30), GETUTCDATE(), 126)),
+                ('viral-ref-01', N'Mẹo sắp xếp đồ dùng gia đình gọn gàng trong 15 phút', 'facebook', N'Đồ gia dụng', 'https://www.facebook.com/profile.php?id=100037782653708', N'Mẫu ý tưởng nội dung hữu ích gắn liền với đời sống hàng ngày.', 85, 0, 0, 0, N'Lối sống tiện lợi', CONVERT(NVARCHAR(30), GETUTCDATE(), 126)),
                 ('viral-ref-02', N'Đập hộp và trải nghiệm nhanh phụ kiện công nghệ tiện ích', 'tiktok', N'Công nghệ', 'https://www.tiktok.com/@harutv666', N'Mẫu kịch bản video ngắn review công năng thực tế.', 80, 0, 0, 0, N'Review chân thật', CONVERT(NVARCHAR(30), GETUTCDATE(), 126));
             END;
             """);
@@ -572,6 +567,29 @@ public sealed partial class StoreDb
         return command.ExecuteNonQuery() > 0;
     }
 
+    public bool MarkSocialPostPublishFailure(string id, string status, string errorMessage, string? postUrl)
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = """
+            UPDATE social_auto_posts
+            SET status = @status,
+                error_message = @error_message,
+                post_url = @post_url,
+                published_time = NULL,
+                likes_count = 0,
+                shares_count = 0,
+                comments_count = 0,
+                views_count = 0
+            WHERE id = @id AND status <> 'published';
+            """;
+        command.Parameters.Add(new SqlParameter("@id", SqlDbType.NVarChar, 100) { Value = id });
+        command.Parameters.Add(new SqlParameter("@status", SqlDbType.NVarChar, 50) { Value = status });
+        command.Parameters.Add(new SqlParameter("@error_message", SqlDbType.NVarChar, -1) { Value = errorMessage });
+        command.Parameters.Add(new SqlParameter("@post_url", SqlDbType.NVarChar, 500) { Value = (object?)postUrl ?? DBNull.Value });
+        return command.ExecuteNonQuery() > 0;
+    }
+
     public bool DeleteSocialPost(string id)
     {
         using var db = Open();
@@ -872,7 +890,7 @@ public sealed partial class StoreDb
             var score = 88;
 
             var postUrl = tpl.Platform == "facebook"
-                ? "https://www.facebook.com/profile.php?id=61580644871703"
+                ? "https://www.facebook.com/profile.php?id=100037782653708"
                 : "https://www.tiktok.com/@harutv666";
 
             var post = new SocialViralPost

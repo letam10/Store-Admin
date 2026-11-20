@@ -1,62 +1,88 @@
 <!--
   FILE NOTE
-  - Mục đích: Giao diện Popup của Chrome Extension OmniCart Social Bridge, hiển thị trạng thái kết nối 3 tab, thông tin tài khoản Facebook John Harper / TikTok @harutv666 và nút kích hoạt nhanh.
-  - Liên kết trực tiếp: Store-Admin/extension/manifest.json, Store-Admin/extension/popup.js, Store-Admin/extension/background.js.
-  - Vùng ảnh hưởng khi sửa: Menu popup khi bấm vào icon Extension trên thanh công cụ trình duyệt.
+  - Mục đích: Trung tâm điều khiển OmniVision v2.0 trên Popup Chrome Extension.
+  - Liên kết trực tiếp: manifest.json, popup.js, background.js.
 -->
 <!DOCTYPE html>
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>OmniCart Social Bridge</title>
+  <title>OmniCart OmniVision Bridge</title>
   <style>
+    * { box-sizing: border-box; }
     body {
-      width: 320px;
+      width: 356px;
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      font-size: 13px;
-      color: #1e293b;
-      background: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 12.5px;
+      color: #e2f8ec;
+      background: #071710;
     }
     .header {
-      background: #102a1e;
-      color: #edf7ef;
-      padding: 12px 16px;
+      background: linear-gradient(135deg, #0d2b1d, #13422b);
+      padding: 12px 14px;
       display: flex;
       align-items: center;
       gap: 8px;
+      border-bottom: 1px solid #1e593c;
     }
     .header h2 {
       margin: 0;
       font-size: 14px;
-      font-weight: 600;
+      font-weight: 700;
+      color: #f0fdf4;
     }
-    .badge-mv3 {
+    .badge {
       font-size: 10px;
-      background: #28543a;
-      color: #9fe2bf;
-      padding: 2px 6px;
-      border-radius: 4px;
+      font-weight: 700;
+      background: #14532d;
+      color: #86efac;
+      border: 1px solid #22c55e66;
+      padding: 2px 7px;
+      border-radius: 999px;
       margin-left: auto;
     }
-    .content {
-      padding: 12px 16px;
+    .tabs {
       display: flex;
-      flex-direction: column;
-      gap: 12px;
+      background: #0a2016;
+      border-bottom: 1px solid #18442f;
     }
+    .tab-btn {
+      flex: 1;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #94a3b8;
+      padding: 9px 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .tab-btn.active {
+      color: #4ade80;
+      border-bottom-color: #22c55e;
+      background: #0d291c;
+    }
+    .panel {
+      display: none;
+      padding: 12px 14px;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .panel.active { display: flex; }
     .card {
-      background: #ffffff;
-      border: 1px solid #e2e8f0;
-      border-radius: 8px;
+      background: #0c2318;
+      border: 1px solid #1b4d35;
+      border-radius: 9px;
       padding: 10px 12px;
     }
     .card-title {
-      font-size: 11px;
+      font-size: 10.5px;
       font-weight: 700;
       text-transform: uppercase;
-      color: #64748b;
-      margin-bottom: 6px;
+      letter-spacing: 0.4px;
+      color: #6ee7b7;
+      margin-bottom: 7px;
     }
     .profile-item {
       display: flex;
@@ -64,109 +90,205 @@
       justify-content: space-between;
       margin-bottom: 6px;
     }
-    .profile-item:last-child {
-      margin-bottom: 0;
-    }
-    .profile-name {
-      font-weight: 600;
-      color: #0f172a;
-    }
-    .profile-sub {
-      font-size: 11px;
-      color: #64748b;
-    }
-    .status-dot {
+    .profile-item:last-child { margin-bottom: 0; }
+    .profile-name { font-weight: 600; color: #f8fafc; }
+    .profile-sub { font-size: 11px; color: #94a3b8; }
+    .dot {
       display: inline-block;
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: #10b981;
-      margin-right: 4px;
+      background: #22c55e;
+      margin-right: 5px;
     }
     .actions {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 7px;
     }
-    button {
-      background: #102a1e;
-      color: #ffffff;
+    .row-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px;
+    }
+    button.btn {
+      background: #16a34a;
+      color: #04130b;
       border: none;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-weight: 600;
+      padding: 8px 10px;
+      border-radius: 7px;
+      font-weight: 700;
       cursor: pointer;
       font-size: 12px;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 6px;
+      gap: 5px;
     }
-    button:hover {
-      background: #163e2c;
-    }
+    button.btn:hover { background: #22c55e; }
     button.btn-secondary {
-      background: #f1f5f9;
-      color: #334155;
-      border: 1px solid #cbd5e1;
+      background: #102e20;
+      color: #d1fae5;
+      border: 1px solid #245c40;
     }
-    button.btn-secondary:hover {
-      background: #e2e8f0;
+    button.btn-secondary:hover { background: #163d2b; }
+    button.btn-warn {
+      background: #33200a;
+      color: #fde68a;
+      border: 1px solid #b45309;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 8px;
+    }
+    .field:last-child { margin-bottom: 0; }
+    .field label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #a7f3d0;
+    }
+    .field input, .field select {
+      background: #06130d;
+      color: #f0fdf4;
+      border: 1px solid #225c40;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 12px;
+      outline: none;
+    }
+    .field input:focus, .field select:focus { border-color: #22c55e; }
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
     }
     .log-box {
-      font-family: monospace;
+      font-family: ui-monospace, monospace;
       font-size: 11px;
-      background: #0f172a;
-      color: #38bdf8;
+      background: #030b07;
+      color: #7dd3fc;
+      border: 1px solid #163c2a;
       padding: 8px;
-      border-radius: 6px;
-      max-height: 80px;
+      border-radius: 7px;
+      max-height: 110px;
       overflow-y: auto;
       white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .hint {
+      font-size: 10.5px;
+      color: #94a3b8;
+      line-height: 1.4;
     }
   </style>
 </head>
 <body>
   <div class="header">
-    <span>🤖</span>
-    <h2>OmniCart Social Bridge</h2>
-    <span class="badge-mv3">Tab Controller</span>
+    <span>👁️</span>
+    <h2>OmniCart OmniVision</h2>
+    <span class="badge">v2.0 Vision</span>
   </div>
 
-  <div class="content">
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="control">🎛️ Điều khiển & Tab</button>
+    <button class="tab-btn" data-tab="vision">🧠 Cấu hình Mắt AI</button>
+  </div>
+
+  <!-- TAB 1: ĐIỀU KHIỂN -->
+  <div class="panel active" id="panel-control">
     <div class="card">
-      <div class="card-title">Tài khoản đích chính chủ</div>
+      <div class="card-title">Tài khoản chính chủ</div>
       <div class="profile-item">
         <div>
-          <div class="profile-name">📘 John Harper</div>
-          <div class="profile-sub">ID: 61580644871703</div>
+          <div class="profile-name">📘 Hoàng Thái HT</div>
+          <div class="profile-sub">ID: 100037782653708</div>
         </div>
-        <div><span class="status-dot"></span>Sẵn sàng</div>
+        <div><span class="dot"></span>OmniVision</div>
       </div>
-      <div class="profile-item" style="margin-top: 6px;">
+      <div class="profile-item">
         <div>
           <div class="profile-name">🎵 harutv</div>
-          <div class="profile-sub">@harutv666</div>
+          <div class="profile-sub">@harutv666 • Photo Mode</div>
         </div>
-        <div><span class="status-dot"></span>Sẵn sàng</div>
+        <div><span class="dot"></span>OmniVision</div>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-title">Trạng thái điều khiển 3 Tab</div>
-      <div id="tabs-status" style="font-size: 12px; color: #475569;">
-        Đang kiểm tra tab trình duyệt…
-      </div>
+      <div class="card-title">Trạng thái kết nối 3 Tab</div>
+      <div id="tabs-status" style="line-height:1.6;font-size:12px;">Đang kiểm tra…</div>
     </div>
 
     <div class="actions">
-      <button id="btn-post-fb">📝 Mở Admin để đăng Facebook</button>
-      <button id="btn-post-tiktok" style="background: #000; color: #fe2c55; border: 1px solid #fe2c55;">📝 Mở Admin để đăng TikTok</button>
-      <button id="btn-scrape-viral" class="btn-secondary">🔥 Quét cảm hứng Viral thật</button>
-      <button id="btn-open-admin" class="btn-secondary">⚙️ Mở Quản trị Store-Admin</button>
+      <button id="btn-open-admin" class="btn">⚙️ Mở Store-Admin để Đăng bài</button>
+      <div class="row-2">
+        <button id="btn-inspect-fb" class="btn btn-secondary">👁️ Soi Tab FB</button>
+        <button id="btn-inspect-tt" class="btn btn-secondary">👁️ Soi Tab TikTok</button>
+      </div>
+      <div class="row-2">
+        <button id="btn-scrape-viral" class="btn btn-secondary">🔥 Quét Viral FB</button>
+        <button id="btn-reset-jobs" class="btn btn-warn">🧹 Mở khóa tác vụ</button>
+      </div>
     </div>
 
-    <div class="log-box" id="log-output">Hệ thống sẵn sàng điều khiển 3 tab tự động.</div>
+    <div class="log-box" id="log-output">Sẵn sàng quan sát & điều khiển 3 tab.</div>
+  </div>
+
+  <!-- TAB 2: CẤU HÌNH VISION AI -->
+  <div class="panel" id="panel-vision">
+    <div class="card">
+      <div class="card-title">Hiển thị mắt trực quan (HUD)</div>
+      <div class="toggle-row">
+        <span>Hiện khung nhắm & trạng thái trên FB/TikTok</span>
+        <input type="checkbox" id="cfg-show-hud" checked>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Mắt AI dự phòng (Multimodal Vision AI)</div>
+      <div class="field">
+        <label for="cfg-ai-mode">Chế độ hỗ trợ Vision AI</label>
+        <select id="cfg-ai-mode">
+          <option value="layout">Bản đồ hình học + AI (Ngầm 100%, không bật tab)</option>
+          <option value="screenshot">Chụp màn hình thật + AI (Chính xác nhất)</option>
+          <option value="off">Chỉ dùng OmniVision Hình học (Không gọi AI)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="cfg-provider">Nhà cung cấp Vision AI</label>
+        <select id="cfg-provider">
+          <option value="ollama">Ollama Local (Miễn phí trên máy)</option>
+          <option value="gemini">Google Gemini Vision (gemini-2.5-flash)</option>
+          <option value="openai">OpenAI / LM Studio / OpenRouter</option>
+        </select>
+      </div>
+      <div class="field" id="wrap-endpoint">
+        <label for="cfg-endpoint">API Endpoint</label>
+        <input type="text" id="cfg-endpoint" placeholder="http://localhost:11434/api/chat">
+      </div>
+      <div class="field">
+        <label for="cfg-model">Model Vision</label>
+        <input type="text" id="cfg-model" placeholder="qwen2.5vl:7b / llama3.2-vision / gemini-2.5-flash">
+      </div>
+      <div class="field" id="wrap-apikey">
+        <label for="cfg-apikey">API Key (bỏ trống nếu dùng Ollama Local)</label>
+        <input type="password" id="cfg-apikey" placeholder="AIza... hoặc sk-...">
+      </div>
+      <div class="hint">
+        Mặc định OmniVision Hình học đã tự xử lý được 99% thao tác FB & TikTok kể cả khi tắt AI. Bật Ollama/Gemini giúp tự nhận diện khi giao diện thay đổi đột xuất.
+      </div>
+    </div>
+
+    <div class="row-2">
+      <button id="btn-test-vision" class="btn btn-secondary">🧪 Kiểm tra mắt AI</button>
+      <button id="btn-save-vision" class="btn">💾 Lưu cấu hình</button>
+    </div>
+
+    <div class="log-box" id="vision-log">Chưa kiểm tra kết nối Vision AI.</div>
   </div>
 
   <script src="popup.js"></script>

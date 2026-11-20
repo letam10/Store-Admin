@@ -1,15 +1,17 @@
 /*
   FILE NOTE
-  - Mục đích: Module Quản trị Tự động hóa đăng bài Mạng Xã Hội (Facebook John Harper, TikTok @harutv666), cấu hình chu kỳ linh hoạt (30s, 30m, 1h, 2h, 6h), tích hợp Chrome Extension Manifest V3 điều khiển 3 tab tự động đăng bài thật và cào bài viral thật không chiếm quyền chuột bàn phím.
+  - Mục đích: Module Quản trị Tự động hóa đăng bài Mạng Xã Hội (Facebook Hoàng Thái HT, TikTok @harutv666), cấu hình chu kỳ linh hoạt (30s, 30m, 1h, 2h, 6h), tích hợp Chrome Extension Manifest V3 điều khiển 3 tab tự động đăng bài thật và cào bài viral thật không chiếm quyền chuột bàn phím.
   - Liên kết trực tiếp: Store-Admin/src/pages/Admin.jsx, Store-Admin/src/pages/AdminSocialAutomation.css, Store-Admin/src/api/chat.js, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs, Store-Admin/extension/manifest.json
-  - Vùng ảnh hưởng khi sửa: Trải nghiệm người dùng quản trị khi chuyển qua tab Tự động đăng bài MXH, gửi nhận API mạng xã hội, quy trình đăng bài Facebook John Harper / TikTok @harutv666 và cập nhật báo cáo tương tác.
+  - Vùng ảnh hưởng khi sửa: Trải nghiệm người dùng quản trị khi chuyển qua tab Tự động đăng bài MXH, gửi nhận API mạng xã hội, quy trình đăng bài Facebook Hoàng Thái HT / TikTok @harutv666 và cập nhật báo cáo tương tác.
+  - Sửa 2026-11-20: Thêm PING tới extension; quyền riêng tư được chọn một lần và áp dụng đồng nhất cho Facebook, TikTok.
 */
 
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { apiJson } from '../api/chat'
+import { privacyForSocialPlatform } from './socialPrivacy'
 import './AdminSocialAutomation.css'
 
-export const OFFICIAL_FACEBOOK_PROFILE_URL = 'https://www.facebook.com/profile.php?id=61580644871703'
+export const OFFICIAL_FACEBOOK_PROFILE_URL = 'https://www.facebook.com/profile.php?id=100037782653708'
 export const OFFICIAL_TIKTOK_PROFILE_URL = 'https://www.tiktok.com/@harutv666'
 
 export const copyPostToClipboard = async (text) => {
@@ -158,6 +160,8 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
     }
   }
 
+  const extensionPingCancelRef = useRef(null)
+
   // Helper gửi thông điệp tới Chrome Extension Bridge
   const sendExtensionMessage = (action, payload = {}) => {
     return new Promise((resolve) => {
@@ -167,19 +171,39 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
       }
       const requestId = 'req-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)
       let timer = null
+      let settled = false
+      const cleanup = () => {
+        if (settled) return
+        settled = true
+        if (typeof window !== 'undefined') window.removeEventListener('message', handler)
+        if (timer) clearTimeout(timer)
+        if (action === 'PING' && extensionPingCancelRef.current === cancelPing) {
+          extensionPingCancelRef.current = null
+        }
+      }
       const handler = (event) => {
+        if (event.source !== window || event.origin !== window.location.origin) return
         if (event.data && event.data.source === 'OMNICART_EXTENSION_RESPONSE' && event.data.requestId === requestId) {
-          if (typeof window !== 'undefined') window.removeEventListener('message', handler)
-          if (timer) clearTimeout(timer)
-          if (event.data.ok === true) setExtensionConnected(true)
+          cleanup()
+          if (action === 'PING') {
+            setExtensionConnected(event.data.ok === true && event.data.data?.ok === true)
+          } else if (event.data.ok === true) {
+            setExtensionConnected(true)
+          }
           resolve(event.data)
         }
       }
+      const cancelPing = () => {
+        cleanup()
+        resolve({ ok: false, error: 'PING_CANCELLED' })
+      }
       window.addEventListener('message', handler)
+      if (action === 'PING') extensionPingCancelRef.current = cancelPing
       timer = setTimeout(() => {
-        if (typeof window !== 'undefined') window.removeEventListener('message', handler)
+        cleanup()
+        if (action === 'PING') setExtensionConnected(false)
         resolve({ ok: false, error: 'EXTENSION_NOT_DETECTED' })
-      }, action === 'AUTO_POST' ? 120000 : 2500)
+      }, action === 'AUTO_POST' ? 120000 : action === 'FETCH_REAL_VIRAL' ? 30000 : action === 'PING' ? 8000 : 10000)
 
       try {
         window.postMessage({
@@ -189,8 +213,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
           requestId
         }, '*')
       } catch (e) {
-        if (typeof window !== 'undefined') window.removeEventListener('message', handler)
-        if (timer) clearTimeout(timer)
+        cleanup()
         resolve({ ok: false, error: e.message })
       }
     })
@@ -205,31 +228,45 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
   const autoPostAttemptedIdsRef = useRef(new Set())
   const autoPostInFlightRef = useRef(false)
   const autoPostLastAttemptAtRef = useRef(0)
+  const extensionPingInFlightRef = useRef(false)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    if (window.__OMNICART_EXTENSION_INSTALLED__ || document.documentElement?.hasAttribute?.('data-omnicart-extension-active')) {
-      setExtensionConnected(true)
+    let disposed = false
+    const pingExtension = async () => {
+      if (disposed || extensionPingInFlightRef.current) return
+      extensionPingInFlightRef.current = true
+      try {
+        const response = await sendExtensionMessage('PING')
+        if (!disposed) {
+          setExtensionConnected(response?.ok === true && response?.data?.ok === true)
+        }
+      } finally {
+        extensionPingInFlightRef.current = false
+      }
     }
-    const onReady = () => setExtensionConnected(true)
+
+    // Chỉ báo đã kết nối sau khi Service Worker thực sự phản hồi.
+    pingExtension()
+    const pingTimer = setInterval(pingExtension, 5000)
+    const onReady = () => pingExtension()
     window.addEventListener('omnicart-extension-ready', onReady)
     return () => {
+      disposed = true
+      clearInterval(pingTimer)
+      if (extensionPingCancelRef.current) extensionPingCancelRef.current()
       if (typeof window !== 'undefined') window.removeEventListener('omnicart-extension-ready', onReady)
     }
   }, [])
 
-  // Helper chuyển đổi mốc chu kỳ linh hoạt: 30s, 5m, 30m, 1h, 2h, 3h, 6h
+  // Helper chuyển đổi mốc chu kỳ: 2m, 1h, 4h
   const handleIntervalChange = (val) => {
     let min = 120
     let hrs = 2
     let sec = 7200
-    if (val === '30s') { min = 0.5; hrs = 0.5 / 60; sec = 30 }
-    else if (val === '5m') { min = 5; hrs = 5 / 60; sec = 300 }
-    else if (val === '30m') { min = 30; hrs = 0.5; sec = 1800 }
+    if (val === '2m') { min = 2; hrs = 2 / 60; sec = 120 }
     else if (val === '1') { min = 60; hrs = 1; sec = 3600 }
-    else if (val === '2') { min = 120; hrs = 2; sec = 7200 }
-    else if (val === '3') { min = 180; hrs = 3; sec = 10800 }
-    else if (val === '6') { min = 360; hrs = 6; sec = 21600 }
+    else if (val === '4') { min = 240; hrs = 4; sec = 14400 }
     else {
       const parsed = Number(val) || 2
       min = parsed >= 5 ? parsed : parsed * 60
@@ -240,15 +277,13 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
   }
 
   const currentIntervalKey = useMemo(() => {
-    if (settings.intervalSeconds === 30 || settings.intervalMinutes === 0.5 || settings.intervalHours < 0.02) return '30s'
-    if (settings.intervalMinutes === 5 || settings.intervalSeconds === 300) return '5m'
-    if (settings.intervalMinutes === 30) return '30m'
+    if (settings.intervalSeconds === 120 || settings.intervalMinutes === 2) return '2m'
     if (settings.intervalMinutes === 60) return '1'
-    if (settings.intervalMinutes === 120) return '2'
-    if (settings.intervalMinutes === 180) return '3'
-    if (settings.intervalMinutes === 360) return '6'
-    if (Math.abs(settings.intervalHours - 0.5) < 0.1) return '30m'
-    return String(Math.round(settings.intervalHours || 2))
+    if (settings.intervalMinutes === 240 || settings.intervalHours === 4) return '4'
+    // Legacy fallback: map các giá trị cũ sang gần nhất
+    if (settings.intervalSeconds <= 120 || settings.intervalMinutes <= 2) return '2m'
+    if (settings.intervalMinutes <= 90) return '1'
+    return '4'
   }, [settings.intervalMinutes, settings.intervalHours, settings.intervalSeconds])
 
   // AI Studio State
@@ -308,7 +343,13 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
       ])
 
       if (resStats?.stats) setStats(resStats.stats)
-      if (resSettings?.settings) setSettings(resSettings.settings)
+      if (resSettings?.settings) {
+        setSettings(current => ({
+          ...current,
+          ...resSettings.settings,
+          privacy: resSettings.settings.privacy === 'public' ? 'public' : 'only_me'
+        }))
+      }
       if (resPosts?.posts) setPosts(resPosts.posts)
       if (resGroups?.groups) setGroups(resGroups.groups)
       if (resViral?.posts) setViralPosts(resViral.posts)
@@ -331,10 +372,14 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
       const res = await apiJson('/api/admin/social/settings', {
         method: 'POST',
         headers: { 'x-csrf-token': csrfToken },
-        body: JSON.stringify(settings)
+        body: JSON.stringify({ ...settings, privacy: settings.privacy === 'public' ? 'public' : 'only_me' })
       })
       if (res?.settings) {
-        setSettings(res.settings)
+        setSettings(current => ({
+          ...current,
+          ...res.settings,
+          privacy: res.settings.privacy === 'public' ? 'public' : 'only_me'
+        }))
         showNotice('Đã lưu cấu hình tự động hóa thành công!')
         const resStats = await apiJson('/api/admin/social/stats')
         if (resStats?.stats) setStats(resStats.stats)
@@ -442,7 +487,12 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
 
   // Publish from Studio
   const handlePublishStudio = async (immediate = true) => {
-    const draft = { ...studioDraft, platform: studioPlatform, privacy: 'only_me' }
+    const targetPrivacy = privacyForSocialPlatform(studioPlatform, settings.privacy)
+    if (!targetPrivacy) {
+      showNotice('Kênh đăng bài không được hỗ trợ.', 'error')
+      return
+    }
+    const draft = { ...studioDraft, platform: studioPlatform, privacy: targetPrivacy }
     if (immediate) return handleRealAutoPostThroughExtension(draft)
 
     try {
@@ -460,7 +510,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
           content: studioDraft.content,
           hashtags: studioDraft.hashtags,
           targetGroup: studioTargetGroup || undefined,
-          privacy: 'only_me',
+          privacy: targetPrivacy,
           publishImmediately: false
         })
       })
@@ -493,12 +543,18 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
   const handleRealAutoPostThroughExtension = async (targetPost) => {
     if (targetPost?.id) autoPostAttemptedIdsRef.current.add(String(targetPost.id))
 
+    let postId = targetPost?.id || null
+    let platform = String(targetPost?.platform || 'unknown').toLowerCase()
+    let failureCode = null
+    let livePostUrl = null
+    let livePostId = null
+
     try {
       setRealPostingBusy(true)
       showNotice('Đang gửi ảnh sản phẩm và nội dung qua Chrome Extension; chưa ghi nhận đã đăng.')
 
       const post = { ...studioDraft, ...(targetPost || {}) }
-      const platform = (post.platform || studioPlatform || 'facebook').toLowerCase()
+      platform = (post.platform || studioPlatform || 'facebook').toLowerCase()
       if (!['facebook', 'tiktok'].includes(platform)) throw new Error('Kênh đăng bài không được hỗ trợ.')
 
       const productImage = post.productImage || studioDraft.productImage
@@ -508,7 +564,10 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
       const fullText = formatPostText(post)
       if (!fullText) throw new Error('Bài viết chưa có nội dung để đăng.')
 
-      let postId = post.id
+      const targetPrivacy = privacyForSocialPlatform(platform, settings.privacy || 'only_me')
+      if (!targetPrivacy) throw new Error('Kênh đăng bài không được hỗ trợ.')
+
+      postId = post.id || postId
       if (!postId) {
         const created = await apiJson('/api/admin/social/posts/create', {
           method: 'POST',
@@ -522,7 +581,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
             title: post.title || '',
             content: post.content || '',
             hashtags: post.hashtags || '',
-            privacy: 'only_me',
+            privacy: targetPrivacy,
             publishImmediately: false
           })
         })
@@ -537,23 +596,31 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
           title: '',
           content: fullText,
           hashtags: '',
-          privacy: 'only_me',
+          privacy: targetPrivacy,
           imageUrl
         }
       })
 
       if (reply?.error === 'EXTENSION_NOT_DETECTED') {
+        failureCode = reply.error
         setShowExtensionHelp(true)
         throw new Error('Chưa phát hiện Chrome Extension. Bản nháp đã lưu, bài chưa đăng.')
       }
 
       const result = reply?.data
+      if (result?.postUrl && result?.realPostId) {
+        livePostUrl = result.postUrl
+        livePostId = result.realPostId
+      }
       if (reply?.ok !== true || result?.ok !== true || result.platform !== platform ||
-          result.privacy !== 'only_me' || !result.postUrl || !result.realPostId) {
+          result.privacy !== targetPrivacy ||
+          !result.postUrl || !result.realPostId) {
         const errorCode = result?.error || reply?.error || 'POST_NOT_VERIFIED'
+        failureCode = errorCode
         throw new Error(getExtensionPostErrorMessage(errorCode))
       }
 
+      const confirmedPrivacy = result.privacy || targetPrivacy
       const saved = await apiJson(`/api/admin/social/posts/${encodeURIComponent(postId)}/publish-real`, {
         method: 'POST',
         headers: { 'x-csrf-token': csrfToken },
@@ -562,19 +629,52 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
           publishedTime: result.publishedTime,
           platform,
           realPostId: result.realPostId,
-          privacy: 'only_me'
+          privacy: confirmedPrivacy
         })
       })
       if (!saved?.ok || saved.post?.status !== 'published' || saved.post?.postUrl !== result.postUrl) {
         throw new Error('Mạng xã hội đã trả liên kết bài đăng nhưng máy chủ chưa xác nhận lưu lịch sử.')
       }
 
-      showNotice(`Đã xác nhận đăng bài ${platform === 'facebook' ? 'Facebook' : 'TikTok'} ở chế độ Chỉ mình tôi: ${result.postUrl}`)
+      const privacyLabel = confirmedPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Công khai'
+      showNotice(`Đã xác nhận đăng bài ${platform === 'facebook' ? 'Facebook' : 'TikTok'} (${privacyLabel}): ${result.postUrl}`)
       await loadAll()
       setActiveSubTab('logs')
       return { ok: true, platform, postUrl: result.postUrl }
     } catch (err) {
-      showNotice(err.message || 'Lỗi khi đăng bài qua Extension', 'error')
+      const errorMessage = err.message || 'Lỗi khi đăng bài qua Extension'
+      const ambiguousPostErrors = new Set([
+        'FACEBOOK_POST_NOT_VERIFIED',
+        'FACEBOOK_PERMALINK_NOT_FOUND',
+        'TIKTOK_POST_NOT_VERIFIED',
+        'TIKTOK_PERMALINK_NOT_FOUND'
+      ])
+      const outcome = livePostUrl || ambiguousPostErrors.has(failureCode) ? 'unverified' : 'failed'
+      let failureSaveFailed = false
+
+      if (postId && targetPost?.status !== 'published') {
+        try {
+          const failed = await apiJson(`/api/admin/social/posts/${encodeURIComponent(postId)}/publish-failure`, {
+            method: 'POST',
+            headers: { 'x-csrf-token': csrfToken },
+            body: JSON.stringify({
+              status: outcome,
+              errorMessage: failureCode ? `${errorMessage} (${failureCode})` : errorMessage,
+              postUrl: livePostUrl,
+              realPostId: livePostId
+            })
+          })
+          if (!failed?.ok || failed.post?.status !== outcome) failureSaveFailed = true
+          await loadAll()
+        } catch (_) {
+          failureSaveFailed = true
+        }
+      }
+
+      showNotice(
+        `${errorMessage}${failureSaveFailed ? ' Không lưu được trạng thái lỗi vào lịch sử.' : ''}`,
+        'error'
+      )
       return { ok: false, platform: targetPost?.platform || 'unknown', error: err.message || 'Lỗi khi đăng bài qua Extension' }
     } finally {
       setRealPostingBusy(false)
@@ -583,12 +683,16 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
 
   const getExtensionPostErrorMessage = (code) => {
     const messages = {
+      EXTENSION_CONTEXT_INVALIDATED: 'Tiện ích Extension vừa được làm mới. Vui lòng nhấn F5 tải lại trang Admin để cập nhật kết nối.',
       PRODUCT_IMAGE_REQUIRED: 'Thiếu ảnh sản phẩm; bài chưa được đăng.',
       PRODUCT_IMAGE_URL_NOT_ALLOWED: 'Ảnh phải lấy từ Store hoặc Store-Admin; bài chưa được đăng.',
       TIKTOK_PHOTO_UPLOAD_UNAVAILABLE: 'Trang TikTok hiện tại không cung cấp ô tải ảnh; bài chưa được đăng.',
       TIKTOK_ACCOUNT_MISMATCH: 'Extension không xác nhận được tài khoản @harutv666; bài chưa được đăng.',
-      TIKTOK_ONLY_ME_NOT_CONFIRMED: 'Không xác nhận được quyền riêng tư Chỉ mình tôi trên TikTok; bài chưa được đăng.',
-      FACEBOOK_ACCOUNT_MISMATCH: 'Tab Facebook không trỏ đúng tài khoản John Harper; bài chưa được đăng.',
+      TIKTOK_PRIVACY_NOT_CONFIRMED: 'TikTok chưa xác nhận đúng quyền riêng tư đã chọn; bài chưa được đăng.',
+      FACEBOOK_ACCOUNT_MISMATCH: 'Tab Facebook không trỏ đúng tài khoản Hoàng Thái HT; bài chưa được đăng.',
+      FACEBOOK_COMPOSER_NOT_FOUND: 'Không tìm thấy khung tạo bài viết Facebook trên trang cá nhân Hoàng Thái HT.',
+      FACEBOOK_COMPOSER_DID_NOT_OPEN: 'Facebook không mở khung Tạo bài viết; chưa có bài nào được gửi.',
+      FACEBOOK_PUBLIC_NOT_CONFIRMED: 'Facebook chưa xác nhận đối tượng Công khai; extension đã dừng trước khi đăng.',
       FACEBOOK_ONLY_ME_NOT_CONFIRMED: 'Không xác nhận được quyền riêng tư Chỉ mình tôi trên Facebook; bài chưa được đăng.',
       FACEBOOK_POST_NOT_VERIFIED: 'Facebook chưa hiển thị bài mới có liên kết riêng; không ghi nhận đã đăng.',
       TIKTOK_POST_NOT_VERIFIED: 'TikTok chưa hiển thị bài mới có liên kết riêng; không ghi nhận đã đăng.'
@@ -612,15 +716,12 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
 
         const nextPost = availablePosts
           .filter(post => {
-            const createdAt = Date.parse(post.createdAt || post.triggerTime || '')
-            return post.status === 'ready_for_publish' &&
+            return (post.status === 'ready_for_publish' || post.status === 'ready_for_api') &&
               ['facebook', 'tiktok'].includes(String(post.platform || '').toLowerCase()) &&
               post.id &&
-              Number.isFinite(createdAt) &&
-              createdAt >= autoPostSessionStartedAtRef.current &&
               !autoPostAttemptedIdsRef.current.has(String(post.id))
           })
-          .sort((left, right) => Date.parse(left.createdAt || left.triggerTime) - Date.parse(right.createdAt || right.triggerTime))[0]
+          .sort((left, right) => Date.parse(right.createdAt || right.triggerTime || 0) - Date.parse(left.createdAt || left.triggerTime || 0))[0]
 
         if (!nextPost || disposed) return
 
@@ -652,7 +753,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
   // Quét và nạp dữ liệu bài Viral thật từ Facebook & TikTok
   const handleScrapeRealViralThroughExtension = async () => {
     try {
-      showNotice('Đang quét bài viral và xu hướng thật từ Facebook John Harper & TikTok @harutv666...')
+      showNotice('Đang quét bài viral và xu hướng thật từ Facebook Hoàng Thái HT & TikTok @harutv666...')
       const res = await sendExtensionMessage('FETCH_REAL_VIRAL', { platform: 'facebook' })
 
       if (res?.data?.posts && res.data.posts.length > 0) {
@@ -661,7 +762,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
           headers: { 'x-csrf-token': csrfToken },
           body: JSON.stringify({ posts: res.data.posts })
         })
-        showNotice(`🔥 Đã cào và lưu thành công ${res.data.posts.length} bài viết viral thật từ Facebook John Harper!`)
+        showNotice(`🔥 Đã cào và lưu thành công ${res.data.posts.length} bài viết viral thật từ Facebook Hoàng Thái HT!`)
         const resViral = await apiJson('/api/admin/social/viral')
         if (resViral?.posts) setViralPosts(resViral.posts)
       } else {
@@ -822,7 +923,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
       escapeCsv(p.productName),
       escapeCsv(p.productPrice),
       escapeCsv(p.platform),
-      escapeCsv(p.status === 'published' ? 'Đã xuất bản' : p.status === 'pending_approval' ? 'Chờ duyệt' : 'Lỗi'),
+      escapeCsv(p.status === 'published' ? 'Đã xuất bản' : p.status === 'unverified' ? 'Chưa xác minh' : p.status === 'pending_approval' ? 'Chờ duyệt' : 'Lỗi'),
       escapeCsv(p.title),
       escapeCsv(p.targetGroup || 'Trang chính'),
       escapeCsv(p.likesCount),
@@ -868,7 +969,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
             <span className={'social-status-pill ' + (settings.isActive ? 'is-active' : 'is-paused')}>
               <span aria-hidden="true">{settings.isActive ? '●' : '○'}</span>
               {settings.isActive
-                ? `Đang chạy (${currentIntervalKey === '30s' ? 'Mỗi 30 giây' : currentIntervalKey === '5m' ? 'Mỗi 5 phút' : currentIntervalKey === '30m' ? 'Mỗi 30 phút' : `Mỗi ${settings.intervalHours} giờ`})`
+                ? `Đang chạy (${currentIntervalKey === '2m' ? 'Mỗi 2 phút' : currentIntervalKey === '1' ? 'Mỗi 1 giờ' : 'Mỗi 4 giờ'})`
                 : 'Đang tạm dừng'}
             </span>
           </div>
@@ -957,7 +1058,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
               </span>
             </div>
             <p style={{ margin: '4px 0 0', fontSize: '12px', opacity: 0.9 }}>
-              Điều khiển 3 tab (Store-Admin, Facebook <strong>John Harper</strong>, TikTok <strong>@harutv666</strong>) — <strong>Hoàn toàn không chiếm quyền chuột/bàn phím máy tính</strong>. Lịch Full-Auto cần giữ trang này mở; chỉ bài mới phát sinh trong phiên mới tự chạy.
+              Điều khiển 3 tab (Store-Admin, Facebook <strong>Hoàng Thái HT</strong>, TikTok <strong>@harutv666</strong>) — <strong>Hoàn toàn không chiếm quyền chuột/bàn phím máy tính</strong>. Lịch Full-Auto cần giữ trang này mở; chỉ bài mới phát sinh trong phiên mới tự chạy.
             </p>
           </div>
         </div>
@@ -969,7 +1070,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
             style={{ fontSize: '12px', padding: '6px 12px' }}
             disabled={realPostingBusy || batchPosting || !studioDraft.productImage || !studioDraft.content}
             onClick={() => handleRealAutoPostThroughExtension({ ...studioDraft, platform: 'facebook' })}
-            title="Đăng bài thật ngay lên Facebook John Harper qua tab trình duyệt"
+            title="Đăng bài có ảnh sản phẩm lên Facebook Hoàng Thái HT qua tab trình duyệt"
           >
             🚀 Đăng Thật FB (Không chiếm chuột)
           </button>
@@ -1086,17 +1187,14 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   value={currentIntervalKey}
                   onChange={e => handleIntervalChange(e.target.value)}
                 >
-                  <option value="30s">⚡ Mỗi 30 giây (kiểm thử nhanh)</option>
-                  <option value="30m">🕐 Mỗi 30 phút</option>
+                  <option value="2m">⚡ Mỗi 2 phút (kiểm thử nhanh)</option>
                   <option value="1">🕐 Mỗi 1 giờ</option>
-                  <option value="2">🕐 Mỗi 2 giờ</option>
-                  <option value="3">🕐 Mỗi 3 giờ</option>
-                  <option value="6">🕐 Mỗi 6 giờ</option>
+                  <option value="4">🕓 Mỗi 4 giờ</option>
                 </select>
               </div>
 
               <div className="social-field">
-                <label htmlFor="cfg-privacy">Quyền riêng tư đăng bài (Privacy Mode)</label>
+                <label htmlFor="cfg-privacy">Quyền riêng tư áp dụng cho tất cả nền tảng</label>
                 <select
                   id="cfg-privacy"
                   className="social-select"
@@ -1106,6 +1204,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   <option value="only_me">🔒 Chỉ mình tôi</option>
                   <option value="public">🌐 Công khai</option>
                 </select>
+                <small className="social-muted-text">Cùng lựa chọn này sẽ được dùng cho Facebook và TikTok.</small>
               </div>
 
               <div className="social-field">
@@ -1116,7 +1215,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   value={settings.channels}
                   onChange={e => setSettings({ ...settings, channels: e.target.value })}
                 >
-                  <option value="facebook,tiktok">Đa kênh: Facebook Fanpage + TikTok</option>
+                  <option value="facebook,tiktok">Đa kênh: Facebook cá nhân + TikTok</option>
                   <option value="facebook">Chỉ xuất bản lên Facebook</option>
                   <option value="tiktok">Chỉ xuất bản lên TikTok</option>
                 </select>
@@ -1562,7 +1661,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   className="social-action-btn"
                   onClick={handleScrapeRealViralThroughExtension}
                   disabled={loading}
-                  title="Quét trực tiếp bài viết viral từ Facebook John Harper và TikTok @harutv666"
+                  title="Quét trực tiếp bài viết viral từ Facebook Hoàng Thái HT và TikTok @harutv666"
                   style={{ fontSize: '12px', padding: '7px 14px', display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#0f172a', borderColor: '#334155', color: '#38bdf8' }}
                 >
                   ⚡ Cào bài viral thật qua Extension
@@ -1650,6 +1749,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                 <option value="internal_draft">📝 Bản Nháp</option>
                 <option value="ready_for_api">⏳ Chờ gửi API</option>
                 <option value="pending_approval">🟡 Chờ Admin duyệt</option>
+                <option value="unverified">⚠️ Chưa xác minh</option>
                 <option value="failed">🔴 Thất bại</option>
               </select>
             </div>
@@ -1743,7 +1843,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                       {p.targetGroup || 'Trang chính'}
                     </td>
                     <td>
-                      <span className={'status-tag status-tag--' + p.status}>
+                      <span className={'status-tag status-tag--' + p.status} title={p.errorMessage || ''}>
                         {p.status === 'published' ? '🟢 Đã đăng' :
                          p.status === 'unverified' ? '⚠️ Chưa xác minh' :
                          p.status === 'ready_for_publish' || p.status === 'ready_for_api' ? '⏳ Chờ xuất bản thật' :
@@ -1768,7 +1868,14 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                           {p.platform === 'facebook' ? 'Bài Facebook ↗' : 'Bài TikTok ↗'}
                         </a>
                       ) : (
-                        <span className="social-muted-text">Bản nháp (Chưa đăng thật)</span>
+                        <span className="social-muted-text">
+                          {p.status === 'unverified' ? 'Chưa xác minh liên kết bài đăng' : 'Bản nháp (Chưa đăng thật)'}
+                        </span>
+                      )}
+                      {p.errorMessage && (
+                        <small className="social-muted-text" title={p.errorMessage} style={{ display: 'block', maxWidth: '180px', whiteSpace: 'normal' }}>
+                          {p.errorMessage}
+                        </small>
                       )}
                     </td>
                     <td>
@@ -1782,13 +1889,13 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                         >
                           {copiedPostId === p.id ? '✓ Đã chép' : '📋 Chép'}
                         </button>
-                        {p.status !== 'published' ? (
+                        {p.status !== 'unverified' && p.status !== 'published' ? (
                           <>
                             <button
                               type="button"
                               className="social-action-btn social-action-btn--primary"
                               onClick={() => handlePublishPost(p)}
-                              title={p.platform === 'facebook' ? 'Đăng ngay lên Facebook cá nhân John Harper' : 'Đăng ngay lên TikTok @harutv666'}
+                              title={p.platform === 'facebook' ? 'Đăng bài có ảnh lên Facebook cá nhân Hoàng Thái HT' : 'Đăng ngay lên TikTok @harutv666'}
                               style={{ fontSize: '11px', whiteSpace: 'nowrap' }}
                               disabled={realPostingBusy || batchPosting}
                             >
@@ -1805,7 +1912,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                               ⚡ Đăng Tab Thật
                             </button>
                           </>
-                        ) : (
+                        ) : p.status === 'published' ? (
                           <button
                             type="button"
                             className="social-action-btn social-action-btn--primary"
@@ -1816,7 +1923,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                           >
                             {p.platform === 'facebook' ? '🚀 Đăng lại FB' : '🚀 Đăng lại TikTok'}
                           </button>
-                        )}
+                        ) : null}
                         {p.status === 'pending_approval' && (
                           <button
                             type="button"
@@ -1887,6 +1994,12 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
               </span>
             </div>
 
+            {selectedPostModal.errorMessage && (
+              <div className="social-muted-text" style={{ color: '#fca5a5', fontSize: '12px' }}>
+                Lý do: {selectedPostModal.errorMessage}
+              </div>
+            )}
+
             <div>
               <strong style={{ fontSize: '15px' }}>{selectedPostModal.title}</strong>
               <div className="social-modal-body-content">
@@ -1902,7 +2015,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
-              {selectedPostModal.status !== 'published' ? (
+              {selectedPostModal.status !== 'published' && selectedPostModal.status !== 'unverified' ? (
                 <button
                   type="button"
                   className="social-btn-trigger"
@@ -1911,7 +2024,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                 >
                   🚀 {selectedPostModal.platform === 'facebook' ? 'Đăng Lên Facebook Ngay' : 'Xuất Bản Ngay'}
                 </button>
-              ) : (
+              ) : selectedPostModal.status === 'published' ? (
                 selectedPostModal.platform === 'facebook' && (
                   <button
                     type="button"
@@ -1923,7 +2036,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                     🚀 Đăng lại qua Extension
                   </button>
                 )
-              )}
+              ) : null}
               <button
                 type="button"
                 className="social-btn-trigger"
@@ -1940,7 +2053,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
                   className="social-btn-trigger"
                   style={{ textDecoration: 'none' }}
                 >
-                  {selectedPostModal.platform === 'facebook' ? 'Trang Cá Nhân Facebook John Harper ↗' : 'Mở Bài Viết Thực Tế ↗'}
+                  {selectedPostModal.platform === 'facebook' ? 'Trang Cá Nhân Facebook Hoàng Thái HT ↗' : 'Mở Bài Viết Thực Tế ↗'}
                 </a>
               )}
               <button
@@ -1971,7 +2084,7 @@ export default function AdminSocialAutomation({ csrfToken, language = 'vi' }) {
             </div>
             <div style={{ fontSize: '13px', lineHeight: 1.6, padding: '8px 0' }}>
               <p style={{ margin: '0 0 12px 0' }}>
-                Để tự động hóa đăng bài thật lên Facebook <strong>John Harper</strong> và TikTok <strong>@harutv666</strong> mà <strong>hoàn toàn không chiếm quyền điều khiển chuột bàn phím máy tính</strong>, hãy nạp Extension theo 3 bước sau:
+                Để tự động hóa đăng bài có ảnh sản phẩm lên Facebook <strong>Hoàng Thái HT</strong> và TikTok <strong>@harutv666</strong> mà <strong>hoàn toàn không chiếm quyền điều khiển chuột bàn phím máy tính</strong>, hãy nạp Extension theo 3 bước sau:
               </p>
               <ol style={{ paddingLeft: '20px', margin: '0 0 16px 0' }}>
                 <li style={{ marginBottom: '8px' }}>

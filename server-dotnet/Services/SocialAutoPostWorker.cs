@@ -1,6 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Dịch vụ chạy ngầm (BackgroundService) tự động hóa tạo nội dung tiếp thị Mạng Xã Hội định kỳ (tần suất quét vòng lặp 10 giây tránh quá tải hệ thống), xuất bản bài viết trỏ đến trang cá nhân Facebook chính thức John Harper https://www.facebook.com/profile.php?id=61580644871703 và TikTok @harutv666, bảo toàn quyền riêng tư chỉ mình tôi / công khai.
+  - Mục đích: Dịch vụ chạy ngầm (BackgroundService) tự động hóa tạo nội dung tiếp thị Mạng Xã Hội định kỳ, xuất bản bài viết trỏ đến Facebook Hoàng Thái HT và TikTok @harutv666, bảo toàn quyền riêng tư đã chọn.
   - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.SocialAutomation.cs, Store-Admin/server-dotnet/Services/SocialCopywriterService.cs, Store-Admin/server-dotnet/Program.cs
   - Vùng ảnh hưởng khi sửa: Chu kỳ tự động quét sản phẩm, sinh bài viết bằng Qwen AI, lưu vết audit log CSDL, xuất bản đa kênh Facebook/TikTok và quản lý lịch trình tiếp theo.
 */

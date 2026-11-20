@@ -1,8 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Giao diện quản lý chủ đề và banner hai bên trang chủ (ThemeEditor), hỗ trợ cấu hình 0 banner hoặc từ 10 đến 20 banner mỗi bên, tìm kiếm sản phẩm mượt mà, tùy chỉnh riêng từng banner và tự động điền banner khi lưu/thay đổi.
-  - Liên kết trực tiếp: Store-Admin/src/services/sideBanners.js, Store-Admin/src/pages/ThemeEditor.css, Store-Admin/src/api/chat.js.
-  - Vùng ảnh hưởng khi sửa: Trang Quản trị > Giao diện (Theme Editor) trong Store-Admin, cấu hình banner của hệ thống.
+  - Mục đích: Giao diện quản lý chủ đề và banner hai bên trang chủ (ThemeEditor), hỗ trợ cấu hình 0 banner hoặc từ 10 đến 20 banner mỗi bên, chế độ xem thu gọn/chi tiết, bộ lọc tìm kiếm nhanh, tự động đồng bộ màu sắc banner theo Store Theme (Đất nung, Rừng xanh, Ô liu...) và thích ứng Dark/Light mode.
+  - Liên kết trực tiếp: Store-Admin/src/services/sideBanners.js, Store-Admin/src/pages/ThemeEditor.css, Store-Admin/src/api/chat.js, Store-Admin/shared/theme.js.
+  - Vùng ảnh hưởng khi sửa: Trang Quản trị > Giao diện (Theme Editor) trong Store-Admin, xem trước và lưu cấu hình banner của hệ thống.
 */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -107,11 +107,78 @@ function formatBannerPrice(value) {
 }
 
 function SideBannerColorField({ label, value, onChange }) {
-  const swatch = /^#[0-9A-F]{6}$/.test(value || '') ? value : '#FFFFFF'
-  return <label className="side-banner-color"><span>{label}</span><span className="side-banner-color-inputs"><input type="color" value={swatch} onChange={(event) => onChange(event.target.value.toUpperCase())} aria-label={label} /><input type="text" value={value} maxLength="7" placeholder="#FFFFFF" onChange={(event) => onChange(event.target.value.toUpperCase())} aria-label={'Mã màu ' + label} /></span></label>
+  const swatch = /^#[0-9A-F]{6}$/i.test(value || '') ? value : '#FFFFFF'
+  return (
+    <label className="side-banner-color">
+      <span>{label}</span>
+      <span className="side-banner-color-inputs">
+        <input
+          type="color"
+          value={swatch}
+          onChange={(event) => onChange(event.target.value.toUpperCase())}
+          aria-label={label}
+        />
+        <input
+          type="text"
+          value={value}
+          maxLength="7"
+          placeholder="Mặc định"
+          onChange={(event) => onChange(event.target.value.toUpperCase())}
+          aria-label={'Mã màu ' + label}
+        />
+        {value ? (
+          <button
+            type="button"
+            className="side-banner-btn-tiny"
+            onClick={() => onChange('')}
+            title={'Xóa màu ' + label + ' (dùng màu mặc định)'}
+            style={{ padding: '2px 5px', fontSize: '10px' }}
+          >
+            ✕
+          </button>
+        ) : null}
+      </span>
+    </label>
+  )
 }
 
-const SIDE_BANNER_PREVIEW_COLORS = { bg: '#FFFFFF', text: '#18362A', accent: '#4F8B67' }
+// Tính toán màu chữ có độ tương phản cao dựa trên độ sáng (YIQ) của màu nền
+function getContrastTextColor(hexColor, isDark = false) {
+  if (!hexColor || !/^#[0-9A-Fa-f]{6}$/.test(hexColor)) {
+    return isDark ? '#E2F0E6' : '#18362A'
+  }
+  const clean = hexColor.slice(1)
+  const r = Number.parseInt(clean.slice(0, 2), 16)
+  const g = Number.parseInt(clean.slice(2, 4), 16)
+  const b = Number.parseInt(clean.slice(4, 6), 16)
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000
+  // Nếu nền sáng (yiq >= 135) dùng chữ màu sẫm #18362A, nếu nền tối dùng chữ sáng #E2F0E6
+  return yiq >= 135 ? '#18362A' : '#E2F0E6'
+}
+
+// Giải quyết màu sắc hiển thị cho slot banner theo theme (Light/Dark), Store Theme và tùy chỉnh riêng
+function resolveBannerSlotColors(slot = {}, isDark = false, theme = null) {
+  const customBg = slot.bg && /^#[0-9A-Fa-f]{6}$/i.test(slot.bg) ? slot.bg : ''
+  const customText = slot.text && /^#[0-9A-Fa-f]{6}$/i.test(slot.text) ? slot.text : ''
+  const customAccent = slot.accent && /^#[0-9A-Fa-f]{6}$/i.test(slot.accent) ? slot.accent : ''
+
+  const modeKey = isDark ? 'dark' : 'light'
+  const themeColors = theme?.[modeKey]?.colors || {}
+
+  // Khi chưa custom màu riêng: tự động lấy màu theo Store Theme đang chọn (Đất nung, Rừng xanh, Ô liu, hoặc custom palette)
+  const defaultBg = themeColors.surface || (isDark ? '#14281F' : '#FFFFFF')
+  const defaultText = themeColors.text || (isDark ? '#E2F0E6' : '#18362A')
+  const defaultAccent = themeColors.accent || (isDark ? '#34D399' : '#4F8B67')
+  const defaultBorder = themeColors.border || (isDark ? '#284C37' : '#D6E3D8')
+
+  const bg = customBg || defaultBg
+  // Khi có custom riêng, tự động tính toán màu chữ tương phản tương ứng nếu slot.text chưa đặt:
+  const text = customText || (customBg ? getContrastTextColor(customBg, isDark) : defaultText)
+  const accent = customAccent || defaultAccent
+  const border = customAccent || (customBg ? customBg : defaultBorder)
+
+  return { bg, text, accent, border, isCustomized: Boolean(customBg || customText || customAccent) }
+}
 
 // Modal duyệt và chọn sản phẩm trực quan, lọc theo danh mục
 function ProductPickerModal({ activeSlot, catalog, onClose, onSelect }) {
@@ -213,12 +280,24 @@ function ProductPickerModal({ activeSlot, catalog, onClose, onSelect }) {
   )
 }
 
-function SideBannerSlot({ sideLabel, index, slot, catalog, catalogReady, onChange, onOpenPicker }) {
+function SideBannerSlot({
+  sideLabel,
+  side,
+  index,
+  slot,
+  catalog,
+  catalogReady,
+  isDark = false,
+  storeTheme = null,
+  isExpanded = true,
+  isHighlighted = false,
+  onToggleExpand,
+  onChange,
+  onOpenPicker,
+}) {
   const product = sideBannerProduct(catalog, slot.productId)
   const selectedMissing = slot.productId !== '' && !product
-  const previewBg = slot.bg || SIDE_BANNER_PREVIEW_COLORS.bg
-  const previewText = slot.text || SIDE_BANNER_PREVIEW_COLORS.text
-  const previewAccent = slot.accent || SIDE_BANNER_PREVIEW_COLORS.accent
+  const colors = resolveBannerSlotColors(slot, isDark, storeTheme)
   const previewTitle = slot.title || product?.name || 'Chưa chọn sản phẩm'
 
   const [query, setQuery] = useState('')
@@ -255,19 +334,116 @@ function SideBannerSlot({ sideLabel, index, slot, catalog, catalogReady, onChang
       productId: '',
       title: '',
       note: '',
+      bg: '',
+      text: '',
+      accent: '',
     })
     setQuery('')
     setShowDropdown(false)
     setIsSearching(false)
   }
 
+  // Chế độ Thu gọn (Compact view: hiển thị thẻ hàng ngang nhỏ gọn có thumbnail, số thứ tự, tên sản phẩm, giá, trạng thái, nút sửa nhanh)
+  if (!isExpanded) {
+    return (
+      <article
+        id={`side-banner-slot-${side}-${index}`}
+        className={'side-banner-slot side-banner-slot--compact' + (isHighlighted ? ' is-highlighted' : '')}
+      >
+        <div className="side-banner-compact-left">
+          <span className="side-banner-compact-index">#{index + 1}</span>
+          <div className="side-banner-compact-thumb">
+            {product?.image ? (
+              <img src={product.image} alt={product.name || ''} loading="lazy" />
+            ) : (
+              <span className="side-banner-compact-thumb-empty">{product ? '📦' : '—'}</span>
+            )}
+          </div>
+          <div className="side-banner-compact-info">
+            <strong title={slot.title || product?.name || 'Tự động khi lưu'}>
+              {slot.title || product?.name || 'Chưa chọn riêng (tự động khi lưu)'}
+            </strong>
+            <span className="side-banner-compact-meta">
+              {product ? (
+                <>
+                  {product.category ? product.category + ' · ' : ''}
+                  <b style={{ color: 'var(--theme-accent-strong, #2f6847)' }}>{formatBannerPrice(product.price)}</b>
+                </>
+              ) : (
+                'Tự động gán sản phẩm khi lưu'
+              )}
+            </span>
+          </div>
+        </div>
+
+        <div className="side-banner-compact-right">
+          <span className={'side-banner-badge' + (product ? ' is-customized' : ' is-empty')}>
+            {product ? 'Đã tùy chỉnh' : slot.productId ? 'Mã: ' + slot.productId : 'Tự động khi lưu'}
+          </span>
+
+          {colors.isCustomized && (
+            <span
+              className="side-banner-color-indicator"
+              title="Đã tùy chỉnh màu sắc riêng"
+              style={{ background: colors.bg, borderColor: colors.border }}
+            />
+          )}
+
+          <button
+            type="button"
+            className="side-banner-action-btn side-banner-action-btn--sm"
+            onClick={onToggleExpand}
+            title="Mở rộng chi tiết ô banner này để sửa tiêu đề, ghi chú, màu sắc..."
+          >
+            ✏️ Sửa nhanh
+          </button>
+
+          <button
+            type="button"
+            className="side-banner-action-btn side-banner-action-btn--sm"
+            onClick={onOpenPicker}
+            disabled={!catalogReady}
+            title="Chọn nhanh sản phẩm khác từ danh mục"
+          >
+            📂 Chọn SP
+          </button>
+
+          {product && (
+            <button
+              type="button"
+              className="side-banner-btn-tiny side-banner-btn-tiny--danger"
+              onClick={handleClearProduct}
+              title="Bỏ chọn để tự động điền"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </article>
+    )
+  }
+
+  // Chế độ Chi tiết (Expanded view: đầy đủ các trường nhập, thumbnail 72px và mini preview 72px)
   return (
-    <article className="side-banner-slot">
+    <article
+      id={`side-banner-slot-${side}-${index}`}
+      className={'side-banner-slot' + (isHighlighted ? ' is-highlighted' : '')}
+    >
       <div className="side-banner-slot-head">
         <h4>{sideLabel} · Banner {index + 1}</h4>
-        <span className="side-banner-badge">
-          {product ? 'Đã tùy chỉnh' : slot.productId ? 'Mã: ' + slot.productId : 'Tự động khi lưu'}
-        </span>
+        <div className="side-banner-slot-head-actions">
+          <span className={'side-banner-badge' + (product ? ' is-customized' : ' is-empty')}>
+            {product ? 'Đã tùy chỉnh' : slot.productId ? 'Mã: ' + slot.productId : 'Tự động khi lưu'}
+          </span>
+          <button
+            type="button"
+            className="side-banner-btn-tiny"
+            onClick={onToggleExpand}
+            title="Thu gọn thẻ này"
+          >
+            ⊟ Thu gọn
+          </button>
+        </div>
       </div>
 
       <div className="side-banner-thumb">
@@ -460,31 +636,61 @@ function SideBannerSlot({ sideLabel, index, slot, catalog, catalogReady, onChang
         <SideBannerColorField label="Màu nhấn" value={slot.accent} onChange={(value) => onChange({ accent: value })} />
       </div>
 
-      <div className="side-banner-mini-preview" style={{ background: previewBg, color: previewText }}>
+      <div
+        className="side-banner-mini-preview"
+        style={{
+          background: colors.bg,
+          color: colors.text,
+          borderColor: colors.border,
+        }}
+      >
         <strong>{previewTitle}</strong>
         {product && <span>{formatBannerPrice(product.price)}</span>}
-        <em style={{ background: previewAccent }}>Xem</em>
+        <em
+          style={{
+            background: colors.accent,
+            color: getContrastTextColor(colors.accent, isDark),
+          }}
+        >
+          Xem
+        </em>
       </div>
     </article>
   )
 }
 
-function SideBannerSyncColumn({ sideLabel, slots, catalog }) {
+function SideBannerSyncColumn({ sideLabel, side, slots, catalog, onSelectSlot, isDark = false, storeTheme = null }) {
   return (
     <div className="side-banner-sync-column">
-      <h4>{sideLabel}</h4>
+      <h4>
+        <span>{sideLabel}</span>
+        <span className="side-banner-sync-count">{slots.length} ô</span>
+      </h4>
       {slots.map((slot, index) => {
         const product = sideBannerProduct(catalog, slot.productId)
-        const bg = slot.bg || SIDE_BANNER_PREVIEW_COLORS.bg
-        const text = slot.text || SIDE_BANNER_PREVIEW_COLORS.text
-        const accent = slot.accent || SIDE_BANNER_PREVIEW_COLORS.accent
+        const { bg, text, border } = resolveBannerSlotColors(slot, isDark, storeTheme)
         return (
           <div
             key={sideLabel + '-' + index}
+            role="button"
+            tabIndex={0}
             className={'side-banner-sync-card' + (product ? '' : ' is-empty')}
-            style={{ background: bg, color: text, borderColor: accent }}
+            style={{ background: bg, color: text, borderColor: border }}
+            onClick={() => onSelectSlot?.(side, index)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onSelectSlot?.(side, index)
+              }
+            }}
+            title={`Bấm để cuộn và làm nổi bật ${sideLabel} banner ${index + 1}`}
           >
             <span className="side-banner-sync-card-index">{index + 1}</span>
+            {product?.image ? (
+              <img src={product.image} alt={product.name || ''} className="side-banner-sync-card-thumb" loading="lazy" />
+            ) : (
+              <span className="side-banner-sync-card-thumb-empty">{product ? '📦' : '—'}</span>
+            )}
             <span className="side-banner-sync-card-name">{slot.title || product?.name || 'Tự động khi lưu'}</span>
             {product && <span className="side-banner-sync-card-price">{formatBannerPrice(product.price)}</span>}
           </div>
@@ -501,6 +707,8 @@ function SideBannerPanel({
   catalogError,
   busy,
   status,
+  isDark = false,
+  storeTheme = null,
   onRetryCatalog,
   onCountChange,
   onSlotChange,
@@ -516,9 +724,100 @@ function SideBannerPanel({
 
   const [activeTab, setActiveTab] = useState('all') // 'all' | 'left' | 'right'
   const [modalSlot, setModalSlot] = useState(null) // { side, index, sideLabel }
+  const [viewMode, setViewMode] = useState('expanded') // 'expanded' | 'compact'
+  const [expandedSlots, setExpandedSlots] = useState({}) // { [`${side}-${index}`]: boolean }
+  const [slotSearch, setSlotSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all') // 'all' | 'customized' | 'empty'
+  const [highlightedSlot, setHighlightedSlot] = useState(null)
 
   const totalBanners = count * 2
   const totalFilled = leftFilled + rightFilled
+
+  function isSlotExpanded(side, index) {
+    const key = `${side}-${index}`
+    if (expandedSlots[key] !== undefined) {
+      return expandedSlots[key]
+    }
+    return viewMode === 'expanded'
+  }
+
+  function toggleSlotExpand(side, index) {
+    const key = `${side}-${index}`
+    setExpandedSlots((prev) => ({
+      ...prev,
+      [key]: !isSlotExpanded(side, index),
+    }))
+  }
+
+  function collapseAll() {
+    setViewMode('compact')
+    setExpandedSlots({})
+  }
+
+  function expandAll() {
+    setViewMode('expanded')
+    setExpandedSlots({})
+  }
+
+  function matchesFilter(slot, index) {
+    const isSlotFilled = slot.productId !== ''
+    if (statusFilter === 'customized' && !isSlotFilled) return false
+    if (statusFilter === 'empty' && isSlotFilled) return false
+
+    if (!slotSearch.trim()) return true
+    const q = slotSearch.trim().toLowerCase()
+    if (String(index + 1) === q || `#${index + 1}` === q) return true
+    if (slot.title && slot.title.toLowerCase().includes(q)) return true
+    if (slot.note && slot.note.toLowerCase().includes(q)) return true
+    const product = sideBannerProduct(catalog, slot.productId)
+    if (product) {
+      if (product.name && product.name.toLowerCase().includes(q)) return true
+      if (product.category && product.category.toLowerCase().includes(q)) return true
+      if (String(product.id).includes(q)) return true
+      if (String(product.price).includes(q)) return true
+    }
+    return false
+  }
+
+  function handleSelectSlotFromSync(side, index) {
+    if (activeTab !== 'all' && activeTab !== side) {
+      setActiveTab('all')
+    }
+    const slot = config[side]?.[index]
+    if (slot && !matchesFilter(slot, index)) {
+      setSlotSearch('')
+      setStatusFilter('all')
+    }
+    const key = `${side}-${index}`
+    setExpandedSlots((prev) => ({ ...prev, [key]: true }))
+    setHighlightedSlot(key)
+
+    setTimeout(() => {
+      const el = document.getElementById(`side-banner-slot-${side}-${index}`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        el.focus?.()
+      }
+    }, 60)
+
+    setTimeout(() => {
+      setHighlightedSlot((curr) => (curr === key ? null : curr))
+    }, 2200)
+  }
+
+  const filteredSlots = useMemo(() => {
+    return {
+      left: config.left
+        .map((slot, index) => ({ slot, index }))
+        .filter(({ slot, index }) => matchesFilter(slot, index)),
+      right: config.right
+        .map((slot, index) => ({ slot, index }))
+        .filter(({ slot, index }) => matchesFilter(slot, index)),
+    }
+  }, [config.left, config.right, catalog, slotSearch, statusFilter])
+
+  const totalFilteredCount = filteredSlots.left.length + filteredSlots.right.length
+  const isFilterActive = slotSearch.trim() !== '' || statusFilter !== 'all'
 
   return (
     <div className="side-banner-panel">
@@ -600,17 +899,123 @@ function SideBannerPanel({
           </p>
         </div>
       ) : (
-        <div className="side-banner-sync" aria-label="Xem trước đồng bộ hai bên">
-          <SideBannerSyncColumn sideLabel="Bên trái" slots={config.left} catalog={catalog} />
-          <div className="side-banner-sync-sale" aria-label="Khe giảm giá ở giữa">
-            <span>Đang giảm giá</span>
+        <div className="side-banner-sync-wrapper">
+          <div className="side-banner-sync" aria-label="Xem trước đồng bộ hai bên">
+            <SideBannerSyncColumn
+              sideLabel="Bên trái"
+              side="left"
+              slots={config.left}
+              catalog={catalog}
+              onSelectSlot={handleSelectSlotFromSync}
+              isDark={isDark}
+              storeTheme={storeTheme}
+            />
+            <div className="side-banner-sync-sale" aria-label="Khe giảm giá ở giữa">
+              <span>Đang giảm giá</span>
+            </div>
+            <SideBannerSyncColumn
+              sideLabel="Bên phải"
+              side="right"
+              slots={config.right}
+              catalog={catalog}
+              onSelectSlot={handleSelectSlotFromSync}
+              isDark={isDark}
+              storeTheme={storeTheme}
+            />
           </div>
-          <SideBannerSyncColumn sideLabel="Bên phải" slots={config.right} catalog={catalog} />
+          <p className="side-banner-sync-note">
+            💡 <strong>Mẹo:</strong> Bấm vào bất kỳ thẻ xem trước nào ở trên để cuộn và làm nổi bật ngay ô banner đó. Khe ở giữa là khu vực “Đang giảm giá” ở trang chủ.
+          </p>
         </div>
       )}
-      <p className="side-banner-sync-note">
-        Xem trước đồng bộ: 2 cột trái/phải luôn cùng {count} ô. Khe ở giữa là khu vực “Đang giảm giá” ở trang chủ.
-      </p>
+
+      {/* Thanh bộ lọc & Tìm kiếm nhanh slot & Chế độ xem */}
+      {count > 0 && (
+        <div className="side-banner-filter-bar">
+          <div className="side-banner-filter-search-wrap">
+            <input
+              type="text"
+              className="side-banner-filter-search"
+              placeholder="🔍 Tìm nhanh slot (tên sản phẩm, tiêu đề, số #)..."
+              value={slotSearch}
+              onChange={(e) => setSlotSearch(e.target.value)}
+              aria-label="Tìm kiếm slot banner"
+            />
+            {slotSearch && (
+              <button
+                type="button"
+                className="side-banner-filter-clear"
+                onClick={() => setSlotSearch('')}
+                aria-label="Xóa tìm kiếm"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          <div className="side-banner-filter-chips" role="group" aria-label="Bộ lọc trạng thái">
+            <button
+              type="button"
+              className={'side-banner-chip' + (statusFilter === 'all' ? ' is-active' : '')}
+              onClick={() => setStatusFilter('all')}
+            >
+              Tất cả ({totalBanners})
+            </button>
+            <button
+              type="button"
+              className={'side-banner-chip' + (statusFilter === 'customized' ? ' is-active' : '')}
+              onClick={() => setStatusFilter('customized')}
+            >
+              ✓ Đã chọn ({totalFilled})
+            </button>
+            <button
+              type="button"
+              className={'side-banner-chip' + (statusFilter === 'empty' ? ' is-active' : '')}
+              onClick={() => setStatusFilter('empty')}
+            >
+              ⚡ Chưa chọn ({totalBanners - totalFilled})
+            </button>
+          </div>
+
+          <div className="side-banner-view-mode-group" role="group" aria-label="Chế độ hiển thị danh sách">
+            <button
+              type="button"
+              className={'side-banner-action-btn' + (viewMode === 'compact' ? ' side-banner-action-btn--primary' : '')}
+              onClick={collapseAll}
+              title="Chuyển tất cả banner sang dạng thẻ hàng ngang thu gọn"
+            >
+              ⊟ Thu gọn tất cả
+            </button>
+            <button
+              type="button"
+              className={'side-banner-action-btn' + (viewMode === 'expanded' ? ' side-banner-action-btn--primary' : '')}
+              onClick={expandAll}
+              title="Mở rộng tất cả banner để chỉnh sửa toàn bộ chi tiết"
+            >
+              ⊞ Mở rộng tất cả
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Thông tin kết quả lọc khi đang tìm kiếm */}
+      {isFilterActive && count > 0 && (
+        <div className="side-banner-filter-summary">
+          <span>
+            Đang lọc: hiển thị <strong>{totalFilteredCount}</strong> / {totalBanners} banner
+          </span>
+          <button
+            type="button"
+            className="side-banner-btn-tiny"
+            onClick={() => {
+              setSlotSearch('')
+              setStatusFilter('all')
+            }}
+          >
+            ✕ Bỏ lọc
+          </button>
+        </div>
+      )}
 
       {/* Chuyển đổi tab xem bên trái / bên phải / cả hai */}
       <div className="side-banner-view-tabs" role="tablist" aria-label="Lọc bên hiển thị">
@@ -643,27 +1048,43 @@ function SideBannerPanel({
         ['right', 'Bên phải'],
       ]
         .filter(([side]) => activeTab === 'all' || activeTab === side)
-        .map(([side, sideLabel]) => (
-          <fieldset key={side} className="side-banner-column">
-            <legend>
-              {sideLabel} · {filled(side)}/{config[side].length} banner đã chọn sản phẩm riêng
-            </legend>
-            <div className="side-banner-slots">
-              {config[side].map((slot, index) => (
-                <SideBannerSlot
-                  key={side + '-' + index}
-                  sideLabel={sideLabel}
-                  index={index}
-                  slot={slot}
-                  catalog={catalog}
-                  catalogReady={catalogReady}
-                  onChange={(patch) => onSlotChange(side, index, patch)}
-                  onOpenPicker={() => setModalSlot({ side, index, sideLabel })}
-                />
-              ))}
-            </div>
-          </fieldset>
-        ))}
+        .map(([side, sideLabel]) => {
+          const items = filteredSlots[side]
+          return (
+            <fieldset key={side} className="side-banner-column">
+              <legend>
+                {sideLabel} · {filled(side)}/{config[side].length} banner đã chọn sản phẩm riêng
+                {isFilterActive && ` (Khớp lọc: ${items.length})`}
+              </legend>
+              {items.length === 0 ? (
+                <p className="side-banner-empty-filter" style={{ textAlign: 'center', padding: '24px 0', color: 'var(--theme-muted)' }}>
+                  Không có banner nào ở {sideLabel.toLowerCase()} khớp với bộ lọc hiện tại.
+                </p>
+              ) : (
+                <div className={'side-banner-slots' + (viewMode === 'compact' ? ' is-compact' : '')}>
+                  {items.map(({ slot, index }) => (
+                    <SideBannerSlot
+                      key={side + '-' + index}
+                      sideLabel={sideLabel}
+                      side={side}
+                      index={index}
+                      slot={slot}
+                      catalog={catalog}
+                      catalogReady={catalogReady}
+                      isDark={isDark}
+                      storeTheme={storeTheme}
+                      isExpanded={isSlotExpanded(side, index)}
+                      isHighlighted={highlightedSlot === `${side}-${index}`}
+                      onToggleExpand={() => toggleSlotExpand(side, index)}
+                      onChange={(patch) => onSlotChange(side, index, patch)}
+                      onOpenPicker={() => setModalSlot({ side, index, sideLabel })}
+                    />
+                  ))}
+                </div>
+              )}
+            </fieldset>
+          )
+        })}
 
       {/* Nút lưu banner */}
       <div className="side-banner-save">
@@ -872,6 +1293,7 @@ export default function ThemeEditor({ csrfToken }) {
   }
 
   const variant = activeTheme[mode]
+  const isDark = mode === 'dark' || (typeof document !== 'undefined' && document.documentElement.getAttribute('data-admin-theme') === 'dark')
 
   return (
     <section className="admin-module-card theme-editor">
@@ -954,6 +1376,8 @@ export default function ThemeEditor({ csrfToken }) {
           catalogError={catalogError}
           busy={busy}
           status={status}
+          isDark={isDark}
+          storeTheme={storeTheme}
           onRetryCatalog={retryCatalog}
           onCountChange={changeSideBannerCount}
           onSlotChange={changeSideBannerSlot}

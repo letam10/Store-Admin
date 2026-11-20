@@ -1,19 +1,23 @@
 {
   "manifest_version": 3,
-  "name": "OmniCart Social Auto-Poster & Inspiration Bridge",
-  "version": "1.0.0",
-  "description": "Tự động đăng bài thật lên Facebook cá nhân John Harper và TikTok @harutv666 an toàn qua tab trình duyệt, không chiếm chuột/bàn phím, quét cảm hứng viral thật.",
+  "name": "OmniCart Social Auto-Poster & OmniVision Bridge",
+  "version": "2.0.0",
+  "description": "Tự động đăng bài có ảnh lên Facebook Hoàng Thái HT và TikTok @harutv666 bằng OmniVision (mắt hình học + Multimodal Vision AI) kết nối thời gian thực với Store-Admin.",
   "permissions": [
     "tabs",
     "scripting",
     "activeTab",
-    "storage"
+    "storage",
+    "clipboardRead",
+    "clipboardWrite",
+    "alarms"
   ],
   "host_permissions": [
     "http://localhost/*",
     "http://127.0.0.1/*",
     "https://*.facebook.com/*",
-    "https://*.tiktok.com/*"
+    "https://*.tiktok.com/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -21,30 +25,40 @@
   "content_scripts": [
     {
       "matches": [
-        "http://localhost/*",
-        "http://127.0.0.1/*"
+        "http://localhost:5174/*",
+        "http://127.0.0.1:5174/*"
       ],
-      "js": ["content-admin-bridge.js"],
-      "run_at": "document_start"
+      "js": [
+        "content-admin-bridge.js"
+      ],
+      "run_at": "document_idle"
     },
     {
       "matches": [
         "https://*.facebook.com/*"
       ],
-      "js": ["content-media.js", "content-facebook.js"],
+      "js": [
+        "vision-engine.js",
+        "content-media.js",
+        "content-facebook.js"
+      ],
       "run_at": "document_idle"
     },
     {
       "matches": [
         "https://*.tiktok.com/*"
       ],
-      "js": ["content-media.js", "content-tiktok.js"],
+      "js": [
+        "vision-engine.js",
+        "content-media.js",
+        "content-tiktok.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "OmniCart Social Bridge",
+    "default_title": "OmniCart OmniVision Bridge",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

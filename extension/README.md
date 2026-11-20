@@ -2,64 +2,52 @@
 
 /*
   FILE NOTE
-  - Mục đích: Hướng dẫn cài đặt và sử dụng Chrome Extension OmniCart Social Bridge tự động hóa đăng bài thật lên Facebook John Harper và TikTok @harutv666 không chiếm quyền điều khiển chuột bàn phím.
+  - Mục đích: Hướng dẫn cài đặt và sử dụng Chrome Extension OmniCart Social Bridge tự động đăng bài có ảnh lên Facebook Hoàng Thái HT và TikTok @harutv666.
   - Liên kết trực tiếp: Store-Admin/extension/manifest.json, Store-Admin/src/pages/AdminSocialAutomation.jsx.
   - Vùng ảnh hưởng khi sửa: Tài liệu hướng dẫn sử dụng và kiểm thử thực tế cho người dùng và reviewer.
 */
 
-## 1. Giới thiệu tổng quan
-**OmniCart Social Bridge** là tiện ích mở rộng trình duyệt (Chrome Extension Manifest V3) được thiết kế đặc biệt để giải quyết triệt để 2 bài toán lớn trong tự động hóa tiếp thị mạng xã hội:
-1. **Tránh vi phạm bảo mật từ Meta & TikTok**: Không gọi ngầm API token không chính thức (Graph API / TikTok API) gây checkpoint, khóa nick hoặc yêu cầu duyệt doanh nghiệp phức tạp. Tiện ích thao tác trực tiếp trên phiên đăng nhập cookie có sẵn của chính chủ trên trình duyệt.
-2. **Không chiếm quyền điều khiển máy tính**: Hoàn toàn **không dùng thư viện di chuyển chuột máy tính vật lý (PyAutoGUI/RobotJS)**. Tiện ích chỉ điều phối đúng **2 hoặc 3 tab cần thiết** trong trình duyệt bằng DOM Events và Chrome Scripting API ngầm trong tab. Bạn vẫn có thể dùng chuột, gõ bàn phím và làm việc ở các phần mềm khác bình thường trong khi hệ thống đăng bài.
+# OmniCart Social Bridge v2.0 — OmniVision Engine (Manifest V3)
+
+## 1. Điểm nâng cấp nổi bật ở v2.0.0
+1. **Lõi thị giác 2 tầng (`vision-engine.js`)**:
+   - **Tầng 1 — Mắt Hình Học & Ngữ Nghĩa (luôn bật, chạy ngầm 100%)**: Không còn phụ thuộc class CSS dễ hỏng. Nhận diện nút và ô nhập liệu dựa trên vị trí tương đối với nhãn hiển thị (ví dụ tìm nhãn *"Người có thể nhìn thấy bài đăng này"* rồi chọn dropdown ngay bên dưới; phân biệt chính xác ô Tiêu đề `0/90` và Mô tả `0/4000`; loại trừ tuyệt đối ảnh avatar và thanh header).
+   - **Tầng 2 — Mắt AI Đa Phương Thức (Set-of-Mark Vision AI)**: Hỗ trợ **Ollama Local** (`qwen2.5vl:7b` / `llama3.2-vision`), **Google Gemini** (`gemini-2.5-flash`) hoặc **OpenAI / LM Studio** để tự xử lý khi Facebook/TikTok thay đổi giao diện đột xuất.
+2. **Sửa triệt để luồng đăng Facebook Hoàng Thái HT (`100037782653708`)**:
+   - Định vị chuẩn khung *"Bạn đang nghĩ gì?"* trong cột chính (kèm phương án dự phòng *"Ảnh/video"*).
+   - Nhập liệu đa chiến lược tương thích **Lexical Editor** cả trong tab nền.
+   - Đổi & xác nhận đầy đủ quyền riêng tư (**Công khai** / **Chỉ mình tôi**), kể cả bấm *"Xem thêm"* và bấm *"Xong/Lưu"*.
+3. **Sửa triệt để luồng đăng TikTok Studio Photo Mode (`@harutv666`)**:
+   - Tự chuyển từ tab **Video** sang tab **Ảnh**; tự dọn bản nháp cũ nếu còn sót.
+   - Đợi màn hình thực sự chuyển sang biểu mẫu **Chi tiết** có **Ảnh bìa** (không nhận nhầm avatar góc trên phải).
+   - Điền đủ cả **Tiêu đề (0/90)** lẫn **Mô tả & Hashtag (0/4000)** và tự kiểm chứng bộ đếm ký tự.
+   - Tự cuộn chọn đúng **Người có thể nhìn thấy bài đăng này**, bấm nút **Đăng** chính xác và xử lý popup *"Tiếp tục đăng?"*.
+4. **Cầu nối Store-Admin thời gian thực**:
+   - Dùng **Persistent Port** chống ngủ Service Worker giữa chừng và tự bơm lại cầu nối khi reload extension.
+   - Hiển thị **OmniVision Live Dock** gọn nhẹ ở góc phải dưới trang `http://localhost:5174` để theo dõi từng bước đăng bài theo thời gian thực.
 
 ---
 
-## 2. Thông tin tài khoản đích
-- **Facebook cá nhân**: [John Harper (ID: 61580644871703)](https://www.facebook.com/profile.php?id=61580644871703)
-- **TikTok cá nhân**: [@harutv666 (Tên: harutv)](https://www.tiktok.com/@harutv666)
+## 2. Cài đặt / Cập nhật nhanh trong 1 phút
+Vào `chrome://extensions/` → Bấm biểu tượng **Tải lại (Reload ↻)** ở tiện ích **OmniCart Social Auto-Poster & OmniVision Bridge**.
+Quay lại tab `http://localhost:5174` — cầu nối sẽ tự kết nối lại và hiện huy hiệu xanh **👁️ OmniVision v2.0.0 • Kết nối tốt** ở góc phải dưới màn hình.
 
 ---
 
-## 3. Các bước cài đặt Extension vào Chrome / Edge trong 1 phút
-1. Mở trình duyệt Chrome hoặc Microsoft Edge.
-2. Truy cập vào đường dẫn: `chrome://extensions/` (hoặc `edge://extensions/`).
-3. Bật công tắc **Chế độ dành cho nhà phát triển (Developer mode)** ở góc trên bên phải màn hình.
-4. Bấm nút **Tải tiện ích đã giải nén (Load unpacked)** ở góc trên bên trái.
-5. Chọn thư mục tiện ích:
-   ```text
-   D:\Học Tập\Website_React\Store-Admin\extension
-   ```
-6. Tiện ích **OmniCart Social Auto-Poster & Inspiration Bridge** sẽ xuất hiện trên thanh công cụ với biểu tượng robot. Bấm ghim (Pin) để tiện theo dõi.
+## 3. Kiểm thử nhanh trước khi bấm Đăng thật
+1. Mở sẵn 2 tab (hoặc để extension tự mở):
+   - Facebook: `https://www.facebook.com/profile.php?id=100037782653708` (đã đăng nhập **Hoàng Thái HT**).
+   - TikTok Studio: `https://www.tiktok.com/tiktokstudio/upload` (đã đăng nhập **@harutv666**).
+2. Bấm vào icon Extension trên thanh công cụ Chrome → Bấm thử **👁️ Soi Tab FB** và **👁️ Soi Tab TikTok** để xác nhận "mắt" của extension đã nhìn thấy đúng từng nút và ô nhập liệu.
+3. *(Tùy chọn)* Chuyển sang tab **🧠 Cấu hình Mắt AI** trong Popup:
+   - Nếu máy đã cài Ollama Local: chạy `ollama pull qwen2.5vl:7b` rồi bấm **🧪 Kiểm tra mắt AI**.
+   - Hoặc chọn **Google Gemini** (`gemini-2.5-flash`) và dán API key nếu muốn dùng Vision AI chụp màn hình thật khi gặp lỗi.
+   - Nếu không bật Vision AI, chế độ **OmniVision Hình học** vẫn hoạt động độc lập 100%.
+```
 
 ---
 
-## 4. Cơ chế điều khiển 3 Tab thông minh
-Hệ thống kết nối và kiểm soát duy nhất 3 tab trình duyệt:
-- **Tab 1: Trang quản trị Store-Admin** (`http://localhost:5174/admin`)
-  - Chạy giao diện quản trị tiếp thị, bộ lập lịch chu kỳ (30 giây, 30 phút, 1 giờ...).
-  - Kết nối hai chiều với Extension qua `content-admin-bridge.js`.
-- **Tab 2: Facebook cá nhân John Harper** (`https://www.facebook.com/profile.php?id=61580644871703`)
-  - Tự động mở hộp thoại soạn thảo ("Bạn đang nghĩ gì, John?").
-  - Gửi ảnh sản phẩm và caption do AI Local tạo.
-  - Chỉ tiếp tục khi giao diện xác nhận quyền riêng tư **Chỉ mình tôi (only_me)**.
-  - Chỉ lưu là đã đăng khi trang hiển thị bài mới và extension lấy được permalink cụ thể.
-- **Tab 3: TikTok Studio / Upload** (`https://www.tiktok.com/tiktokstudio/upload`)
-  - Gửi ảnh sản phẩm và caption cho tài khoản `@harutv666` nếu trang hiện tại nhận ảnh.
-  - Dừng nếu không có bộ tải ảnh, không xác nhận được quyền riêng tư hoặc không tìm được permalink bài mới.
-
----
-
-## 5. Hướng dẫn kiểm thử thực tế (Testing)
-1. **Kiểm tra kết nối**:
-   - Mở tab Quản trị `http://localhost:5174/admin` -> chọn mục **Local AI & MXH** -> **Tự động đăng bài Mạng Xã Hội**.
-   - Tại banner trên cùng, bạn sẽ thấy huy hiệu xanh: `🟢 Tiện ích trình duyệt (Chrome Extension) Đã kết nối sẵn sàng`.
-2. **Kiểm tra luồng đăng**:
-   - Mở **AI Copywriting Studio**, chọn sản phẩm/ảnh và dùng caption đã được AI Local tạo; quyền riêng tư của lượt đăng được khóa ở **Chỉ mình tôi**.
-   - Bấm **Đăng Ngay Lên Mạng Xã Hội**. Extension mở hoặc dùng tab nền; không dùng chuột/bàn phím hệ thống.
-   - Nhật ký chỉ chuyển sang **Đã đăng** khi có permalink riêng, mã bài, và phản hồi lưu lịch sử thành công. Link trang cá nhân không được tính là permalink.
-   - Nếu Facebook/TikTok không nhận ảnh, không xác nhận được quyền riêng tư, hoặc không tìm thấy bài mới sau khi gửi, giao diện báo lỗi và không ghi là đã đăng.
-   - Các nút đăng trong popup chỉ mở Store-Admin để chọn nội dung AI và ảnh; popup không tự gửi bài mẫu.
-3. **Thử nghiệm Quét bài Viral thật**:
-   - Chuyển sang tab **Hội Nhóm & Viral**.
-   - Bấm nút **🔥 Cào dữ liệu bài Viral thật từ Facebook & TikTok**.
-   - Extension sẽ quét trực tiếp bảng tin Facebook và mục xu hướng TikTok, lưu các bài viết có tương tác thật vào cơ sở dữ liệu để làm kho cảm hứng viết bài.
+### 4. Lưu ý nhỏ để kiểm thử trơn tru ngay lần đầu
+1. **Nhớ thêm file mới `vision-engine.js`** vào đúng thư mục `Store-Admin/extension/` trước khi bấm **Reload** trong `chrome://extensions/`.
+2. **Nếu trước đó bạn đã chạy thử TikTok và bị kẹt lại ở màn hình Ảnh 3**, bản v2.0 đã có sẵn cơ chế tự phát hiện bản nháp cũ đang mở và tự bấm **Hủy bỏ** để làm mới trước khi đăng bài tiếp theo.
+3. **Quan sát trực tiếp qua góc phải dưới trang Store-Admin**: Khi bấm **Đăng Thật FB** hoặc **Đăng Thật TikTok**, khung **👁️ OmniVision Live Telemetry** sẽ tự mở ra ghi lại rõ từng bước (nạp ảnh, xác nhận ảnh bìa, điền tiêu đề, điền mô tả, kiểm tra quyền riêng tư, bấm đăng, kiểm chứng kết quả) — nếu sau này Facebook hay TikTok có đổi giao diện nào bất ngờ, bạn chỉ cần gửi lại dòng log đó hoặc bật thêm **Ollama / Gemini Vision** trong Popup là xử lý ngay được.

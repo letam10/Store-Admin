@@ -1,8 +1,9 @@
 /*
   FILE NOTE
-  - Mục đích: Controller API quản trị cho module Tự động hóa tiếp thị Mạng Xã Hội (chu kỳ 30 giây / phút / giờ, quyền riêng tư chỉ mình tôi/công khai, liên kết Facebook chính thức John Harper https://www.facebook.com/profile.php?id=61580644871703, TikTok @harutv666, API đăng bài thật /publish-real và nạp bài viral thật /viral/import-real).
+  - Mục đích: Controller API quản trị cho module Tự động hóa tiếp thị Mạng Xã Hội (chu kỳ 30 giây / phút / giờ, quyền riêng tư chỉ mình tôi/công khai, Facebook Hoàng Thái HT, TikTok @harutv666, API đăng bài thật /publish-real).
   - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.SocialAutomation.cs, Store-Admin/server-dotnet/Services/SocialCopywriterService.cs, Store-Admin/server-dotnet/Services/SocialAutoPostWorker.cs
-  - Vùng ảnh hưởng khi sửa: Toàn bộ API mạng xã hội cung cấp dữ liệu cho tab "Tự động đăng bài Mạng Xã Hội" trên giao diện Admin, đăng bài Facebook John Harper và TikTok @harutv666.
+  - Vùng ảnh hưởng khi sửa: Toàn bộ API mạng xã hội cung cấp dữ liệu cho tab "Tự động đăng bài Mạng Xã Hội" trên giao diện Admin, đăng bài Facebook Hoàng Thái HT và TikTok @harutv666.
+  - Sửa 2026-11-20: Chấp nhận hai lựa chọn riêng tư dùng chung cho Facebook và TikTok.
 */
 
 using Microsoft.AspNetCore.Mvc;
@@ -22,7 +23,7 @@ public sealed class AdminSocialController(
     SocialAutoPostWorker worker) : ControllerBase
 {
     private const string Cookie = "store_admin_session";
-    public const string DefaultFacebookProfileUrl = "https://www.facebook.com/profile.php?id=61580644871703";
+    public const string DefaultFacebookProfileUrl = "https://www.facebook.com/profile.php?id=100037782653708";
     public const string DefaultTikTokProfileUrl = "https://www.tiktok.com/@harutv666";
 
     private bool CsrfValid()
@@ -165,8 +166,9 @@ public sealed class AdminSocialController(
         var platform = (request.Platform ?? post.Platform).ToLowerInvariant();
         if (platform != post.Platform.ToLowerInvariant() || platform is not ("facebook" or "tiktok"))
             return BadRequest(new { error = "PLATFORM_MISMATCH", message = "Nền tảng xác nhận không khớp với bản nháp." });
-        if (request.Privacy != "only_me")
-            return BadRequest(new { error = "ONLY_ME_PRIVACY_REQUIRED", message = "Lượt đăng này yêu cầu quyền riêng tư Chỉ mình tôi." });
+        var privacy = (request.Privacy ?? post.Privacy ?? "public").Trim().ToLowerInvariant();
+        if (privacy is not ("only_me" or "public"))
+            return BadRequest(new { error = "INVALID_PRIVACY", message = "Quyền riêng tư phải là 'only_me' hoặc 'public'." });
         if (!IsRealPostPermalink(platform, request.PostUrl, request.RealPostId))
             return BadRequest(new { error = "INVALID_POST_PERMALINK", message = "Đường dẫn phải trỏ đến một bài viết cụ thể đã đăng, không phải trang cá nhân." });
         if (!DateTimeOffset.TryParse(request.PublishedTime, out var publishedAt))
@@ -177,12 +179,45 @@ public sealed class AdminSocialController(
             request.PostUrl,
             publishedAt.ToUniversalTime().ToString("o"),
             platform,
-            request.Privacy,
+            privacy,
             request.LikesCount,
             request.SharesCount,
             request.CommentsCount);
         var updated = db.GetSocialPostById(id);
         return Ok(new { ok = success, post = updated });
+    }
+
+    [HttpPost("posts/{id}/publish-failure")]
+    public IActionResult RecordPublishFailure(string id, [FromBody] PublishFailureRequest request)
+    {
+        if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+
+        var post = db.GetSocialPostById(id);
+        if (post == null) return NotFound(new { error = "POST_NOT_FOUND" });
+        if (post.Status == "published")
+            return Conflict(new { error = "POST_ALREADY_PUBLISHED", message = "Bài đã được xác nhận đăng; không thể đổi trạng thái thành lỗi." });
+
+        var status = (request.Status ?? "failed").Trim().ToLowerInvariant();
+        if (status is not ("failed" or "unverified"))
+            return BadRequest(new { error = "INVALID_FAILURE_STATUS" });
+
+        string? verifiedPostUrl = null;
+        if (status == "unverified" && !string.IsNullOrWhiteSpace(request.PostUrl) &&
+            !string.IsNullOrWhiteSpace(request.RealPostId) &&
+            IsRealPostPermalink(post.Platform.ToLowerInvariant(), request.PostUrl, request.RealPostId))
+        {
+            verifiedPostUrl = request.PostUrl;
+        }
+
+        var errorMessage = string.IsNullOrWhiteSpace(request.ErrorMessage)
+            ? "Extension chưa xác nhận kết quả đăng bài."
+            : request.ErrorMessage.Trim();
+        if (errorMessage.Length > 1000) errorMessage = errorMessage[..1000];
+
+        var updatedStatus = db.MarkSocialPostPublishFailure(id, status, errorMessage, verifiedPostUrl);
+        if (!updatedStatus) return Conflict(new { error = "POST_STATE_CHANGED" });
+
+        return Ok(new { ok = true, post = db.GetSocialPostById(id) });
     }
 
     private static bool IsRealPostPermalink(string platform, string postUrl, string realPostId)
