@@ -1,73 +1,145 @@
 {
+
   "manifest_version": 3,
+
   "name": "OmniCart Social Auto-Poster & OmniVision Bridge",
-  "version": "3.0.0",
-  "description": "Tự động đăng bài có ảnh, theo dõi duyệt bài TikTok 3-5 phút, cào bài viral (FB >=5K, TikTok >=50K) và lấy hội nhóm Facebook tự động trên bất kỳ tài khoản nào đang đăng nhập.",
+
+  "version": "3.1.0",
+
+  "description": "Tự động đăng bài có ảnh, theo dõi duyệt bài TikTok, cào bài viral (FB >=5K, TikTok >=50K) với bộ đếm trượt 5 phút và lấy hội nhóm Facebook tự động trên bất kỳ tài khoản nào đang đăng nhập.",
+
   "permissions": [
+
     "tabs",
+
     "scripting",
+
     "activeTab",
+
     "storage",
+
     "clipboardRead",
+
     "clipboardWrite",
+
     "alarms"
+
   ],
+
   "host_permissions": [
+
     "http://localhost/*",
+
     "http://127.0.0.1/*",
+
     "https://*.facebook.com/*",
+
     "https://*.tiktok.com/*",
+
     "https://*/*"
+
   ],
+
   "background": {
+
     "service_worker": "background.js"
+
   },
+
   "content_scripts": [
+
     {
+
       "matches": [
+
         "http://localhost:5174/*",
+
         "http://127.0.0.1:5174/*"
+
       ],
+
       "js": [
+
         "content-admin-bridge.js"
+
       ],
+
       "run_at": "document_idle"
+
     },
+
     {
+
       "matches": [
+
         "https://*.facebook.com/*"
+
       ],
+
       "js": [
+
         "vision-engine.js",
+
         "content-media.js",
+
         "content-facebook.js"
+
       ],
+
       "run_at": "document_idle"
+
     },
+
     {
+
       "matches": [
+
         "https://*.tiktok.com/*"
+
       ],
+
       "js": [
+
         "vision-engine.js",
+
         "content-media.js",
+
         "content-tiktok.js"
+
       ],
+
       "run_at": "document_idle"
+
     }
+
   ],
+
   "action": {
+
     "default_popup": "popup.html",
-    "default_title": "OmniCart OmniVision Bridge v3.0",
+
+    "default_title": "OmniCart OmniVision Bridge v3.1",
+
     "default_icon": {
+
       "16": "icons/icon16.png",
+
       "48": "icons/icon48.png",
+
       "128": "icons/icon128.png"
+
     }
+
   },
+
   "icons": {
+
     "16": "icons/icon16.png",
+
     "48": "icons/icon48.png",
+
     "128": "icons/icon128.png"
+
   }
+
 }

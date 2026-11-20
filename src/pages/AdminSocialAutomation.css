@@ -1307,3 +1307,112 @@ html[data-admin-theme="dark"] .social-viral-column {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ==========================================================================
+
+   V3.1: BỘ SẮP XẾP NHỎ CHO HỘI NHÓM & 2 CỘT BÀI VIRAL
+
+   ========================================================================== */
+
+.social-sort-bar {
+
+  display: inline-flex;
+
+  align-items: center;
+
+  gap: 6px;
+
+  font-size: 12px;
+
+  font-weight: 700;
+
+}
+
+
+
+.social-sort-select {
+
+  padding: 6px 10px;
+
+  border-radius: 8px;
+
+  border: 1px solid var(--admin-border-light, #dce7df);
+
+  background: #fbfdfc;
+
+  color: var(--admin-text-dark, #123223);
+
+  font-size: 12px;
+
+  font-weight: 600;
+
+  cursor: pointer;
+
+  outline: none;
+
+}
+
+
+
+.social-viral-head-tools {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  flex-wrap: wrap;
+
+}
+
+
+
+.social-sort-select--mini {
+
+  padding: 4px 8px;
+
+  font-size: 11px;
+
+  border-radius: 7px;
+
+  background: rgba(0, 0, 0, 0.28) !important;
+
+  border: 1px solid rgba(255, 255, 255, 0.28) !important;
+
+  color: #ffffff !important;
+
+}
+
+
+
+.social-sort-select--mini option {
+
+  background: #0d2218;
+
+  color: #edf7ef;
+
+}
+
+
+
+html[data-admin-theme="dark"] .social-sort-select {
+
+  background: #0b1d16 !important;
+
+  border-color: #28543a !important;
+
+  color: #edf7ef !important;
+
+}
+
+
+
+html[data-admin-theme="dark"] .social-sort-select option {
+
+  background: #0b1d16;
+
+  color: #edf7ef;
+
+}

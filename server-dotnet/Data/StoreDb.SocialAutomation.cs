@@ -1,10 +1,13 @@
 /*
   FILE NOTE
-  - Mục đích: Truy cập dữ liệu SQL Server cho Tự động hóa đăng bài MXH đa tài khoản (không hardcode tên/ID nick).
-  - Nâng cấp:
-    1. IsRealSocialPostPermalink chấp nhận link bài viết thật từ BẤT KỲ tài khoản Facebook hoặc TikTok nào (@any_handle/video|photo/id).
-    2. Hỗ trợ trạng thái pending_review (chờ TikTok duyệt 3-5 phút).
-    3. Thêm DeleteAllSocialPosts(), DeleteAllSocialViralPosts(), ImportRealGroupTargets() (chống trùng URL) và ImportRealViralPosts() chống trùng URL.
+  - Mục đích: Truy cập dữ liệu SQL Server cho Tự động hóa đăng bài MXH đa tài khoản v3.1.0 (không hardcode tên/ID nick).
+  - Nâng cấp v3.1.0:
+    1. ImportRealGroupTargets chống trùng theo cả URL lẫn Tên nhóm + cập nhật số thành viên nếu nhóm cũ từng bị 0.
+    2. IsRealSocialPostPermalink chấp nhận link bài viết thật từ BẤT KỲ tài khoản Facebook hoặc TikTok nào (@any_handle/video|photo/id).
+    3. Hỗ trợ trạng thái pending_review (chờ TikTok duyệt 3-5 phút).
+    4. Thêm DeleteAllSocialPosts(), DeleteAllSocialViralPosts(), ImportRealGroupTargets() và ImportRealViralPosts().
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Controllers/AdminSocialController.cs, Store-Admin/server-dotnet/Models/SocialAutomationModels.cs
+  - Vùng ảnh hưởng khi sửa: Dữ liệu đăng bài tự động, nhóm Facebook mục tiêu, bài viết viral và cấu hình chiến dịch.
 */
 
 using System.Data;
@@ -565,19 +568,45 @@ public sealed partial class StoreDb
 
     public int ImportRealGroupTargets(IEnumerable<SocialGroupTarget> groups)
     {
-        var existingUrls = new HashSet<string>(
-            GetSocialGroupTargets().Select(g => g.GroupUrl.Trim().TrimEnd('/').ToLowerInvariant()),
-            StringComparer.OrdinalIgnoreCase);
+        var existing = GetSocialGroupTargets();
+        var existingByUrl = new Dictionary<string, SocialGroupTarget>(StringComparer.OrdinalIgnoreCase);
+        var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var g in existing)
+        {
+            var urlKey = g.GroupUrl.Trim().TrimEnd('/').ToLowerInvariant();
+            existingByUrl[urlKey] = g;
+            existingNames.Add(g.GroupName.Trim().ToLowerInvariant());
+        }
 
         int added = 0;
+        using var db = Open();
         foreach (var group in groups)
         {
             if (string.IsNullOrWhiteSpace(group.GroupName) || string.IsNullOrWhiteSpace(group.GroupUrl)) continue;
-            var normalizedUrl = group.GroupUrl.Trim().TrimEnd('/').ToLowerInvariant();
-            if (existingUrls.Contains(normalizedUrl)) continue;
+            var urlKey = group.GroupUrl.Trim().TrimEnd('/').ToLowerInvariant();
+            var nameKey = group.GroupName.Trim().ToLowerInvariant();
+
+            if (existingByUrl.TryGetValue(urlKey, out var old))
+            {
+                // Nếu nhóm cũ từng bị lưu lỗi 0 thành viên -> cập nhật lại số thành viên thật!
+                if (old.MembersCount == 0 && group.MembersCount > 0)
+                {
+                    using var upd = db.CreateCommand();
+                    upd.CommandText = "UPDATE social_group_targets SET members_count = @m, interaction_rate = @r WHERE id = @id";
+                    upd.Parameters.Add(new SqlParameter("@m", SqlDbType.Int) { Value = group.MembersCount });
+                    upd.Parameters.Add(new SqlParameter("@r", SqlDbType.NVarChar, 50) { Value = group.InteractionRate ?? "Cao" });
+                    upd.Parameters.Add(new SqlParameter("@id", SqlDbType.NVarChar, 100) { Value = old.Id });
+                    upd.ExecuteNonQuery();
+                }
+                continue;
+            }
+
+            if (existingNames.Contains(nameKey)) continue;
 
             AddSocialGroupTarget(group);
-            existingUrls.Add(normalizedUrl);
+            existingByUrl[urlKey] = group;
+            existingNames.Add(nameKey);
             added++;
         }
         return added;

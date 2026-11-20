@@ -1,274 +1,549 @@
 /*
+
   FILE NOTE
-  - Mục đích: Bộ điều khiển API Tự động hóa đăng bài Mạng Xã Hội đa tài khoản.
+
+  - Mục đích: Bộ điều khiển API Tự động hóa đăng bài MXH đa tài khoản (v3.1).
+
   - Bổ sung mới:
-    1. POST /api/admin/social/posts/{id}/pending-review (lưu trạng thái chờ TikTok duyệt 3-5 phút).
-    2. DELETE /api/admin/social/posts/clear-all (xóa toàn bộ nhật ký đăng bài).
-    3. DELETE /api/admin/social/viral/clear-all (xóa toàn bộ bài viral đã cào).
-    4. POST /api/admin/social/groups/import-real (lưu 5 hội nhóm Facebook thật từ Extension).
-    5. Cho phép xác minh link bài thật từ BẤT KỲ nick Facebook / TikTok nào đang đăng nhập.
+
+    1. GET /api/admin/social/posts/export — Xuất báo cáo lịch sử đăng bài dạng file Excel (.xlsx) chuẩn OpenXML!
+
+    2. Chấp nhận permalink thật của BẤT KỲ tài khoản Facebook hoặc TikTok nào (@any_handle/video|photo/id).
+
+    3. Giữ nguyên đầy đủ các endpoint cũ + /pending-review + /posts/clear-all + /viral/clear-all + /groups/import-real.
+
 */
 
+
+
+using System.Text.RegularExpressions;
+
 using Microsoft.AspNetCore.Mvc;
+
 using StoreApi.Data;
+
 using StoreApi.Models;
+
 using StoreApi.Security;
+
 using StoreApi.Services;
+
+
 
 namespace StoreApi.Controllers;
 
+
+
 [ApiController]
+
 [Route("api/admin/social")]
+
 [TypeFilter(typeof(AdminAccessFilter))]
+
 public sealed class AdminSocialController(
+
     StoreDb db,
+
     SocialCopywriterService copywriter,
+
     SocialAutoPostWorker worker) : ControllerBase
+
 {
+
     public const string DefaultFacebookProfileUrl = "https://www.facebook.com/me";
+
     public const string DefaultTikTokProfileUrl = "https://www.tiktok.com/";
 
+
+
     [HttpGet("stats")]
-    public IActionResult Stats() => Ok(new { stats = db.GetSocialSummaryStats() });
+
+    public IActionResult Stats() => Ok(new { ok = true, stats = db.GetSocialSummaryStats() });
+
+
 
     [HttpGet("settings")]
-    public IActionResult GetSettings() => Ok(new { settings = db.GetSocialSettings() });
+
+    public IActionResult GetSettings() => Ok(new { ok = true, settings = db.GetSocialSettings() });
+
+
 
     [HttpPost("settings")]
+
     public IActionResult SaveSettings([FromBody] SocialCampaignSettings request)
+
     {
+
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
-        var privacy = string.Equals(request.Privacy, "public", StringComparison.OrdinalIgnoreCase) ? "public" : "only_me";
-        request.Privacy = privacy;
-        var saved = db.SaveSocialSettings(request);
-        return Ok(new { ok = true, settings = saved });
+
+        request.Privacy = string.Equals(request.Privacy, "public", StringComparison.OrdinalIgnoreCase) ? "public" : "only_me";
+
+        return Ok(new { ok = true, settings = db.SaveSocialSettings(request) });
+
     }
+
+
 
     [HttpPost("trigger-cycle")]
+
     public async Task<IActionResult> TriggerCycle([FromQuery] string? platform = null, CancellationToken cancellationToken = default)
+
     {
+
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+
         var post = await worker.TriggerCycleNowAsync(platform, cancellationToken);
+
         if (post is null) return BadRequest(new { ok = false, error = "CYCLE_BUSY_OR_NO_PRODUCT" });
-        return Ok(new { ok = true, post });
+
+        return Ok(new { ok = true, post, stats = db.GetSocialSummaryStats() });
+
     }
+
+
 
     [HttpPost("generate")]
+
     public async Task<IActionResult> Generate([FromBody] GeneratePostRequest request)
+
     {
-        if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+
         var settings = db.GetSocialSettings();
+
         var product = db.GetCatalogProductForPromotion(settings.PreferredCategory, request.ProductId);
+
         if (product is null) return NotFound(new { ok = false, error = "PRODUCT_NOT_FOUND" });
 
+
+
         var generated = await copywriter.GeneratePostAsync(
-            product.Value.Name,
-            product.Value.Price,
-            product.Value.Category,
-            product.Value.Description,
-            request.Platform ?? "facebook",
-            request.ToneStyle ?? settings.ToneStyle,
-            settings,
-            request.CustomTopic,
-            product.Value.Id);
+
+            product.Value.Name, product.Value.Price, product.Value.Category, product.Value.Description,
+
+            request.Platform ?? "facebook", request.ToneStyle ?? settings.ToneStyle, settings, request.CustomTopic, product.Value.Id);
+
+
 
         return Ok(new
+
         {
+
             ok = true,
+
             product = new
+
             {
+
                 id = product.Value.Id,
+
                 name = product.Value.Name,
+
                 price = product.Value.Price,
+
                 image = product.Value.Image,
+
                 category = product.Value.Category,
+
                 description = product.Value.Description
+
             },
+
             generated
+
         });
+
     }
+
+
 
     [HttpGet("posts")]
-    public IActionResult GetPosts([FromQuery] string? status = null, [FromQuery] string? platform = null, [FromQuery] int limit = 80)
-        => Ok(new { posts = db.GetSocialPosts(status, platform, limit) });
 
-    [HttpPost("posts/create")]
-    public IActionResult CreatePost([FromBody] CreateCustomPostRequest request)
+    public IActionResult GetPosts([FromQuery] string? status = null, [FromQuery] string? platform = null, [FromQuery] int limit = 120)
+
+        => Ok(new { ok = true, posts = db.GetSocialPosts(status, platform, limit) });
+
+
+
+    [HttpGet("posts/export")]
+
+    public IActionResult ExportPostsExcel([FromQuery] string? status = null, [FromQuery] string? platform = null)
+
     {
-        if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
-        var platform = (request.Platform ?? "facebook").Trim().ToLowerInvariant();
-        if (platform is not ("facebook" or "tiktok")) return BadRequest(new { ok = false, error = "UNSUPPORTED_PLATFORM" });
-        var privacy = string.Equals(request.Privacy, "public", StringComparison.OrdinalIgnoreCase) ? "public" : "only_me";
 
-        var created = db.CreateSocialPost(new SocialAutoPost
-        {
-            ProductId = request.ProductId,
-            ProductName = string.IsNullOrWhiteSpace(request.ProductName) ? "Sản phẩm OmniCart" : request.ProductName.Trim(),
-            ProductPrice = request.ProductPrice,
-            ProductImage = request.ProductImage,
-            Platform = platform,
-            Title = request.Title?.Trim() ?? "",
-            Content = request.Content?.Trim() ?? "",
-            Hashtags = request.Hashtags?.Trim() ?? "",
-            Status = "internal_draft",
-            TargetGroup = string.IsNullOrWhiteSpace(request.TargetGroup) ? "Trang cá nhân đang đăng nhập" : request.TargetGroup.Trim(),
-            Privacy = privacy
-        });
+        var posts = db.GetSocialPosts(status, platform, limit: 1000);
 
-        return Ok(new { ok = true, post = created });
+        var bytes = SocialExcelExport.BuildPostsWorkbook(posts);
+
+        var fileName = $"Bao_Cao_Dang_Bai_MXH_{DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)):yyyy-MM-dd}.xlsx";
+
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+
     }
 
-    [HttpPost("posts/{id}/pending-review")]
-    public IActionResult MarkPendingReview(string id, [FromBody] MarkPendingReviewRequest request)
+
+
+    [HttpPost("posts/create")]
+
+    public IActionResult CreatePost([FromBody] CreateCustomPostRequest request)
+
     {
+
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+
+        var platform = (request.Platform ?? "facebook").Trim().ToLowerInvariant();
+
+        if (platform is not ("facebook" or "tiktok")) return BadRequest(new { ok = false, error = "UNSUPPORTED_PLATFORM" });
+
+        var privacy = string.Equals(request.Privacy, "public", StringComparison.OrdinalIgnoreCase) ? "public" : "only_me";
+
+
+
+        var created = db.CreateSocialPost(new SocialAutoPost
+
+        {
+
+            ProductId = request.ProductId,
+
+            ProductName = string.IsNullOrWhiteSpace(request.ProductName) ? "Sản phẩm OmniCart" : request.ProductName.Trim(),
+
+            ProductPrice = request.ProductPrice,
+
+            ProductImage = request.ProductImage,
+
+            Platform = platform,
+
+            Title = request.Title?.Trim() ?? "",
+
+            Content = request.Content?.Trim() ?? "",
+
+            Hashtags = request.Hashtags?.Trim() ?? "",
+
+            Status = "internal_draft",
+
+            TargetGroup = string.IsNullOrWhiteSpace(request.TargetGroup) ? "Trang cá nhân đang đăng nhập" : request.TargetGroup.Trim(),
+
+            Privacy = privacy
+
+        });
+
+
+
+        return Ok(new { ok = true, post = created });
+
+    }
+
+
+
+    [HttpPost("posts/{id}/approve")]
+
+    [HttpPost("posts/{id}/publish")]
+
+    public IActionResult LegacyPublishBlocked(string id)
+
+    {
+
+        if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+
+        if (db.GetSocialPostById(id) is null) return NotFound(new { error = "POST_NOT_FOUND" });
+
+        return Conflict(new { ok = false, error = "PUBLISH_REQUIRES_EXTENSION" });
+
+    }
+
+
+
+    [HttpPost("posts/{id}/pending-review")]
+
+    public IActionResult MarkPendingReview(string id, [FromBody] MarkPendingReviewRequest request)
+
+    {
+
+        if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+
         var existing = db.GetSocialPostById(id);
+
         if (existing is null) return NotFound(new { ok = false, error = "POST_NOT_FOUND" });
 
         var privacy = string.Equals(request.Privacy, "public", StringComparison.OrdinalIgnoreCase) ? "public" : existing.Privacy;
+
         db.MarkSocialPostPendingReview(id, privacy, request.Message);
+
         return Ok(new { ok = true, post = db.GetSocialPostById(id) });
+
     }
+
+
 
     [HttpPost("posts/{id}/publish-real")]
+
     public IActionResult PublishReal(string id, [FromBody] PublishRealPostRequest request)
+
     {
+
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+
         var existing = db.GetSocialPostById(id);
+
         if (existing is null) return NotFound(new { ok = false, error = "POST_NOT_FOUND" });
 
+
+
         var platform = string.IsNullOrWhiteSpace(request.Platform) ? existing.Platform : request.Platform.Trim().ToLowerInvariant();
+
         if (platform is not ("facebook" or "tiktok")) return BadRequest(new { ok = false, error = "UNSUPPORTED_PLATFORM" });
 
-        if (string.IsNullOrWhiteSpace(request.PostUrl) || !StoreDb.IsRealSocialPostPermalink(platform, request.PostUrl))
-        {
+        if (string.IsNullOrWhiteSpace(request.PostUrl) || !IsAnyLoggedInRealPermalink(platform, request.PostUrl))
+
             return BadRequest(new { ok = false, error = "INVALID_REAL_PERMALINK" });
-        }
+
+
 
         var privacy = string.Equals(request.Privacy, "public", StringComparison.OrdinalIgnoreCase) ? "public" : "only_me";
-        db.PublishRealSocialPost(
-            id,
-            request.PostUrl.Trim(),
-            request.PublishedTime,
-            platform,
-            privacy,
-            request.LikesCount,
-            request.SharesCount,
-            request.CommentsCount);
+
+        db.PublishRealSocialPost(id, request.PostUrl.Trim(), request.PublishedTime, platform, privacy, request.LikesCount, request.SharesCount, request.CommentsCount);
 
         return Ok(new { ok = true, post = db.GetSocialPostById(id) });
+
     }
+
+
 
     [HttpPost("posts/{id}/publish-failure")]
+
     public IActionResult PublishFailure(string id, [FromBody] PublishFailureRequest request)
+
     {
+
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+
         var status = request.Status is "unverified" or "failed" ? request.Status : "failed";
+
         var msg = string.IsNullOrWhiteSpace(request.ErrorMessage) ? "Đăng bài chưa thành công." : request.ErrorMessage.Trim();
+
         var updated = db.MarkSocialPostPublishFailure(id, status, msg, request.PostUrl);
+
         if (!updated) return NotFound(new { ok = false, error = "POST_NOT_FOUND_OR_PUBLISHED" });
+
         return Ok(new { ok = true, post = db.GetSocialPostById(id) });
+
     }
+
+
 
     [HttpDelete("posts/clear-all")]
+
     public IActionResult ClearAllPosts()
+
     {
+
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
-        var deletedCount = db.DeleteAllSocialPosts();
-        return Ok(new { ok = true, deletedCount });
+
+        return Ok(new { ok = true, deletedCount = db.DeleteAllSocialPosts() });
+
     }
 
+
+
     [HttpDelete("posts/{id}")]
+
     public IActionResult DeletePost(string id)
+
     {
+
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+
         return db.DeleteSocialPost(id) ? Ok(new { ok = true }) : NotFound(new { ok = false, error = "POST_NOT_FOUND" });
+
     }
+
+
 
     // ================= HỘI NHÓM FACEBOOK =================
 
+
+
     [HttpGet("groups")]
+
     public IActionResult GetGroups([FromQuery] string? category = null)
-        => Ok(new { groups = db.GetSocialGroupTargets(category) });
+
+        => Ok(new { ok = true, groups = db.GetSocialGroupTargets(category) });
+
+
 
     [HttpPost("groups")]
+
     public IActionResult AddGroup([FromBody] AddGroupRequest request)
+
     {
+
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+
         if (string.IsNullOrWhiteSpace(request.GroupName) || string.IsNullOrWhiteSpace(request.GroupUrl))
+
             return BadRequest(new { ok = false, error = "INVALID_GROUP" });
 
+
+
         var group = db.AddSocialGroupTarget(new SocialGroupTarget
+
         {
+
             GroupName = request.GroupName.Trim(),
+
             GroupUrl = request.GroupUrl.Trim(),
+
             Category = string.IsNullOrWhiteSpace(request.Category) ? "Cộng đồng Facebook" : request.Category.Trim(),
+
             MembersCount = Math.Max(0, request.MembersCount),
+
             InteractionRate = string.IsNullOrWhiteSpace(request.InteractionRate) ? "Cao" : request.InteractionRate.Trim(),
+
             IsAutoShare = request.IsAutoShare,
+
             Notes = request.Notes?.Trim()
+
         });
+
         return Ok(new { ok = true, group });
+
     }
+
+
 
     [HttpPost("groups/import-real")]
+
     public IActionResult ImportRealGroups([FromBody] ImportRealGroupsRequest request)
+
     {
+
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
-        var groups = request.Groups ?? [];
-        var addedCount = db.ImportRealGroupTargets(groups);
+
+        var addedCount = db.ImportRealGroupTargets(request.Groups ?? []);
+
         return Ok(new { ok = true, addedCount, groups = db.GetSocialGroupTargets() });
+
     }
+
+
 
     [HttpPost("groups/{id}/toggle")]
+
     public IActionResult ToggleGroup(string id, [FromBody] ToggleGroupRequest request)
+
     {
+
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
-        return db.ToggleSocialGroupAutoShare(id, request.IsAutoShare)
-            ? Ok(new { ok = true })
-            : NotFound(new { ok = false, error = "GROUP_NOT_FOUND" });
+
+        return db.ToggleSocialGroupAutoShare(id, request.IsAutoShare) ? Ok(new { ok = true }) : NotFound(new { ok = false, error = "GROUP_NOT_FOUND" });
+
     }
 
+
+
     [HttpDelete("groups/{id}")]
+
     public IActionResult DeleteGroup(string id)
+
     {
+
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+
         return db.DeleteSocialGroupTarget(id) ? Ok(new { ok = true }) : NotFound(new { ok = false, error = "GROUP_NOT_FOUND" });
+
     }
+
+
 
     // ================= BÀI ĐĂNG VIRAL THẬT =================
 
+
+
     [HttpGet("viral")]
+
     public IActionResult GetViral([FromQuery] string? category = null)
-        => Ok(new { posts = db.GetSocialViralPosts(category) });
+
+        => Ok(new { ok = true, posts = db.GetSocialViralPosts(category) });
+
+
 
     [HttpPost("viral/import-real")]
+
     public IActionResult ImportRealViral([FromBody] ImportRealViralRequest request)
+
     {
+
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
-        var posts = request.Posts ?? [];
-        var addedCount = db.ImportRealViralPosts(posts);
+
+        var addedCount = db.ImportRealViralPosts(request.Posts ?? []);
+
         return Ok(new { ok = true, addedCount, posts = db.GetSocialViralPosts() });
+
     }
+
+
 
     [HttpDelete("viral/clear-all")]
+
     public IActionResult ClearAllViral()
+
     {
+
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
-        var deletedCount = db.DeleteAllSocialViralPosts();
-        return Ok(new { ok = true, deletedCount });
+
+        return Ok(new { ok = true, deletedCount = db.DeleteAllSocialViralPosts() });
+
     }
+
+
 
     [HttpDelete("viral/{id}")]
+
     public IActionResult DeleteViral(string id)
+
     {
+
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+
         return db.DeleteSocialViralPost(id) ? Ok(new { ok = true }) : NotFound(new { ok = false, error = "VIRAL_NOT_FOUND" });
+
     }
 
-    private bool CsrfValid()
+
+
+    private static bool IsAnyLoggedInRealPermalink(string platform, string postUrl)
+
     {
-        var raw = Request.Cookies["store_admin_session"];
-        return !string.IsNullOrEmpty(raw) && Request.Headers["x-csrf-token"] == Tokens.Sha256("csrf:" + raw);
+
+        if (StoreDb.IsRealSocialPostPermalink(platform, postUrl)) return true;
+
+        if (!Uri.TryCreate(postUrl, UriKind.Absolute, out var uri)) return false;
+
+        var host = uri.Host.ToLowerInvariant();
+
+        if (platform == "tiktok")
+
+        {
+
+            return (host == "tiktok.com" || host.EndsWith(".tiktok.com", StringComparison.Ordinal)) &&
+
+                   Regex.IsMatch(uri.AbsolutePath, @"^/@[A-Za-z0-9._-]+/(?:video|photo)/[0-9]+/?$", RegexOptions.IgnoreCase);
+
+        }
+
+        return false;
+
     }
+
+
+
+    private bool CsrfValid()
+
+    {
+
+        var raw = Request.Cookies["store_admin_session"];
+
+        return !string.IsNullOrEmpty(raw) && Request.Headers["x-csrf-token"] == Tokens.Sha256("csrf:" + raw);
+
+    }
+
 }
