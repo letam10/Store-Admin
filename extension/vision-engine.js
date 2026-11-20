@@ -1,19 +1,19 @@
 /*
   FILE NOTE
-  - Mục đích: Lõi nhận thức thị giác & hành vi giống người thật (OmniVision Engine v2.1.0).
-  - Nâng cấp v2.1.0:
-    1. Hệ thống delay phân phối chuẩn (Gaussian Jitter) & tốc độ pacingMode ('normal' | 'careful' | 'fast') tránh bị quét bot.
-    2. humanClick với tọa độ lệch tự nhiên trong vùng giữa nút + hover + thời gian nhấn giữ như người thật.
-    3. formatPostText() bảo toàn toàn bộ xuống dòng (\n\n), emoji, bullet, CTA và khối #hashtag.
-    4. smartTypeText() 6 chiến lược (gõ nhịp người cho input ngắn + Synthetic Paste + beforeinput + TextEvent('textInput') + execCommand + Clipboard API) kèm verifyFn bắt buộc.
-    5. getDeepActiveElement() hỗ trợ Click-to-Discover tìm chính xác editor Draft.js / Lexical dù chiều cao ban đầu nhỏ.
+  - Mục đích: Lõi nhận thức thị giác & mô phỏng hành vi người thật 24/7 (OmniVision Engine v3.0.0).
+  - Tính năng v3.0.0:
+    1. inspectPageHealth() & waitForPageStable(): nhận diện trang đang tải (spinner/skeleton), mất mạng (offline/network error), captcha/checkpoint, màn hình đăng nhập.
+    2. parseHumanCount(): đọc chính xác mọi đơn vị tương tác Việt/Anh (5,2K / 50,4N / 5,2 nghìn / 1,4Tr / 1.4M / 5.432).
+    3. humanDelay() theo phân phối chuẩn Gaussian, humanClick() lệch tâm tự nhiên, humanScrollWave() cuộn giống người lướt feed.
+    4. formatPostText() bảo toàn toàn bộ đoạn văn (\n\n), emoji và khối #hashtag.
+    5. smartTypeText() 6 chiến lược (kèm Chromium TextEvent('textInput') & Synthetic Paste) và tự kiểm chứng.
 */
 
 ;(() => {
-  if (globalThis.__OMNICART_VISION_VERSION__ === '2.1.0' && globalThis.OmniVision) {
+  if (globalThis.__OMNICART_VISION_VERSION__ === '3.0.0' && globalThis.OmniVision) {
     return
   }
-  globalThis.__OMNICART_VISION_VERSION__ = '2.1.0'
+  globalThis.__OMNICART_VISION_VERSION__ = '3.0.0'
 
   const HUD_HOST_ID = 'omnicart-vision-hud-host'
   const MARK_LAYER_ID = 'omnicart-vision-som-layer'
@@ -33,7 +33,6 @@
     return 1.0
   }
 
-  // Thời gian trễ ngẫu nhiên theo phân phối chuẩn (tránh khoảng thời gian máy móc lặp đều)
   function randomGaussianBetween(minMs, maxMs) {
     const low = Math.min(minMs, maxMs)
     const high = Math.max(minMs, maxMs)
@@ -42,8 +41,7 @@
   }
 
   async function humanDelay(minMs = 600, maxMs = 1400) {
-    const mult = getPacingMultiplier()
-    const ms = Math.max(80, Math.round(randomGaussianBetween(minMs, maxMs) * mult))
+    const ms = Math.max(80, Math.round(randomGaussianBetween(minMs, maxMs) * getPacingMultiplier()))
     await sleep(ms)
     return ms
   }
@@ -53,11 +51,20 @@
   }
 
   async function humanReadPause() {
-    return humanDelay(1100, 2200)
+    return humanDelay(1100, 2300)
   }
 
   async function humanReviewPause() {
-    return humanDelay(1600, 2900)
+    return humanDelay(1700, 3100)
+  }
+
+  // Mô phỏng hành vi lướt nhẹ tự nhiên như người đang online
+  async function humanIdleWave() {
+    try {
+      const delta = randomGaussianBetween(120, 280) * (Math.random() > 0.35 ? 1 : -1)
+      window.scrollBy({ top: delta, behavior: 'smooth' })
+      await humanDelay(350, 750)
+    } catch (_) {}
   }
 
   function normalizeText(value) {
@@ -69,7 +76,6 @@
       .trim()
   }
 
-  // Giữ nguyên định dạng bài viết bóng bẩy: đoạn văn (\n\n), gạch đầu dòng, emoji và khối hashtag
   function formatPostText(value, maxLen = 4000) {
     let text = String(value || '')
       .normalize('NFC')
@@ -117,7 +123,6 @@
     return cleanTags.join(' ')
   }
 
-  // Ghép nội dung + khối hashtag mượt mà, tránh lặp lại hashtag đã nằm sẵn trong nội dung
   function composeBodyAndHashtags(rawBody, rawHashtags, maxLen = 3900) {
     const body = formatPostText(rawBody || '', maxLen)
     const tags = formatHashtags(rawHashtags)
@@ -130,8 +135,34 @@
       .filter((tag) => tag && !bodyLower.includes(tag.toLowerCase()))
 
     if (!missingTags.length) return body
-    const combined = `${body}\n\n${missingTags.join(' ')}`
-    return formatPostText(combined, maxLen)
+    return formatPostText(`${body}\n\n${missingTags.join(' ')}`, maxLen)
+  }
+
+  // Đọc chính xác số tương tác / thành viên chuẩn Việt & Anh:
+  // VD: "5,2K" -> 5200, "50,4N" -> 50400, "1,2 triệu" -> 1200000, "1,4Tr" -> 1400000, "6.543" -> 6543
+  function parseHumanCount(raw) {
+    const str = normalizeText(raw).toLowerCase()
+    if (!str) return 0
+
+    // Có đơn vị viết tắt hoặc tiếng Việt
+    const unitMatch = str.match(/(\d+(?:[.,]\d+)?)\s*(k|n|nghìn|ngàn|m|tr|triệu|b|tỷ|tỉ)\b/i)
+    if (unitMatch) {
+      const num = parseFloat(unitMatch[1].replace(',', '.'))
+      const unit = unitMatch[2].toLowerCase()
+      if (!Number.isFinite(num)) return 0
+      if (unit === 'k' || unit === 'n' || unit === 'nghìn' || unit === 'ngàn') return Math.round(num * 1000)
+      if (unit === 'm' || unit === 'tr' || unit === 'triệu') return Math.round(num * 1000000)
+      if (unit === 'b' || unit === 'tỷ' || unit === 'tỉ') return Math.round(num * 1000000000)
+    }
+
+    // Dạng số đầy đủ có dấu chấm/phẩy phân tách hàng nghìn: "5.420" hoặc "12,350"
+    const plainMatch = str.match(/\b(\d{1,3}(?:[.,\s]\d{3})+|\d+)\b/)
+    if (plainMatch) {
+      const digits = plainMatch[1].replace(/[^\d]/g, '')
+      const num = parseInt(digits, 10)
+      return Number.isFinite(num) ? num : 0
+    }
+    return 0
   }
 
   function getDeepActiveElement(rootDoc = document) {
@@ -156,7 +187,6 @@
     return active
   }
 
-  // Duyệt DOM sâu qua open ShadowRoot và same-origin iframe
   function queryAllDeep(root = document, selector = '*') {
     const results = []
     const visited = new Set()
@@ -259,6 +289,100 @@
     }
   }
 
+  // =========================================================================
+  // MẮT NHẬN THỨC MÔI TRƯỜNG: MẤT MẠNG / ĐANG TẢI / CAPTCHA / NHẦM TRANG
+  // =========================================================================
+  function inspectPageHealth() {
+    const bodyText = normalizeText(document.body?.innerText || '').slice(0, 1500)
+    const isOffline =
+      navigator.onLine === false ||
+      /không có kết nối internet|no internet|err_internet_disconnected|err_connection|err_name_not_resolved|mất kết nối mạng|không thể kết nối|unable to connect|network error|check your internet/i.test(bodyText)
+
+    const isCaptchaOrCheckpoint =
+      /\/checkpoint|\/verify/i.test(location.pathname) ||
+      /verify to continue|kéo thanh trượt|drag the slider|xác minh bảo mật|security check|captcha|chứng minh bạn không phải người máy/i.test(bodyText)
+
+    const isPageError =
+      /trang này không hiển thị|this content isn't available|page isn't available|đã xảy ra lỗi|something went wrong|couldn't load|không tải được|502 bad gateway|503 service/i.test(bodyText) &&
+      bodyText.length < 550
+
+    const activeSpinners = Array.from(
+      document.querySelectorAll('[role="progressbar"], [aria-busy="true"], [class*="Spinner"], [class*="spinner"], [class*="Loading"]')
+    ).filter((el) => {
+      if (!isReallyVisible(el, { minWidth: 16, minHeight: 16 })) return false
+      const r = el.getBoundingClientRect()
+      return r.top > 40 && r.top < window.innerHeight - 40
+    })
+
+    const isStillLoading =
+      document.readyState !== 'complete' ||
+      bodyText.length < 25 ||
+      (activeSpinners.length > 0 && bodyText.length < 240)
+
+    return {
+      ok: !isOffline && !isCaptchaOrCheckpoint && !isPageError,
+      online: navigator.onLine !== false && !isOffline,
+      isOffline,
+      isCaptchaOrCheckpoint,
+      isPageError,
+      isStillLoading,
+      spinnerCount: activeSpinners.length,
+      url: location.href,
+      textLen: bodyText.length
+    }
+  }
+
+  // Chờ trang tải hoàn chỉnh & phục hồi mạng nếu tạm rớt mạng (tránh tắt đột ngột!)
+  async function waitForPageStable(platform = 'system', options = {}) {
+    const { maxWaitMs = 25000, onStatus = null } = options
+    const deadline = Date.now() + maxWaitMs
+    let reportedOffline = false
+    let reportedLoading = false
+
+    while (Date.now() < deadline) {
+      const health = inspectPageHealth()
+
+      if (health.isCaptchaOrCheckpoint) {
+        const msg = 'Phát hiện màn hình xác minh bảo mật / Captcha — cần người dùng xác minh 1 lần.'
+        if (onStatus) onStatus('captcha', msg, 'warn')
+        else reportStep(platform, 'captcha', msg, 'warn')
+        return { ok: false, reason: 'CAPTCHA_OR_CHECKPOINT', health }
+      }
+
+      if (health.isOffline) {
+        if (!reportedOffline) {
+          reportedOffline = true
+          const msg = 'Phát hiện mất kết nối mạng, đang kiên nhẫn chờ mạng phục hồi...'
+          if (onStatus) onStatus('network', msg, 'warn')
+          else reportStep(platform, 'network', msg, 'warn')
+        }
+        await sleep(2000)
+        continue
+      }
+
+      if (health.isPageError) {
+        return { ok: false, reason: 'PAGE_ERROR_STATE', health }
+      }
+
+      if (health.isStillLoading) {
+        if (!reportedLoading) {
+          reportedLoading = true
+          const msg = 'Mắt OmniVision thấy trang đang tải dữ liệu, đang đợi ổn định...'
+          if (onStatus) onStatus('loading', msg, 'info')
+          else reportStep(platform, 'loading', msg, 'info')
+        }
+        await sleep(800)
+        continue
+      }
+
+      return { ok: true, reason: 'STABLE', health }
+    }
+
+    const finalHealth = inspectPageHealth()
+    if (finalHealth.isOffline) return { ok: false, reason: 'NETWORK_OFFLINE', health: finalHealth }
+    return { ok: true, reason: 'TIMEOUT_PROCEED', health: finalHealth }
+  }
+
   function getScrollableAncestor(el) {
     let cur = el?.parentElement
     while (cur && cur !== document.body && cur !== document.documentElement) {
@@ -276,14 +400,13 @@
     if (!el) return
     try {
       el.scrollIntoView({ behavior: 'smooth', block, inline: 'nearest' })
-      await humanDelay(320, 620)
+      await humanDelay(300, 600)
     } catch (_) {
       try { el.scrollIntoView({ block }) } catch (_) {}
-      await sleep(250)
+      await sleep(240)
     }
   }
 
-  // Cuộn mượt từng bước giống con lăn chuột của người thật thay vì nhảy cóc tức thì
   async function scrollContainerToBottom(referenceEl) {
     const scroller = referenceEl ? getScrollableAncestor(referenceEl) : (document.scrollingElement || document.documentElement)
     try {
@@ -384,7 +507,6 @@
     return best
   }
 
-  // Click mô phỏng hành vi tay người thật: cuộn mượt -> di chuột vào điểm lệch tự nhiên -> hover -> nhấn giữ -> thả -> click
   async function humanClick(el, label = '') {
     if (!el) return false
     await scrollIntoViewSafely(el, 'center')
@@ -413,14 +535,12 @@
     try { el.dispatchEvent(new MouseEvent('mousemove', { ...common, buttons: 0 })) } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mouseover', { ...common, buttons: 0 })) } catch (_) {}
 
-    // Độ trễ hover tự nhiên như mắt người vừa rê chuột tới nút
     await humanDelay(110, 260)
 
     try { el.dispatchEvent(new PointerEvent('pointerdown', common)) } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mousedown', common)) } catch (_) {}
     try { el.focus({ preventScroll: true }) } catch (_) {}
 
-    // Thời gian ngón tay giữ chuột trái trước khi nhả (65-145ms)
     await sleep(randomGaussianBetween(65, 145))
 
     try { el.dispatchEvent(new PointerEvent('pointerup', { ...common, buttons: 0 })) } catch (_) {}
@@ -503,7 +623,6 @@
     } catch (_) {}
   }
 
-  // Gõ theo từng cụm ngắn giống người thật cho input ngắn (< 100 ký tự, ví dụ Tiêu đề TikTok)
   async function typeNativeInputHumanLike(el, targetText) {
     const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
     const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
@@ -526,7 +645,6 @@
     el.dispatchEvent(new Event('change', { bubbles: true }))
   }
 
-  // Nhập liệu 6 chiến lược có tự kiểm chứng — tương thích Facebook Lexical, TikTok Draft.js/Lexical & React Input kể cả tab nền
   async function smartTypeText(el, text, options = {}) {
     if (!el) return { ok: false, method: 'none', actual: '' }
     const {
@@ -541,17 +659,16 @@
     const targetText = formatPostText(text, 4000)
     if (!targetText) return { ok: false, method: 'empty', actual: '' }
 
-    const verifySuccess = () => {
-      const actual = readEditorValue(el)
+    const verifySuccess = (node) => {
+      const actual = readEditorValue(node)
       const textOk = isTextMatched(actual, targetText, placeholderRe)
-      const customOk = typeof verifyFn === 'function' ? Boolean(verifyFn(el, actual)) : true
+      const customOk = typeof verifyFn === 'function' ? Boolean(verifyFn(node, actual)) : true
       return { ok: textOk && customOk, actual }
     }
 
     await scrollIntoViewSafely(el, 'center')
     highlightTarget(el, label, '#38bdf8')
 
-    // === CASE 1: Native <input> / <textarea> ===
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
       await humanClick(el, label)
       if (clearFirst) await clearEditable(el)
@@ -568,12 +685,10 @@
       }
 
       await humanDelay(320, 620)
-      const res = verifySuccess()
+      const res = verifySuccess(el)
       return { ok: res.ok, method: humanBurst ? 'human-native-burst' : 'native-setter', actual: res.actual }
     }
 
-    // === CASE 2: Rich ContentEditable (Facebook Lexical / TikTok Draft.js / Slate) ===
-    // Chọn đúng phần tử contenteditable sâu nhất bên trong nếu el là khung bao ngoài
     const editableEl = el.isContentEditable
       ? (el.querySelector('[contenteditable="true"]') || el)
       : (el.querySelector('[contenteditable="true"], [contenteditable="plaintext-only"]') || el)
@@ -581,32 +696,20 @@
     await humanClick(editableEl, label)
     if (clearFirst) await clearEditable(editableEl)
     placeCaretAtEnd(editableEl)
-    // Nhịp dừng chuẩn bị dán nội dung như người thật
     await humanDelay(450, 950)
 
-    const checkEditable = () => {
-      const actual = readEditorValue(editableEl)
-      const textOk = isTextMatched(actual, targetText, placeholderRe)
-      const customOk = typeof verifyFn === 'function' ? Boolean(verifyFn(editableEl, actual)) : true
-      return { ok: textOk && customOk, actual }
-    }
-
-    // Chiến lược 1: Synthetic ClipboardEvent('paste') — Giữ nguyên mọi đoạn văn \n\n trên Lexical & Draft.js kể cả tab nền!
+    // Chiến lược 1: Synthetic Paste (giữ nguyên mọi \n\n trên Lexical & Draft.js kể cả tab nền)
     try {
       const dt = new DataTransfer()
       dt.setData('text/plain', targetText)
-      const pasteEvt = new ClipboardEvent('paste', {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        clipboardData: dt
-      })
-      editableEl.dispatchEvent(pasteEvt)
+      editableEl.dispatchEvent(new ClipboardEvent('paste', {
+        bubbles: true, cancelable: true, composed: true, clipboardData: dt
+      }))
       await humanDelay(550, 900)
-      const check1 = checkEditable()
-      if (check1.ok) {
+      const c1 = verifySuccess(editableEl)
+      if (c1.ok) {
         if (dismissPopover) dispatchEscape(editableEl)
-        return { ok: true, method: 'synthetic-paste', actual: check1.actual }
+        return { ok: true, method: 'synthetic-paste', actual: c1.actual }
       }
     } catch (_) {}
 
@@ -617,31 +720,26 @@
       const dt = new DataTransfer()
       dt.setData('text/plain', targetText)
       editableEl.dispatchEvent(new InputEvent('beforeinput', {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        inputType: 'insertFromPaste',
-        data: targetText,
-        dataTransfer: dt
+        bubbles: true, cancelable: true, composed: true,
+        inputType: 'insertFromPaste', data: targetText, dataTransfer: dt
       }))
       await humanDelay(500, 850)
-      const check2 = checkEditable()
-      if (check2.ok) {
+      const c2 = verifySuccess(editableEl)
+      if (c2.ok) {
         if (dismissPopover) dispatchEscape(editableEl)
-        return { ok: true, method: 'beforeinput-paste', actual: check2.actual }
+        return { ok: true, method: 'beforeinput-paste', actual: c2.actual }
       }
     } catch (_) {}
 
-    // Chiến lược 3: Legacy Chromium TextEvent('textInput') từng đoạn — Cực mạnh cho Draft.js & Lexical trên tab nền!
+    // Chiến lược 3: Legacy Chromium TextEvent('textInput') từng đoạn
     try {
       if (clearFirst) await clearEditable(editableEl)
       placeCaretAtEnd(editableEl)
       const lines = targetText.split('\n')
       for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]
-        if (line) {
+        if (lines[i]) {
           const textEvent = document.createEvent('TextEvent')
-          textEvent.initTextEvent('textInput', true, true, window, line)
+          textEvent.initTextEvent('textInput', true, true, window, lines[i])
           editableEl.dispatchEvent(textEvent)
         }
         if (i < lines.length - 1) {
@@ -649,43 +747,38 @@
           document.execCommand('insertLineBreak', false, null)
           editableEl.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }))
         }
-        await sleep(Math.round(randomGaussianBetween(75, 175) * getPacingMultiplier()))
+        await sleep(Math.round(randomGaussianBetween(70, 165) * getPacingMultiplier()))
       }
       await humanDelay(550, 900)
-      const check3 = checkEditable()
-      if (check3.ok) {
+      const c3 = verifySuccess(editableEl)
+      if (c3.ok) {
         if (dismissPopover) dispatchEscape(editableEl)
-        return { ok: true, method: 'chromium-textInput', actual: check3.actual }
+        return { ok: true, method: 'chromium-textInput', actual: c3.actual }
       }
     } catch (_) {}
 
-    // Chiến lược 4: document.execCommand('insertText') từng đoạn
+    // Chiến lược 4: execCommand('insertText') từng đoạn
     try {
       if (clearFirst) await clearEditable(editableEl)
       placeCaretAtEnd(editableEl)
       const lines = targetText.split('\n')
       for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]
-        if (line) {
-          document.execCommand('insertText', false, line)
-        }
+        if (lines[i]) document.execCommand('insertText', false, lines[i])
         if (i < lines.length - 1) {
-          editableEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }))
           document.execCommand('insertLineBreak', false, null)
-          editableEl.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }))
         }
         await sleep(Math.round(randomGaussianBetween(60, 140) * getPacingMultiplier()))
       }
       editableEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: targetText }))
       await humanDelay(500, 850)
-      const check4 = checkEditable()
-      if (check4.ok) {
+      const c4 = verifySuccess(editableEl)
+      if (c4.ok) {
         if (dismissPopover) dispatchEscape(editableEl)
-        return { ok: true, method: 'execCommand-lines', actual: check4.actual }
+        return { ok: true, method: 'execCommand-lines', actual: c4.actual }
       }
     } catch (_) {}
 
-    // Chiến lược 5: InputEvent('beforeinput', insertText) từng đoạn
+    // Chiến lược 5: beforeinput insertText từng đoạn
     try {
       if (clearFirst) await clearEditable(editableEl)
       placeCaretAtEnd(editableEl)
@@ -693,32 +786,25 @@
       for (let i = 0; i < lines.length; i++) {
         if (lines[i]) {
           editableEl.dispatchEvent(new InputEvent('beforeinput', {
-            bubbles: true,
-            cancelable: true,
-            composed: true,
-            inputType: 'insertText',
-            data: lines[i]
+            bubbles: true, cancelable: true, composed: true, inputType: 'insertText', data: lines[i]
           }))
         }
         if (i < lines.length - 1) {
           editableEl.dispatchEvent(new InputEvent('beforeinput', {
-            bubbles: true,
-            cancelable: true,
-            composed: true,
-            inputType: 'insertParagraph'
+            bubbles: true, cancelable: true, composed: true, inputType: 'insertParagraph'
           }))
         }
         await sleep(Math.round(randomGaussianBetween(55, 120) * getPacingMultiplier()))
       }
       await humanDelay(500, 800)
-      const check5 = checkEditable()
-      if (check5.ok) {
+      const c5 = verifySuccess(editableEl)
+      if (c5.ok) {
         if (dismissPopover) dispatchEscape(editableEl)
-        return { ok: true, method: 'beforeinput-lines', actual: check5.actual }
+        return { ok: true, method: 'beforeinput-lines', actual: c5.actual }
       }
     } catch (_) {}
 
-    // Chiến lược 6: Clipboard API thật (chỉ dùng nếu tab đang focus)
+    // Chiến lược 6: Clipboard API thật (nếu tab đang focus)
     if (document.hasFocus()) {
       try {
         if (clearFirst) await clearEditable(editableEl)
@@ -726,15 +812,15 @@
         await navigator.clipboard.writeText(targetText)
         document.execCommand('paste')
         await humanDelay(500, 800)
-        const check6 = checkEditable()
-        if (check6.ok) {
+        const c6 = verifySuccess(editableEl)
+        if (c6.ok) {
           if (dismissPopover) dispatchEscape(editableEl)
-          return { ok: true, method: 'clipboard-api', actual: check6.actual }
+          return { ok: true, method: 'clipboard-api', actual: c6.actual }
         }
       } catch (_) {}
     }
 
-    const finalCheck = checkEditable()
+    const finalCheck = verifySuccess(editableEl)
     return { ok: finalCheck.ok, method: 'failed', actual: finalCheck.actual }
   }
 
@@ -799,20 +885,10 @@
   function buildInteractiveMap(root = document, maxItems = 75) {
     currentMarkLookup = new Map()
     const selector = [
-      'button',
-      '[role="button"]',
-      '[role="tab"]',
-      '[role="combobox"]',
-      '[role="option"]',
-      '[role="menuitem"]',
-      '[role="radio"]',
-      '[role="textbox"]',
-      '[contenteditable="true"]',
-      '[contenteditable="plaintext-only"]',
-      'input:not([type="hidden"]):not([type="file"])',
-      'textarea',
-      'select',
-      'a[href]'
+      'button', '[role="button"]', '[role="tab"]', '[role="combobox"]', '[role="option"]',
+      '[role="menuitem"]', '[role="radio"]', '[role="textbox"]',
+      '[contenteditable="true"]', '[contenteditable="plaintext-only"]',
+      'input:not([type="hidden"]):not([type="file"])', 'textarea', 'select', 'a[href]'
     ].join(',')
 
     const raw = queryAllDeep(root, selector)
@@ -831,7 +907,6 @@
       const tag = el.tagName.toLowerCase()
       const role = el.getAttribute('role') || tag
       const isEditable = el.isContentEditable || tag === 'input' || tag === 'textarea'
-
       if (!label && !isEditable) continue
 
       const color = getElementColorInfo(el)
@@ -982,7 +1057,7 @@
           display:flex;align-items:center;gap:8px;
           background:${theme.bg};border:1px solid ${theme.border};color:#f8fafc;
           padding:8px 12px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.35);
-          font-size:12px;font-weight:600;max-width:360px;backdrop-filter:blur(6px);
+          font-size:12px;font-weight:600;max-width:380px;backdrop-filter:blur(6px);
         ">
           <span style="width:8px;height:8px;border-radius:50%;background:${theme.dot};flex-shrink:0;"></span>
           <span>👁️ ${String(text).replace(/[<>&]/g, '')}</span>
@@ -1047,17 +1122,19 @@
   } catch (_) {}
 
   globalThis.OmniVision = {
-    version: '2.1.0',
+    version: '3.0.0',
     sleep,
     humanDelay,
     humanMicroPause,
     humanReadPause,
     humanReviewPause,
+    humanIdleWave,
     normalizeText,
     formatPostText,
     truncateClean,
     formatHashtags,
     composeBodyAndHashtags,
+    parseHumanCount,
     getDeepActiveElement,
     queryAllDeep,
     isReallyVisible,
@@ -1065,6 +1142,8 @@
     isInViewport,
     getAccessibleLabel,
     getElementColorInfo,
+    inspectPageHealth,
+    waitForPageStable,
     getScrollableAncestor,
     scrollIntoViewSafely,
     scrollContainerToBottom,

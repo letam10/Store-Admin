@@ -1,9 +1,10 @@
 /*
   FILE NOTE
-  - Mục đích: Cầu nối hai chiều bền vững giữa Store-Admin (localhost:5174) và Background Service Worker v2.1.0.
-  - Nâng cấp v2.1.0:
-    1. Tự phục hồi & thử lại mượt mà nếu Service Worker vừa thức dậy.
-    2. Live OmniVision Dock hiển thị rõ phiên bản v2.1.0, nhật ký từng bước (số ký tự Tiêu đề, Mô tả, Hashtag, nhịp delay) và nút Mở khóa nhanh nếu tác vụ kẹt.
+  - Mục đích: Cầu nối bền vững 24/7 giữa Store-Admin và Service Worker v3.0.0.
+  - Tính năng v3.0.0:
+    1. Chuyển tiếp sự kiện POST_VERIFICATION_RESOLVED (khi TikTok duyệt xong sau 3–5 phút) trực tiếp sang React Admin để tự cập nhật DB & link bài thật!
+    2. Đồng bộ mọi kết quả duyệt đã hoàn thành ngay cả khi người dùng F5 trang Admin.
+    3. Hiển thị OmniVision v3.0 Live Dock với số bài đang chờ duyệt 3–5 phút & nút kiểm tra ngay.
 */
 
 ;(() => {
@@ -21,19 +22,11 @@
   let dockShadow = null
 
   function getExtensionVersion() {
-    try {
-      return chrome.runtime.getManifest().version
-    } catch (_) {
-      return '2.1.0'
-    }
+    try { return chrome.runtime.getManifest().version } catch (_) { return '3.0.0' }
   }
 
   function isRuntimeAlive() {
-    try {
-      return typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id)
-    } catch (_) {
-      return false
-    }
+    try { return typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id) } catch (_) { return false }
   }
 
   function mountLiveDock() {
@@ -59,7 +52,7 @@
           .dot.err { background:#ef4444; }
           @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
           .panel {
-            width:380px;max-height:320px;
+            width:395px;max-height:340px;
             background:#071710;color:#e2f8ec;
             border:1px solid #1f5c3f;border-radius:12px;
             box-shadow:0 14px 36px rgba(0,0,0,0.5);
@@ -89,20 +82,21 @@
         </style>
         <div class="panel" id="panel">
           <div class="head">
-            <span>👁️ OmniVision v${getExtensionVersion()} Live</span>
-            <div style="display:flex;gap:5px;">
-              <button class="head-btn" id="btn-unlock" title="Mở khóa hàng đợi nếu kẹt">Mở khóa</button>
-              <button class="head-btn" id="btn-clear">Xóa log</button>
+            <span>👁️ OmniVision v${getExtensionVersion()} 24/7</span>
+            <div style="display:flex;gap:4px;">
+              <button class="head-btn" id="btn-check-pending" title="Kiểm tra ngay bài TikTok đang chờ duyệt">Soi duyệt</button>
+              <button class="head-btn" id="btn-unlock" title="Mở khóa nếu tác vụ treo">Mở khóa</button>
+              <button class="head-btn" id="btn-clear">Xóa</button>
               <button class="head-btn" id="btn-close">Thu gọn</button>
             </div>
           </div>
           <div class="logs" id="logs">
-            <div class="row">Đã kết nối OmniVision v${getExtensionVersion()} (delay tự nhiên như người).</div>
+            <div class="row">Đã kết nối OmniVision v${getExtensionVersion()} (Đa tài khoản • 24/7).</div>
           </div>
         </div>
         <div class="pill" id="pill">
           <span class="dot" id="dot"></span>
-          <span id="pill-text">👁️ OmniVision v${getExtensionVersion()} • Sẵn sàng</span>
+          <span id="pill-text">👁️ OmniVision v${getExtensionVersion()} • Online 24/7</span>
         </div>
       `
       document.documentElement.appendChild(host)
@@ -123,6 +117,9 @@
       dockShadow.getElementById('btn-unlock').addEventListener('click', () => {
         sendToBackground({ type: 'CANCEL_JOB' }, `unlock-${Date.now()}`).catch(() => {})
       })
+      dockShadow.getElementById('btn-check-pending').addEventListener('click', () => {
+        sendToBackground({ type: 'CHECK_PENDING_NOW' }, `chk-${Date.now()}`).catch(() => {})
+      })
     } catch (_) {}
   }
 
@@ -142,21 +139,18 @@
       container.innerHTML = '<div class="row">Chưa có sự kiện mới.</div>'
       return
     }
-    container.innerHTML = dockLogs
-      .slice(0, 30)
-      .map((item) => {
-        const time = new Date(item.timestamp || Date.now()).toLocaleTimeString('vi-VN')
-        const safeMsg = String(item.message || '').replace(/[<>&]/g, '')
-        const plat = String(item.platform || 'sys').toUpperCase()
-        return `<div class="row ${item.level || 'info'}"><div class="meta">[${time}] ${plat}</div>${safeMsg}</div>`
-      })
-      .join('')
+    container.innerHTML = dockLogs.slice(0, 32).map((item) => {
+      const time = new Date(item.timestamp || Date.now()).toLocaleTimeString('vi-VN')
+      const safeMsg = String(item.message || '').replace(/[<>&]/g, '')
+      const plat = String(item.platform || 'sys').toUpperCase()
+      return `<div class="row ${item.level || 'info'}"><div class="meta">[${time}] ${plat}</div>${safeMsg}</div>`
+    }).join('')
   }
 
   function pushDockEvent(evt) {
     if (!evt) return
     dockLogs.unshift(evt)
-    if (dockLogs.length > 45) dockLogs.length = 45
+    if (dockLogs.length > 50) dockLogs.length = 50
     renderDockLogs()
 
     if (evt.level === 'error') {
@@ -165,9 +159,20 @@
       dockShadow?.getElementById('panel')?.classList.add('open')
     } else if (evt.level === 'success') {
       updateDockStatus(`✅ ${String(evt.message || 'Hoàn tất').slice(0, 42)}`, 'ready')
-    } else if (evt.step && !['done', 'scrape_done'].includes(evt.step)) {
-      updateDockStatus(`👁️ ${String(evt.message || 'Đang chạy...').slice(0, 42)}`, 'busy')
+    } else if (evt.step && !['done', 'scrape_done', 'scrape_groups_done'].includes(evt.step)) {
+      updateDockStatus(`👁️ ${String(evt.message || 'Đang xử lý...').slice(0, 42)}`, 'busy')
     }
+  }
+
+  function forwardResolvedVerification(payload) {
+    if (!payload?.postId) return
+    window.postMessage({
+      source: 'OMNICART_POST_VERIFIED',
+      payload
+    }, window.location.origin)
+    try {
+      port?.postMessage({ type: 'ACK_RESOLVED_VERIFICATION', postId: payload.postId })
+    } catch (_) {}
   }
 
   function connectPort() {
@@ -179,18 +184,31 @@
         if (!msg) return
 
         if (msg.type === 'BRIDGE_HELLO') {
-          updateDockStatus(`👁️ OmniVision v${msg.version || getExtensionVersion()} • Kết nối tốt`, 'ready')
+          const pendingCount = Array.isArray(msg.pendingVerifications) ? msg.pendingVerifications.length : 0
+          updateDockStatus(
+            pendingCount > 0
+              ? `⏳ Đang theo dõi ${pendingCount} bài TikTok chờ duyệt...`
+              : `👁️ OmniVision v${msg.version || getExtensionVersion()} • Online 24/7`,
+            pendingCount > 0 ? 'busy' : 'ready'
+          )
           if (Array.isArray(msg.recentLogs)) {
-            msg.recentLogs.slice(0, 10).reverse().forEach((ev) => dockLogs.unshift(ev))
+            msg.recentLogs.slice(0, 12).reverse().forEach((ev) => dockLogs.unshift(ev))
             renderDockLogs()
           }
+          if (Array.isArray(msg.resolvedVerifications)) {
+            msg.resolvedVerifications.forEach(forwardResolvedVerification)
+          }
+          return
+        }
+
+        if (msg.type === 'POST_VERIFICATION_RESOLVED' && msg.payload) {
+          forwardResolvedVerification(msg.payload)
           return
         }
 
         if (msg.type === 'PROGRESS_EVENT' && msg.event) {
           pushDockEvent(msg.event)
           window.postMessage({ source: 'OMNICART_EXTENSION_PROGRESS', event: msg.event }, window.location.origin)
-          window.dispatchEvent(new CustomEvent('omnicart-extension-progress', { detail: msg.event }))
           return
         }
 
@@ -240,7 +258,6 @@
       } catch (_) {}
     }
 
-    // Dự phòng nếu port vừa ngắt khi Service Worker vừa khởi động lại
     return await new Promise((resolve) => {
       chrome.runtime.sendMessage(command, (response) => {
         let lastError = null
@@ -290,10 +307,17 @@
       return
     }
 
-    if (action === 'AUTO_POST') {
+    if (['AUTO_POST', 'FETCH_REAL_VIRAL', 'SCRAPE_FB_GROUPS'].includes(action)) {
       dockExpanded = true
       dockShadow?.getElementById('panel')?.classList.add('open')
-      updateDockStatus(`🚀 Đang đăng bài ${payload?.platform || 'social'}...`, 'busy')
+      updateDockStatus(
+        action === 'AUTO_POST'
+          ? `🚀 Đang đăng bài ${payload?.platform || ''}...`
+          : action === 'SCRAPE_FB_GROUPS'
+            ? '👥 Đang tìm 5 hội nhóm Facebook...'
+            : '🔥 Đang cào 20 bài Viral (2 Tab FB + TikTok)...',
+        'busy'
+      )
     }
 
     try {

@@ -1231,3 +1231,79 @@ html[data-admin-theme="dark"] .social-bridge-content h4 {
 html[data-admin-theme="dark"] .social-bridge-content p {
   color: #bbf7d0 !important;
 }
+/* ==========================================================================
+   V3.0: KHO BÀI VIRAL CHIA ĐÔI 2 CỘT (TRÁI: 10 FACEBOOK >= 5K | PHẢI: 10 TIKTOK >= 50K)
+   VÀ TRẠNG THÁI CHỜ DUYỆT 3-5 PHÚT (pending_review)
+   ========================================================================== */
+.status-tag--pending_review {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #7dd3fc;
+}
+
+html[data-admin-theme="dark"] .status-tag--pending_review {
+  background: rgba(14, 165, 233, 0.18) !important;
+  color: #7dd3fc !important;
+  border: 1px solid rgba(56, 189, 248, 0.4) !important;
+}
+
+.social-viral-split-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.social-viral-column {
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid var(--admin-border-light, #dce7df);
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.social-viral-column__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.social-viral-column__head--fb {
+  background: linear-gradient(135deg, #164e96, #1877f2);
+}
+
+.social-viral-column__head--tt {
+  background: linear-gradient(135deg, #111827, #371525);
+  border-bottom: 2px solid #fe2c55;
+}
+
+.social-viral-count {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.social-table-shell--compact {
+  max-height: 520px;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+html[data-admin-theme="dark"] .social-viral-column {
+  background: #0c2017 !important;
+  border-color: #28543a !important;
+}
+
+@media (max-width: 1120px) {
+  .social-viral-split-grid {
+    grid-template-columns: 1fr;
+  }
+}

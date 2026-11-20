@@ -1,17 +1,12 @@
-<!--
-  FILE NOTE
-  - Mục đích: Trung tâm điều khiển OmniVision v2.1 trên Popup Chrome Extension (có chỉnh tốc độ delay như người).
-  - Liên kết trực tiếp: manifest.json, popup.js, background.js.
--->
 <!DOCTYPE html>
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>OmniCart OmniVision Bridge</title>
+  <title>OmniCart OmniVision v3.0</title>
   <style>
     * { box-sizing: border-box; }
     body {
-      width: 360px;
+      width: 365px;
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       font-size: 12.5px;
@@ -26,164 +21,46 @@
       gap: 8px;
       border-bottom: 1px solid #1e593c;
     }
-    .header h2 {
-      margin: 0;
-      font-size: 14px;
-      font-weight: 700;
-      color: #f0fdf4;
-    }
+    .header h2 { margin: 0; font-size: 14px; font-weight: 700; color: #f0fdf4; }
     .badge {
-      font-size: 10px;
-      font-weight: 700;
-      background: #14532d;
-      color: #86efac;
-      border: 1px solid #22c55e66;
-      padding: 2px 7px;
-      border-radius: 999px;
-      margin-left: auto;
+      font-size: 10px; font-weight: 700; background: #14532d; color: #86efac;
+      border: 1px solid #22c55e66; padding: 2px 7px; border-radius: 999px; margin-left: auto;
     }
-    .tabs {
-      display: flex;
-      background: #0a2016;
-      border-bottom: 1px solid #18442f;
-    }
+    .tabs { display: flex; background: #0a2016; border-bottom: 1px solid #18442f; }
     .tab-btn {
-      flex: 1;
-      background: transparent;
-      border: none;
-      border-bottom: 2px solid transparent;
-      color: #94a3b8;
-      padding: 9px 6px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
+      flex: 1; background: transparent; border: none; border-bottom: 2px solid transparent;
+      color: #94a3b8; padding: 9px 6px; font-size: 12px; font-weight: 600; cursor: pointer;
     }
-    .tab-btn.active {
-      color: #4ade80;
-      border-bottom-color: #22c55e;
-      background: #0d291c;
-    }
-    .panel {
-      display: none;
-      padding: 12px 14px;
-      flex-direction: column;
-      gap: 10px;
-    }
+    .tab-btn.active { color: #4ade80; border-bottom-color: #22c55e; background: #0d291c; }
+    .panel { display: none; padding: 12px 14px; flex-direction: column; gap: 10px; }
     .panel.active { display: flex; }
-    .card {
-      background: #0c2318;
-      border: 1px solid #1b4d35;
-      border-radius: 9px;
-      padding: 10px 12px;
-    }
-    .card-title {
-      font-size: 10.5px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.4px;
-      color: #6ee7b7;
-      margin-bottom: 7px;
-    }
-    .profile-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 6px;
-    }
+    .card { background: #0c2318; border: 1px solid #1b4d35; border-radius: 9px; padding: 10px 12px; }
+    .card-title { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: #6ee7b7; margin-bottom: 7px; }
+    .profile-item { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
     .profile-item:last-child { margin-bottom: 0; }
     .profile-name { font-weight: 600; color: #f8fafc; }
     .profile-sub { font-size: 11px; color: #94a3b8; }
-    .dot {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #22c55e;
-      margin-right: 5px;
-    }
-    .actions {
-      display: flex;
-      flex-direction: column;
-      gap: 7px;
-    }
-    .row-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 7px;
-    }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e; margin-right: 5px; }
+    .actions { display: flex; flex-direction: column; gap: 7px; }
+    .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
     button.btn {
-      background: #16a34a;
-      color: #04130b;
-      border: none;
-      padding: 8px 10px;
-      border-radius: 7px;
-      font-weight: 700;
-      cursor: pointer;
-      font-size: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 5px;
+      background: #16a34a; color: #04130b; border: none; padding: 8px 10px; border-radius: 7px;
+      font-weight: 700; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; gap: 5px;
     }
     button.btn:hover { background: #22c55e; }
-    button.btn-secondary {
-      background: #102e20;
-      color: #d1fae5;
-      border: 1px solid #245c40;
-    }
+    button.btn-secondary { background: #102e20; color: #d1fae5; border: 1px solid #245c40; }
     button.btn-secondary:hover { background: #163d2b; }
-    button.btn-warn {
-      background: #33200a;
-      color: #fde68a;
-      border: 1px solid #b45309;
-    }
-    .field {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      margin-bottom: 8px;
-    }
+    button.btn-warn { background: #33200a; color: #fde68a; border: 1px solid #b45309; }
+    .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
     .field:last-child { margin-bottom: 0; }
-    .field label {
-      font-size: 11px;
-      font-weight: 600;
-      color: #a7f3d0;
-    }
+    .field label { font-size: 11px; font-weight: 600; color: #a7f3d0; }
     .field input, .field select {
-      background: #06130d;
-      color: #f0fdf4;
-      border: 1px solid #225c40;
-      border-radius: 6px;
-      padding: 6px 8px;
-      font-size: 12px;
-      outline: none;
+      background: #06130d; color: #f0fdf4; border: 1px solid #225c40; border-radius: 6px; padding: 6px 8px; font-size: 12px; outline: none;
     }
-    .field input:focus, .field select:focus { border-color: #22c55e; }
-    .toggle-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      font-size: 12px;
-      margin-bottom: 8px;
-    }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; margin-bottom: 8px; }
     .log-box {
-      font-family: ui-monospace, monospace;
-      font-size: 11px;
-      background: #030b07;
-      color: #7dd3fc;
-      border: 1px solid #163c2a;
-      padding: 8px;
-      border-radius: 7px;
-      max-height: 110px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    .hint {
-      font-size: 10.5px;
-      color: #94a3b8;
-      line-height: 1.4;
+      font-family: ui-monospace, monospace; font-size: 11px; background: #030b07; color: #7dd3fc;
+      border: 1px solid #163c2a; padding: 8px; border-radius: 7px; max-height: 110px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
     }
   </style>
 </head>
@@ -191,58 +68,56 @@
   <div class="header">
     <span>👁️</span>
     <h2>OmniCart OmniVision</h2>
-    <span class="badge">v2.1 Human-Pace</span>
+    <span class="badge">v3.0 • 24/7</span>
   </div>
 
   <div class="tabs">
-    <button class="tab-btn active" data-tab="control">🎛️ Điều khiển & Tab</button>
+    <button class="tab-btn active" data-tab="control">🎛️ Điều khiển 24/7</button>
     <button class="tab-btn" data-tab="vision">🧠 Mắt AI & Delay</button>
   </div>
 
-  <!-- TAB 1: ĐIỀU KHIỂN -->
   <div class="panel active" id="panel-control">
     <div class="card">
-      <div class="card-title">Tài khoản chính chủ</div>
+      <div class="card-title">Chế độ Đa tài khoản (Bất kỳ nick nào đang đăng nhập)</div>
       <div class="profile-item">
         <div>
-          <div class="profile-name">📘 Hoàng Thái HT</div>
-          <div class="profile-sub">ID: 100037782653708</div>
+          <div class="profile-name">📘 Facebook phiên hiện tại</div>
+          <div class="profile-sub">Tự nhận diện nick đang đăng nhập</div>
         </div>
-        <div><span class="dot"></span>OmniVision</div>
+        <div><span class="dot"></span>Sẵn sàng</div>
       </div>
       <div class="profile-item">
         <div>
-          <div class="profile-name">🎵 harutv</div>
-          <div class="profile-sub">@harutv666 • Photo + Mô tả + Hashtag</div>
+          <div class="profile-name">🎵 TikTok Studio phiên hiện tại</div>
+          <div class="profile-sub">Tự theo dõi duyệt 3–5 phút & lấy link thật</div>
         </div>
-        <div><span class="dot"></span>OmniVision</div>
+        <div><span class="dot"></span>Sẵn sàng</div>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-title">Trạng thái kết nối 3 Tab</div>
+      <div class="card-title">Trạng thái kết nối Tab & Theo dõi duyệt</div>
       <div id="tabs-status" style="line-height:1.6;font-size:12px;">Đang kiểm tra…</div>
     </div>
 
     <div class="actions">
-      <button id="btn-open-admin" class="btn">⚙️ Mở Store-Admin để Đăng bài</button>
+      <button id="btn-open-admin" class="btn">⚙️ Mở Store-Admin để quản trị</button>
       <div class="row-2">
         <button id="btn-inspect-fb" class="btn btn-secondary">👁️ Soi Tab FB</button>
         <button id="btn-inspect-tt" class="btn btn-secondary">👁️ Soi Tab TikTok</button>
       </div>
       <div class="row-2">
-        <button id="btn-scrape-viral" class="btn btn-secondary">🔥 Quét Viral FB</button>
+        <button id="btn-check-pending" class="btn btn-secondary">⏳ Soi bài chờ duyệt</button>
         <button id="btn-reset-jobs" class="btn btn-warn">🧹 Mở khóa tác vụ</button>
       </div>
     </div>
 
-    <div class="log-box" id="log-output">Sẵn sàng quan sát & điều khiển 3 tab với nhịp trễ tự nhiên.</div>
+    <div class="log-box" id="log-output">Sẵn sàng vận hành 24/7 trên bất kỳ tài khoản Facebook & TikTok nào đang đăng nhập.</div>
   </div>
 
-  <!-- TAB 2: CẤU HÌNH VISION AI & DELAY -->
   <div class="panel" id="panel-vision">
     <div class="card">
-      <div class="card-title">Hành vi giống người & HUD trực quan</div>
+      <div class="card-title">Nhịp người thật & HUD trực quan</div>
       <div class="toggle-row">
         <span>Hiện khung nhắm & trạng thái trên FB/TikTok</span>
         <input type="checkbox" id="cfg-show-hud" checked>
@@ -250,9 +125,9 @@
       <div class="field">
         <label for="cfg-pacing">Tốc độ thao tác (Delay chống quét bot)</label>
         <select id="cfg-pacing">
-          <option value="normal">Tự nhiên như người thật (Khuyên dùng • ~12-18s/bài)</option>
-          <option value="careful">Cẩn trọng chống quét cao (~20-28s/bài)</option>
-          <option value="fast">Nhanh (Chỉ dùng khi kiểm thử)</option>
+          <option value="normal">Tự nhiên như người thật (Khuyên dùng)</option>
+          <option value="careful">Cẩn trọng chống quét cao (Chậm rãi)</option>
+          <option value="fast">Nhanh (Chỉ dùng để kiểm thử)</option>
         </select>
       </div>
     </div>
@@ -262,17 +137,17 @@
       <div class="field">
         <label for="cfg-ai-mode">Chế độ hỗ trợ Vision AI</label>
         <select id="cfg-ai-mode">
-          <option value="layout">Bản đồ hình học + AI (Ngầm 100%, không bật tab)</option>
-          <option value="screenshot">Chụp màn hình thật + AI (Chính xác nhất)</option>
-          <option value="off">Chỉ dùng OmniVision Hình học (Không gọi AI)</option>
+          <option value="layout">Bản đồ hình học + AI (Ngầm 100%)</option>
+          <option value="screenshot">Chụp màn hình thật + AI</option>
+          <option value="off">Chỉ dùng OmniVision Hình học</option>
         </select>
       </div>
       <div class="field">
-        <label for="cfg-provider">Nhà cung cấp Vision AI</label>
+        <label for="cfg-provider">Nhà cung cấp</label>
         <select id="cfg-provider">
-          <option value="ollama">Ollama Local (Miễn phí trên máy)</option>
-          <option value="gemini">Google Gemini Vision (gemini-2.5-flash)</option>
-          <option value="openai">OpenAI / LM Studio / OpenRouter</option>
+          <option value="ollama">Ollama Local (Miễn phí)</option>
+          <option value="gemini">Google Gemini Vision</option>
+          <option value="openai">OpenAI / LM Studio</option>
         </select>
       </div>
       <div class="field">
@@ -281,14 +156,11 @@
       </div>
       <div class="field">
         <label for="cfg-model">Model Vision</label>
-        <input type="text" id="cfg-model" placeholder="qwen2.5vl:7b / llama3.2-vision / gemini-2.5-flash">
+        <input type="text" id="cfg-model" placeholder="qwen2.5vl:7b / gemini-2.5-flash">
       </div>
       <div class="field">
-        <label for="cfg-apikey">API Key (bỏ trống nếu dùng Ollama Local)</label>
-        <input type="password" id="cfg-apikey" placeholder="AIza... hoặc sk-...">
-      </div>
-      <div class="hint">
-        Độ trễ Gaussian Jitter giúp mô phỏng khoảng dừng đọc, rê chuột, gõ tiêu đề và rà soát bài trước khi bấm Đăng.
+        <label for="cfg-apikey">API Key</label>
+        <input type="password" id="cfg-apikey" placeholder="Để trống nếu dùng Ollama Local">
       </div>
     </div>
 

@@ -1,8 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Khai báo các mô hình dữ liệu (Models & DTOs) cho tính năng Tự động hóa đăng bài Mạng Xã Hội (Facebook, TikTok, Group targets, Viral posts, Post audit logs), hỗ trợ chu kỳ 30 giây / phút / giờ linh hoạt, quyền riêng tư chỉ mình tôi / công khai và API đăng bài/viral thật.
-  - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.SocialAutomation.cs, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs, Store-Admin/server-dotnet/Services/SocialAutoPostWorker.cs
-  - Vùng ảnh hưởng khi sửa: Cấu trúc dữ liệu lưu trữ cấu hình chiến dịch, lịch sử bài đăng MXH, nhóm mục tiêu và thống kê tương tác.
+  - Mục đích: Khai báo các mô hình dữ liệu (Models & DTOs) cho Tự động hóa đăng bài MXH đa tài khoản, hỗ trợ theo dõi duyệt bài 3-5 phút (pending_review), nhập hội nhóm & bài viral thật.
 */
 
 namespace StoreApi.Models;
@@ -11,14 +9,14 @@ public sealed class SocialCampaignSettings
 {
     public int Id { get; set; } = 1;
     public bool IsActive { get; set; } = true;
-    public string Mode { get; set; } = "full_auto"; // full_auto | semi_auto
-    public double IntervalHours { get; set; } = 2; // 0.0833 (5m), 0.5 (30m), 1, 2, 3, 6...
-    public int IntervalMinutes { get; set; } = 120; // 5, 30, 60, 120, 180, 360
-    public int IntervalSeconds { get; set; } = 30; // 30s, 300s (5m), 1800s (30m)...
-    public string Privacy { get; set; } = "only_me"; // only_me (Chỉ mình tôi) | public (Công khai)
+    public string Mode { get; set; } = "full_auto";
+    public double IntervalHours { get; set; } = 2;
+    public int IntervalMinutes { get; set; } = 120;
+    public int IntervalSeconds { get; set; } = 120;
+    public string Privacy { get; set; } = "only_me";
     public string Channels { get; set; } = "facebook,tiktok";
     public string PreferredCategory { get; set; } = "all";
-    public string ToneStyle { get; set; } = "viral_engaging"; // viral_engaging, humorous, fomo_sales, authentic_review, storytelling
+    public string ToneStyle { get; set; } = "viral_engaging";
     public bool IncludeHashtags { get; set; } = true;
     public bool IncludeEmojis { get; set; } = true;
     public bool IncludeCta { get; set; } = true;
@@ -37,15 +35,15 @@ public sealed class SocialAutoPost
     public string ProductName { get; set; } = "";
     public decimal ProductPrice { get; set; }
     public string? ProductImage { get; set; }
-    public string Platform { get; set; } = "facebook"; // facebook | tiktok
+    public string Platform { get; set; } = "facebook";
     public string Title { get; set; } = "";
     public string Content { get; set; } = "";
     public string Hashtags { get; set; } = "";
-    public string Status { get; set; } = "internal_draft"; // internal_draft | ready_for_api | published | pending_approval | failed
+    public string Status { get; set; } = "internal_draft"; // internal_draft | ready_for_publish | pending_review | published | pending_approval | unverified | failed
     public string? ErrorMessage { get; set; }
     public string? PostUrl { get; set; }
     public string? TargetGroup { get; set; }
-    public string Privacy { get; set; } = "only_me"; // only_me | public
+    public string Privacy { get; set; } = "only_me";
     public string TriggerTime { get; set; } = "";
     public string? PublishedTime { get; set; }
     public int LikesCount { get; set; }
@@ -63,7 +61,7 @@ public sealed class SocialGroupTarget
     public string Category { get; set; } = "";
     public int MembersCount { get; set; }
     public string InteractionRate { get; set; } = "Cao";
-    public string Status { get; set; } = "active"; // active | joined | pending
+    public string Status { get; set; } = "active";
     public bool IsAutoShare { get; set; } = true;
     public string? Notes { get; set; }
     public string CreatedAt { get; set; } = "";
@@ -100,7 +98,7 @@ public sealed class SocialSummaryStats
     public bool IsActive { get; set; }
     public double IntervalHours { get; set; }
     public int IntervalMinutes { get; set; }
-    public int IntervalSeconds { get; set; } = 30;
+    public int IntervalSeconds { get; set; } = 120;
     public string Privacy { get; set; } = "only_me";
     public string Mode { get; set; } = "full_auto";
 }
@@ -132,25 +130,35 @@ public sealed class AddGroupRequest
 {
     public string GroupName { get; set; } = "";
     public string GroupUrl { get; set; } = "";
-    public string Category { get; set; } = "Đồ gia dụng & Gia đình";
-    public int MembersCount { get; set; } = 25000;
+    public string Category { get; set; } = "Cộng đồng Facebook";
+    public int MembersCount { get; set; }
     public string InteractionRate { get; set; } = "Cao";
     public bool IsAutoShare { get; set; } = true;
     public string? Notes { get; set; }
+}
+
+public sealed class ToggleGroupRequest
+{
+    public bool IsAutoShare { get; set; }
+}
+
+public sealed class ImportRealGroupsRequest
+{
+    public List<SocialGroupTarget>? Groups { get; set; }
 }
 
 public sealed class AddViralPostRequest
 {
     public string Title { get; set; } = "";
     public string Platform { get; set; } = "facebook";
-    public string Category { get; set; } = "Gia dụng & Đời sống";
+    public string Category { get; set; } = "Đời sống & Tiện ích";
     public string PostUrl { get; set; } = "";
     public string Summary { get; set; } = "";
     public int ViralityScore { get; set; } = 96;
-    public int LikesCount { get; set; } = 1200;
-    public int SharesCount { get; set; } = 340;
-    public int CommentsCount { get; set; } = 185;
-    public string TrendingTopic { get; set; } = "Mẹo hay cuộc sống";
+    public int LikesCount { get; set; }
+    public int SharesCount { get; set; }
+    public int CommentsCount { get; set; }
+    public string TrendingTopic { get; set; } = "Xu hướng thực tế";
 }
 
 public sealed class PublishRealPostRequest
@@ -163,6 +171,13 @@ public sealed class PublishRealPostRequest
     public int LikesCount { get; set; }
     public int SharesCount { get; set; }
     public int CommentsCount { get; set; }
+}
+
+public sealed class MarkPendingReviewRequest
+{
+    public string? Platform { get; set; }
+    public string? Privacy { get; set; }
+    public string? Message { get; set; }
 }
 
 public sealed class PublishFailureRequest

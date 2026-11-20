@@ -1,11 +1,14 @@
 /*
   FILE NOTE
-  - Mục đích: Cung cấp các phương thức truy cập dữ liệu SQL Server cho hệ thống Tự động hóa đăng bài Mạng Xã Hội (cài đặt chu kỳ, quyền riêng tư dùng chung, Facebook Hoàng Thái HT, TikTok @harutv666, lưu trạng thái đăng bài đã xác nhận).
-  - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.cs, Store-Admin/server-dotnet/Models/SocialAutomationModels.cs, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs, Store-Admin/server-dotnet/Services/SocialAutoPostWorker.cs
-  - Vùng ảnh hưởng khi sửa: Tầng lưu trữ dữ liệu chiến dịch MXH, bảng audit logs đăng bài, nhóm Facebook mục tiêu và bảng theo dõi bài hot.
+  - Mục đích: Truy cập dữ liệu SQL Server cho Tự động hóa đăng bài MXH đa tài khoản (không hardcode tên/ID nick).
+  - Nâng cấp:
+    1. IsRealSocialPostPermalink chấp nhận link bài viết thật từ BẤT KỲ tài khoản Facebook hoặc TikTok nào (@any_handle/video|photo/id).
+    2. Hỗ trợ trạng thái pending_review (chờ TikTok duyệt 3-5 phút).
+    3. Thêm DeleteAllSocialPosts(), DeleteAllSocialViralPosts(), ImportRealGroupTargets() (chống trùng URL) và ImportRealViralPosts() chống trùng URL.
 */
 
 using System.Data;
+using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using StoreApi.Models;
 
@@ -17,7 +20,6 @@ public sealed partial class StoreDb
     {
         using var db = Open();
 
-        // 1. Tạo bảng social_campaign_settings nếu chưa tồn tại
         ExecuteNonQuery(db, """
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'social_campaign_settings')
             BEGIN
@@ -42,38 +44,24 @@ public sealed partial class StoreDb
             END;
             """);
 
-        // 2. Thêm cột interval_minutes, interval_seconds và privacy vào social_campaign_settings nếu bảng đã tồn tại từ trước
         ExecuteNonQuery(db, """
             IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('social_campaign_settings') AND name = 'interval_minutes')
-            BEGIN
                 ALTER TABLE social_campaign_settings ADD interval_minutes INT NOT NULL DEFAULT 120;
-            END;
-            """);
-
-        ExecuteNonQuery(db, """
             IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('social_campaign_settings') AND name = 'interval_seconds')
-            BEGIN
-                ALTER TABLE social_campaign_settings ADD interval_seconds INT NOT NULL DEFAULT 30;
-            END;
-            """);
-
-        ExecuteNonQuery(db, """
+                ALTER TABLE social_campaign_settings ADD interval_seconds INT NOT NULL DEFAULT 120;
             IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('social_campaign_settings') AND name = 'privacy')
-            BEGIN
                 ALTER TABLE social_campaign_settings ADD privacy NVARCHAR(50) NOT NULL DEFAULT 'only_me';
-            END;
             """);
 
-        // 3. Khởi tạo bản ghi cài đặt mặc định nếu chưa có
         ExecuteNonQuery(db, """
             IF NOT EXISTS (SELECT 1 FROM social_campaign_settings WHERE id = 1)
             BEGIN
                 INSERT INTO social_campaign_settings (
-                    id, is_active, mode, interval_hours, interval_minutes, privacy, channels, preferred_category, tone_style,
+                    id, is_active, mode, interval_hours, interval_minutes, interval_seconds, privacy, channels, preferred_category, tone_style,
                     include_hashtags, include_emojis, include_cta, include_hotline,
                     contact_hotline, order_link_template, last_run_at, next_run_at, updated_at
                 ) VALUES (
-                    1, 1, 'full_auto', 2, 120, 'only_me', 'facebook,tiktok', 'all', 'viral_engaging',
+                    1, 0, 'full_auto', 2, 120, 7200, 'only_me', 'facebook,tiktok', 'all', 'viral_engaging',
                     1, 1, 1, 1,
                     '0901.234.567', 'https://omnicart.vn/products/{id}',
                     CONVERT(NVARCHAR(30), DATEADD(HOUR, -2, GETUTCDATE()), 126),
@@ -83,7 +71,6 @@ public sealed partial class StoreDb
             END;
             """);
 
-        // 4. Tạo bảng social_auto_posts nếu chưa tồn tại
         ExecuteNonQuery(db, """
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'social_auto_posts')
             BEGIN
@@ -110,17 +97,10 @@ public sealed partial class StoreDb
                     created_at NVARCHAR(100) NOT NULL
                 );
             END;
-            """);
-
-        // 5. Thêm cột privacy vào social_auto_posts nếu chưa có
-        ExecuteNonQuery(db, """
             IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('social_auto_posts') AND name = 'privacy')
-            BEGIN
                 ALTER TABLE social_auto_posts ADD privacy NVARCHAR(50) NOT NULL DEFAULT 'only_me';
-            END;
             """);
 
-        // 6. Tạo bảng nhóm và bài viết viral nếu chưa có
         ExecuteNonQuery(db, """
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'social_group_targets')
             BEGIN
@@ -137,9 +117,7 @@ public sealed partial class StoreDb
                     created_at NVARCHAR(100) NOT NULL
                 );
             END;
-            """);
 
-        ExecuteNonQuery(db, """
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'social_viral_posts')
             BEGIN
                 CREATE TABLE social_viral_posts (
@@ -159,60 +137,11 @@ public sealed partial class StoreDb
             END;
             """);
 
-        // 7. Xóa bỏ dứt điểm số liệu mock ảo, gỡ hội nhóm fake và bài viral giả mạo (an toàn sau khi các bảng đã tạo)
+        // Làm sạch dữ liệu mẫu hardcode nick cũ nếu còn sót
         ExecuteNonQuery(db, """
-            -- Xóa các bài demo cũ và bài có liên kết giả mạo
-            DELETE FROM social_auto_posts
-            WHERE id IN ('post-demo-01', 'post-demo-02') 
-               OR post_url LIKE '%omnicart.vietnam%' 
-               OR post_url LIKE '%@omnicart.vn%';
-
-            -- Reset toàn bộ tương tác ảo về 0 cho bài nháp/chờ duyệt
             UPDATE social_auto_posts
-            SET likes_count = 0, shares_count = 0, comments_count = 0, views_count = 0, post_url = NULL
-            WHERE status IN ('internal_draft', 'pending_approval', 'ready_for_api');
-
-            -- Xóa các hội nhóm Facebook giả mạo với link 404 và số thành viên ảo
-            DELETE FROM social_group_targets
-            WHERE group_url LIKE '%nghiennha%' 
-               OR group_url LIKE '%sandeal%' 
-               OR group_url LIKE '%genz%' 
-               OR group_url LIKE '%meovat%' 
-               OR members_count > 10000;
-
-            -- Cập nhật hoặc chuẩn hóa nhóm mẫu sang tài khoản Facebook Hoàng Thái HT
-            UPDATE social_group_targets
-            SET group_name = N'Trang cá nhân Facebook Hoàng Thái HT',
-                group_url = 'https://www.facebook.com/profile.php?id=100037782653708',
-                category = N'Trang cá nhân',
-                notes = N'Trang cá nhân Facebook chính thức của quản trị viên'
-            WHERE group_url LIKE '%facebook.com/groups/%' OR id LIKE 'grp-sample-%';
-
-            -- Chuẩn hóa bài viral TikTok về kênh chính thức @harutv666
-            UPDATE social_viral_posts
-            SET post_url = 'https://www.tiktok.com/@harutv666'
-            WHERE platform = 'tiktok' AND (post_url LIKE '%@omnicart.vietnam%' OR post_url = 'https://www.tiktok.com/' OR post_url IS NULL);
-            """);
-
-        // 8. Khởi tạo mẫu trung thực khi bảng trống (số liệu tương tác 0 trung thực)
-        ExecuteNonQuery(db, """
-            IF NOT EXISTS (SELECT 1 FROM social_group_targets)
-            BEGIN
-                INSERT INTO social_group_targets (
-                    id, group_name, group_url, category, members_count, interaction_rate, status, is_auto_share, notes, created_at
-                ) VALUES
-                ('grp-sample-01', N'Trang cá nhân Facebook Hoàng Thái HT', 'https://www.facebook.com/profile.php?id=100037782653708', N'Trang cá nhân', 0, N'Rất cao', 'active', 1, N'Trang cá nhân Facebook kết nối đăng bài', CONVERT(NVARCHAR(30), GETUTCDATE(), 126)),
-                ('grp-sample-02', N'Cộng Đồng Mua Sắm Tiện Ích & Săn Deal Hời', 'https://www.facebook.com/profile.php?id=100037782653708', N'Khuyến mãi & Mua sắm', 0, N'Bình thường', 'active', 1, N'Kênh mục tiêu chia sẻ bài đăng ưu đãi sản phẩm', CONVERT(NVARCHAR(30), GETUTCDATE(), 126));
-            END;
-
-            IF NOT EXISTS (SELECT 1 FROM social_viral_posts)
-            BEGIN
-                INSERT INTO social_viral_posts (
-                    id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, created_at
-                ) VALUES
-                ('viral-ref-01', N'Mẹo sắp xếp đồ dùng gia đình gọn gàng trong 15 phút', 'facebook', N'Đồ gia dụng', 'https://www.facebook.com/profile.php?id=100037782653708', N'Mẫu ý tưởng nội dung hữu ích gắn liền với đời sống hàng ngày.', 85, 0, 0, 0, N'Lối sống tiện lợi', CONVERT(NVARCHAR(30), GETUTCDATE(), 126)),
-                ('viral-ref-02', N'Đập hộp và trải nghiệm nhanh phụ kiện công nghệ tiện ích', 'tiktok', N'Công nghệ', 'https://www.tiktok.com/@harutv666', N'Mẫu kịch bản video ngắn review công năng thực tế.', 80, 0, 0, 0, N'Review chân thật', CONVERT(NVARCHAR(30), GETUTCDATE(), 126));
-            END;
+            SET target_group = N'Trang cá nhân đang đăng nhập'
+            WHERE target_group LIKE N'%John Harper%' OR target_group LIKE N'%Hoàng Thái HT%';
             """);
     }
 
@@ -221,6 +150,39 @@ public sealed partial class StoreDb
         using var command = db.CreateCommand();
         command.CommandText = sql;
         command.ExecuteNonQuery();
+    }
+
+    // Chấp nhận link bài đăng thật từ BẤT KỲ tài khoản Facebook hoặc TikTok nào đang đăng nhập!
+    public static bool IsRealSocialPostPermalink(string platform, string? postUrl)
+    {
+        if (!Uri.TryCreate(postUrl, UriKind.Absolute, out var uri)) return false;
+        var host = uri.Host.ToLowerInvariant();
+
+        if (platform.Equals("facebook", StringComparison.OrdinalIgnoreCase))
+        {
+            if (host != "facebook.com" && !host.EndsWith(".facebook.com", StringComparison.Ordinal)) return false;
+            var path = uri.AbsolutePath.ToLowerInvariant();
+            return path.Contains("/posts/") ||
+                   path.Contains("/share/") ||
+                   path.Contains("/reel/") ||
+                   path.Contains("/videos/") ||
+                   path.Contains("/photo") ||
+                   (path.Contains("permalink.php") && uri.Query.Contains("story_fbid=", StringComparison.OrdinalIgnoreCase)) ||
+                   uri.Query.Contains("story_fbid=", StringComparison.OrdinalIgnoreCase) ||
+                   uri.Query.Contains("fbid=", StringComparison.OrdinalIgnoreCase) ||
+                   uri.Query.Contains("v=", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (platform.Equals("tiktok", StringComparison.OrdinalIgnoreCase))
+        {
+            if (host != "tiktok.com" && !host.EndsWith(".tiktok.com", StringComparison.Ordinal)) return false;
+            return Regex.IsMatch(
+                uri.AbsolutePath,
+                @"^/@[A-Za-z0-9._-]+/(?:video|photo)/[0-9]+/?$",
+                RegexOptions.IgnoreCase);
+        }
+
+        return false;
     }
 
     public SocialCampaignSettings GetSocialSettings()
@@ -232,34 +194,9 @@ public sealed partial class StoreDb
         if (reader.Read())
         {
             var rawHours = reader.GetInt32(3);
-            int minutes = 120;
-            try
-            {
-                if (!reader.IsDBNull(16)) minutes = reader.GetInt32(16);
-                else minutes = rawHours > 0 ? rawHours * 60 : 120;
-            }
-            catch
-            {
-                minutes = rawHours > 0 ? rawHours * 60 : 120;
-            }
-
-            string privacy = "only_me";
-            try
-            {
-                if (!reader.IsDBNull(17)) privacy = reader.GetString(17);
-            }
-            catch { }
-
-            int seconds = 120 * 60;
-            try
-            {
-                if (!reader.IsDBNull(18)) seconds = reader.GetInt32(18);
-                else seconds = minutes * 60;
-            }
-            catch
-            {
-                seconds = minutes * 60;
-            }
+            int minutes = !reader.IsDBNull(16) ? reader.GetInt32(16) : (rawHours > 0 ? rawHours * 60 : 120);
+            string privacy = !reader.IsDBNull(17) ? reader.GetString(17) : "only_me";
+            int seconds = !reader.IsDBNull(18) ? reader.GetInt32(18) : minutes * 60;
 
             return new SocialCampaignSettings
             {
@@ -293,10 +230,10 @@ public sealed partial class StoreDb
         using var db = Open();
         using var command = db.CreateCommand();
         var now = DateTimeOffset.UtcNow.ToString("o");
-        int seconds = settings.IntervalSeconds > 0 
-            ? settings.IntervalSeconds 
+        int seconds = settings.IntervalSeconds > 0
+            ? settings.IntervalSeconds
             : (settings.IntervalMinutes > 0 ? settings.IntervalMinutes * 60 : (int)Math.Round(settings.IntervalHours * 3600));
-        if (seconds <= 0) seconds = 30;
+        if (seconds <= 0) seconds = 120;
 
         int minutes = seconds >= 60 ? seconds / 60 : 0;
         int hours = (int)Math.Max(1, Math.Round((double)seconds / 3600.0));
@@ -352,7 +289,7 @@ public sealed partial class StoreDb
         command.ExecuteNonQuery();
     }
 
-    public IReadOnlyList<SocialAutoPost> GetSocialPosts(string? status = null, string? platform = null, int limit = 60)
+    public IReadOnlyList<SocialAutoPost> GetSocialPosts(string? status = null, string? platform = null, int limit = 80)
     {
         using var db = Open();
         using var command = db.CreateCommand();
@@ -377,7 +314,7 @@ public sealed partial class StoreDb
             {whereClause}
             ORDER BY created_at DESC;
             """;
-        command.Parameters.Add(new SqlParameter("@limit", SqlDbType.Int) { Value = limit > 0 ? limit : 60 });
+        command.Parameters.Add(new SqlParameter("@limit", SqlDbType.Int) { Value = limit > 0 ? limit : 80 });
 
         var list = new List<SocialAutoPost>();
         using var reader = command.ExecuteReader();
@@ -387,12 +324,7 @@ public sealed partial class StoreDb
             var storedStatus = reader.GetString(9);
             var storedPostUrl = reader.IsDBNull(11) ? null : reader.GetString(11);
             var publishedWithoutPermalink = storedStatus == "published" && !IsRealSocialPostPermalink(platformName, storedPostUrl);
-            string privacy = "only_me";
-            try
-            {
-                if (!reader.IsDBNull(20)) privacy = reader.GetString(20);
-            }
-            catch { }
+            var privacy = !reader.IsDBNull(20) ? reader.GetString(20) : "only_me";
 
             list.Add(new SocialAutoPost
             {
@@ -407,7 +339,7 @@ public sealed partial class StoreDb
                 Hashtags = reader.GetString(8),
                 Status = publishedWithoutPermalink ? "unverified" : storedStatus,
                 ErrorMessage = publishedWithoutPermalink
-                    ? "Chưa xác minh được liên kết bài đăng thật; không tính vào số bài đã đăng hoặc tương tác."
+                    ? "Chưa xác minh được liên kết bài đăng thật."
                     : reader.IsDBNull(10) ? null : reader.GetString(10),
                 PostUrl = publishedWithoutPermalink ? null : storedPostUrl,
                 TargetGroup = reader.IsDBNull(12) ? null : reader.GetString(12),
@@ -424,33 +356,6 @@ public sealed partial class StoreDb
         return list;
     }
 
-    private static bool IsRealSocialPostPermalink(string platform, string? postUrl)
-    {
-        if (!Uri.TryCreate(postUrl, UriKind.Absolute, out var uri)) return false;
-
-        var host = uri.Host.ToLowerInvariant();
-        if (platform.Equals("facebook", StringComparison.OrdinalIgnoreCase))
-        {
-            if (host != "facebook.com" && !host.EndsWith(".facebook.com", StringComparison.Ordinal)) return false;
-            var path = uri.AbsolutePath.ToLowerInvariant();
-            return path.Contains("/posts/") || path.Contains("/share/p/") ||
-                   (path.Contains("permalink.php") && uri.Query.Contains("story_fbid=", StringComparison.OrdinalIgnoreCase)) ||
-                   uri.Query.Contains("story_fbid=", StringComparison.OrdinalIgnoreCase) ||
-                   uri.Query.Contains("fbid=", StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (platform.Equals("tiktok", StringComparison.OrdinalIgnoreCase))
-        {
-            if (host != "tiktok.com" && !host.EndsWith(".tiktok.com", StringComparison.Ordinal)) return false;
-            return System.Text.RegularExpressions.Regex.IsMatch(
-                uri.AbsolutePath,
-                @"^/@harutv666/(?:video|photo)/[0-9]+/?$",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        }
-
-        return false;
-    }
-
     public SocialAutoPost? GetSocialPostById(string id)
     {
         using var db = Open();
@@ -459,46 +364,36 @@ public sealed partial class StoreDb
             SELECT id, product_id, product_name, product_price, product_image, platform,
                    title, content, hashtags, status, error_message, post_url, target_group,
                    trigger_time, published_time, likes_count, shares_count, comments_count, views_count, created_at, privacy
-            FROM social_auto_posts
-            WHERE id = @id;
+            FROM social_auto_posts WHERE id = @id;
             """;
         command.Parameters.Add(new SqlParameter("@id", SqlDbType.NVarChar, 100) { Value = id });
         using var reader = command.ExecuteReader();
-        if (reader.Read())
-        {
-            string privacy = "only_me";
-            try
-            {
-                if (!reader.IsDBNull(20)) privacy = reader.GetString(20);
-            }
-            catch { }
+        if (!reader.Read()) return null;
 
-            return new SocialAutoPost
-            {
-                Id = reader.GetString(0),
-                ProductId = reader.IsDBNull(1) ? null : reader.GetString(1),
-                ProductName = reader.GetString(2),
-                ProductPrice = reader.GetDecimal(3),
-                ProductImage = reader.IsDBNull(4) ? null : reader.GetString(4),
-                Platform = reader.GetString(5),
-                Title = reader.GetString(6),
-                Content = reader.GetString(7),
-                Hashtags = reader.GetString(8),
-                Status = reader.GetString(9),
-                ErrorMessage = reader.IsDBNull(10) ? null : reader.GetString(10),
-                PostUrl = reader.IsDBNull(11) ? null : reader.GetString(11),
-                TargetGroup = reader.IsDBNull(12) ? null : reader.GetString(12),
-                TriggerTime = reader.GetString(13),
-                PublishedTime = reader.IsDBNull(14) ? null : reader.GetString(14),
-                LikesCount = reader.GetInt32(15),
-                SharesCount = reader.GetInt32(16),
-                CommentsCount = reader.GetInt32(17),
-                ViewsCount = reader.GetInt32(18),
-                CreatedAt = reader.GetString(19),
-                Privacy = privacy
-            };
-        }
-        return null;
+        return new SocialAutoPost
+        {
+            Id = reader.GetString(0),
+            ProductId = reader.IsDBNull(1) ? null : reader.GetString(1),
+            ProductName = reader.GetString(2),
+            ProductPrice = reader.GetDecimal(3),
+            ProductImage = reader.IsDBNull(4) ? null : reader.GetString(4),
+            Platform = reader.GetString(5),
+            Title = reader.GetString(6),
+            Content = reader.GetString(7),
+            Hashtags = reader.GetString(8),
+            Status = reader.GetString(9),
+            ErrorMessage = reader.IsDBNull(10) ? null : reader.GetString(10),
+            PostUrl = reader.IsDBNull(11) ? null : reader.GetString(11),
+            TargetGroup = reader.IsDBNull(12) ? null : reader.GetString(12),
+            TriggerTime = reader.GetString(13),
+            PublishedTime = reader.IsDBNull(14) ? null : reader.GetString(14),
+            LikesCount = reader.GetInt32(15),
+            SharesCount = reader.GetInt32(16),
+            CommentsCount = reader.GetInt32(17),
+            ViewsCount = reader.GetInt32(18),
+            CreatedAt = reader.GetString(19),
+            Privacy = !reader.IsDBNull(20) ? reader.GetString(20) : "only_me"
+        };
     }
 
     public SocialAutoPost CreateSocialPost(SocialAutoPost post)
@@ -546,24 +441,21 @@ public sealed partial class StoreDb
         return post;
     }
 
-    public bool UpdateSocialPostStatus(string id, string status, string? errorMessage = null, string? postUrl = null)
+    public bool MarkSocialPostPendingReview(string id, string? privacy, string? message)
     {
         using var db = Open();
         using var command = db.CreateCommand();
-        var now = DateTimeOffset.UtcNow.ToString("o");
         command.CommandText = """
             UPDATE social_auto_posts
-            SET status = @status,
-                error_message = @error_message,
-                post_url = COALESCE(@post_url, post_url),
-                published_time = CASE WHEN @status = 'published' AND published_time IS NULL THEN @now ELSE published_time END
+            SET status = 'pending_review',
+                privacy = COALESCE(@privacy, privacy),
+                error_message = @msg,
+                post_url = NULL
             WHERE id = @id;
             """;
         command.Parameters.Add(new SqlParameter("@id", SqlDbType.NVarChar, 100) { Value = id });
-        command.Parameters.Add(new SqlParameter("@status", SqlDbType.NVarChar, 50) { Value = status });
-        command.Parameters.Add(new SqlParameter("@error_message", SqlDbType.NVarChar, -1) { Value = (object?)errorMessage ?? DBNull.Value });
-        command.Parameters.Add(new SqlParameter("@post_url", SqlDbType.NVarChar, 500) { Value = (object?)postUrl ?? DBNull.Value });
-        command.Parameters.Add(new SqlParameter("@now", SqlDbType.NVarChar, 100) { Value = now });
+        command.Parameters.Add(new SqlParameter("@privacy", SqlDbType.NVarChar, 50) { Value = (object?)privacy ?? DBNull.Value });
+        command.Parameters.Add(new SqlParameter("@msg", SqlDbType.NVarChar, -1) { Value = (object?)(message ?? "Đang chờ duyệt trên mạng xã hội (3–5 phút)...") ?? DBNull.Value });
         return command.ExecuteNonQuery() > 0;
     }
 
@@ -599,18 +491,26 @@ public sealed partial class StoreDb
         return command.ExecuteNonQuery() > 0;
     }
 
+    public int DeleteAllSocialPosts()
+    {
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "DELETE FROM social_auto_posts";
+        return command.ExecuteNonQuery();
+    }
+
     public IReadOnlyList<SocialGroupTarget> GetSocialGroupTargets(string? category = null)
     {
         using var db = Open();
         using var command = db.CreateCommand();
         if (!string.IsNullOrWhiteSpace(category) && category != "all")
         {
-            command.CommandText = "SELECT id, group_name, group_url, category, members_count, interaction_rate, status, is_auto_share, notes, created_at FROM social_group_targets WHERE category = @cat ORDER BY members_count DESC";
+            command.CommandText = "SELECT id, group_name, group_url, category, members_count, interaction_rate, status, is_auto_share, notes, created_at FROM social_group_targets WHERE category = @cat ORDER BY members_count DESC, created_at DESC";
             command.Parameters.Add(new SqlParameter("@cat", SqlDbType.NVarChar, 100) { Value = category.Trim() });
         }
         else
         {
-            command.CommandText = "SELECT id, group_name, group_url, category, members_count, interaction_rate, status, is_auto_share, notes, created_at FROM social_group_targets ORDER BY members_count DESC";
+            command.CommandText = "SELECT id, group_name, group_url, category, members_count, interaction_rate, status, is_auto_share, notes, created_at FROM social_group_targets ORDER BY members_count DESC, created_at DESC";
         }
 
         var list = new List<SocialGroupTarget>();
@@ -651,7 +551,7 @@ public sealed partial class StoreDb
         command.Parameters.Add(new SqlParameter("@id", SqlDbType.NVarChar, 100) { Value = group.Id });
         command.Parameters.Add(new SqlParameter("@group_name", SqlDbType.NVarChar, 255) { Value = group.GroupName });
         command.Parameters.Add(new SqlParameter("@group_url", SqlDbType.NVarChar, 500) { Value = group.GroupUrl });
-        command.Parameters.Add(new SqlParameter("@category", SqlDbType.NVarChar, 100) { Value = group.Category });
+        command.Parameters.Add(new SqlParameter("@category", SqlDbType.NVarChar, 100) { Value = group.Category ?? "Cộng đồng Facebook" });
         command.Parameters.Add(new SqlParameter("@members_count", SqlDbType.Int) { Value = group.MembersCount });
         command.Parameters.Add(new SqlParameter("@interaction_rate", SqlDbType.NVarChar, 50) { Value = group.InteractionRate ?? "Cao" });
         command.Parameters.Add(new SqlParameter("@status", SqlDbType.NVarChar, 50) { Value = group.Status ?? "active" });
@@ -661,6 +561,26 @@ public sealed partial class StoreDb
         command.ExecuteNonQuery();
 
         return group;
+    }
+
+    public int ImportRealGroupTargets(IEnumerable<SocialGroupTarget> groups)
+    {
+        var existingUrls = new HashSet<string>(
+            GetSocialGroupTargets().Select(g => g.GroupUrl.Trim().TrimEnd('/').ToLowerInvariant()),
+            StringComparer.OrdinalIgnoreCase);
+
+        int added = 0;
+        foreach (var group in groups)
+        {
+            if (string.IsNullOrWhiteSpace(group.GroupName) || string.IsNullOrWhiteSpace(group.GroupUrl)) continue;
+            var normalizedUrl = group.GroupUrl.Trim().TrimEnd('/').ToLowerInvariant();
+            if (existingUrls.Contains(normalizedUrl)) continue;
+
+            AddSocialGroupTarget(group);
+            existingUrls.Add(normalizedUrl);
+            added++;
+        }
+        return added;
     }
 
     public bool DeleteSocialGroupTarget(string id)
@@ -688,12 +608,12 @@ public sealed partial class StoreDb
         using var command = db.CreateCommand();
         if (!string.IsNullOrWhiteSpace(category) && category != "all")
         {
-            command.CommandText = "SELECT id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, created_at FROM social_viral_posts WHERE category = @cat ORDER BY virality_score DESC";
+            command.CommandText = "SELECT id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, created_at FROM social_viral_posts WHERE category = @cat ORDER BY likes_count DESC, created_at DESC";
             command.Parameters.Add(new SqlParameter("@cat", SqlDbType.NVarChar, 100) { Value = category.Trim() });
         }
         else
         {
-            command.CommandText = "SELECT id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, created_at FROM social_viral_posts ORDER BY virality_score DESC";
+            command.CommandText = "SELECT id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, created_at FROM social_viral_posts ORDER BY likes_count DESC, created_at DESC";
         }
 
         var list = new List<SocialViralPost>();
@@ -736,14 +656,14 @@ public sealed partial class StoreDb
         command.Parameters.Add(new SqlParameter("@id", SqlDbType.NVarChar, 100) { Value = viral.Id });
         command.Parameters.Add(new SqlParameter("@title", SqlDbType.NVarChar, 500) { Value = viral.Title });
         command.Parameters.Add(new SqlParameter("@platform", SqlDbType.NVarChar, 50) { Value = viral.Platform });
-        command.Parameters.Add(new SqlParameter("@category", SqlDbType.NVarChar, 100) { Value = viral.Category });
+        command.Parameters.Add(new SqlParameter("@category", SqlDbType.NVarChar, 100) { Value = viral.Category ?? "Xu hướng thực tế" });
         command.Parameters.Add(new SqlParameter("@post_url", SqlDbType.NVarChar, 500) { Value = viral.PostUrl });
-        command.Parameters.Add(new SqlParameter("@summary", SqlDbType.NVarChar, -1) { Value = viral.Summary });
+        command.Parameters.Add(new SqlParameter("@summary", SqlDbType.NVarChar, -1) { Value = viral.Summary ?? "" });
         command.Parameters.Add(new SqlParameter("@virality_score", SqlDbType.Int) { Value = viral.ViralityScore });
         command.Parameters.Add(new SqlParameter("@likes_count", SqlDbType.Int) { Value = viral.LikesCount });
         command.Parameters.Add(new SqlParameter("@shares_count", SqlDbType.Int) { Value = viral.SharesCount });
         command.Parameters.Add(new SqlParameter("@comments_count", SqlDbType.Int) { Value = viral.CommentsCount });
-        command.Parameters.Add(new SqlParameter("@trending_topic", SqlDbType.NVarChar, 255) { Value = viral.TrendingTopic });
+        command.Parameters.Add(new SqlParameter("@trending_topic", SqlDbType.NVarChar, 255) { Value = viral.TrendingTopic ?? "Viral thực tế" });
         command.Parameters.Add(new SqlParameter("@created_at", SqlDbType.NVarChar, 100) { Value = viral.CreatedAt });
         command.ExecuteNonQuery();
 
@@ -781,11 +701,19 @@ public sealed partial class StoreDb
 
     public int ImportRealViralPosts(IEnumerable<SocialViralPost> posts)
     {
+        var existingUrls = new HashSet<string>(
+            GetSocialViralPosts().Select(p => p.PostUrl.Trim().TrimEnd('/').ToLowerInvariant()),
+            StringComparer.OrdinalIgnoreCase);
+
         int count = 0;
         foreach (var post in posts)
         {
             if (string.IsNullOrWhiteSpace(post.Title) || string.IsNullOrWhiteSpace(post.PostUrl)) continue;
+            var key = post.PostUrl.Trim().TrimEnd('/').ToLowerInvariant();
+            if (existingUrls.Contains(key)) continue;
+
             AddSocialViralPost(post);
+            existingUrls.Add(key);
             count++;
         }
         return count;
@@ -800,120 +728,12 @@ public sealed partial class StoreDb
         return command.ExecuteNonQuery() > 0;
     }
 
-    public IReadOnlyList<SocialViralPost> FetchMoreRealisticViralPosts(int count = 5)
+    public int DeleteAllSocialViralPosts()
     {
-        if (count <= 0) count = 5;
-
-        // 1. Lấy danh sách sản phẩm thực tế từ kho catalog_products
-        var catalogItems = new List<(string Name, string Category, string Description)>();
-        try
-        {
-            using var db = Open();
-            using var command = db.CreateCommand();
-            command.CommandText = "SELECT TOP 10 name, category, description FROM catalog_products ORDER BY NEWID()";
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                var name = reader.GetString(0);
-                var cat = reader.GetString(1);
-                var desc = reader.IsDBNull(2) ? "" : reader.GetString(2);
-                catalogItems.Add((name, cat, desc));
-            }
-        }
-        catch
-        {
-            // Catalog fallback nếu bảng tạm thời bận hoặc rỗng
-        }
-
-        if (catalogItems.Count == 0)
-        {
-            catalogItems.Add(("Tai nghe Bluetooth Chống Ồn OmiPro", "Công nghệ", "Tai nghe chống ồn chủ động cao cấp âm thanh vòm sống động"));
-            catalogItems.Add(("Bình giữ nhiệt thông minh hiển thị LED", "Đồ gia dụng", "Giữ nhiệt 24h ruột inox 316 an toàn tuyệt đối"));
-            catalogItems.Add(("Túi vải Canvas phong cách tối giản EcoBag", "Thời trang", "Chất vải canvas mộc cao cấp thân thiện môi trường"));
-            catalogItems.Add(("Đèn ngủ để bàn cảm ứng 3 màu ánh sáng", "Đồ gia dụng", "Ánh sáng dịu mắt chống mỏi điều khiển chạm thông minh"));
-            catalogItems.Add(("Bàn phím cơ không dây công thái học", "Công nghệ", "Gõ êm ái kết nối đa thiết bị pin dùng cả tháng"));
-            catalogItems.Add(("Máy tạo ẩm xông tinh dầu sóng siêu âm", "Đồ gia dụng", "Khuếch tán sương mịn tạo ẩm bù ẩm phòng điều hòa"));
-        }
-
-        var templates = new (string Angle, string Platform, string Topic, Func<string, string> TitleGen, Func<string, string, string> SummaryGen)[]
-        {
-            (
-                "Review Thật",
-                "facebook",
-                "Review trải nghiệm thật",
-                name => $"[Review Thật 100%] Sau 30 ngày dùng {name}: Có thực sự thần thánh như lời đồn? ⭐",
-                (name, desc) => $"Phân tích chuyên sâu về công năng thực tế, độ bền và cảm nhận sử dụng {name} trong sinh hoạt thường nhật. {desc}"
-            ),
-            (
-                "Mẹo Hay Video Ngắn",
-                "tiktok",
-                "Mẹo sống thông minh",
-                name => $"Tip biến cuộc sống nhẹ tênh mỗi ngày cùng {name} siêu tiện lợi 🎬✨",
-                (name, desc) => $"Kịch bản video ngắn hướng dẫn mẹo tận dụng công năng của {name} giúp tiết kiệm tối đa thời gian. {desc}"
-            ),
-            (
-                "Góc So Sánh",
-                "facebook",
-                "Tiêu dùng thông minh",
-                name => $"Đặt lên bàn cân: Vì sao {name} liên tục đứng top bảng xếp hạng bán chạy? 🤔",
-                (name, desc) => $"So sánh khách quan chất lượng, giá thành và tiện ích vượt trội của {name} so với các lựa chọn khác trên thị trường."
-            ),
-            (
-                "Phong Cách Sống",
-                "facebook",
-                "Không gian sống & Decor",
-                name => $"Nâng tầm thẩm mỹ không gian sống mỗi ngày với điểm nhấn từ {name} 🌿🏠",
-                (name, desc) => $"Bộ ảnh phối cảnh thực tế và phong cách sống hiện đại cùng {name}, nhận bão tương tác tích cực từ cộng đồng."
-            ),
-            (
-                "Top Xu Hướng",
-                "tiktok",
-                "Top thịnh hành 2026",
-                name => $"Cơn sốt {name} đợt này: Lý do cháy hàng liên tục khiến ai cũng muốn sở hữu! 🔥",
-                (name, desc) => $"Tổng hợp phản hồi bùng nổ của khách hàng và kỷ lục đơn đặt trước cho sản phẩm {name} tại OmniCart."
-            )
-        };
-
-        var rng = Random.Shared;
-        var newPosts = new List<SocialViralPost>();
-        var now = DateTimeOffset.UtcNow;
-
-        for (int i = 0; i < count; i++)
-        {
-            var product = catalogItems[rng.Next(catalogItems.Count)];
-            var tpl = templates[i % templates.Length];
-
-            // Số liệu khởi tạo trung thực bắt đầu từ 0 (không tạo số ảo gây sai lệch báo cáo)
-            var likes = 0;
-            var shares = 0;
-            var comments = 0;
-            var score = 88;
-
-            var postUrl = tpl.Platform == "facebook"
-                ? "https://www.facebook.com/profile.php?id=100037782653708"
-                : "https://www.tiktok.com/@harutv666";
-
-            var post = new SocialViralPost
-            {
-                Id = "viral-" + now.ToUnixTimeSeconds() + "-" + Guid.NewGuid().ToString("N")[..6],
-                Title = tpl.TitleGen(product.Name),
-                Platform = tpl.Platform,
-                Category = product.Category,
-                PostUrl = postUrl,
-                Summary = tpl.SummaryGen(product.Name, product.Description),
-                ViralityScore = score,
-                LikesCount = likes,
-                SharesCount = shares,
-                CommentsCount = comments,
-                TrendingTopic = tpl.Topic,
-                CreatedAt = now.AddMinutes(-i * 15).ToString("o")
-            };
-
-            AddSocialViralPost(post);
-            newPosts.Add(post);
-        }
-
-        return newPosts;
+        using var db = Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "DELETE FROM social_viral_posts";
+        return command.ExecuteNonQuery();
     }
 
     public SocialSummaryStats GetSocialSummaryStats()
@@ -926,13 +746,16 @@ public sealed partial class StoreDb
                 SELECT *, CASE
                     WHEN status = 'published' AND platform = 'facebook' AND (
                         post_url LIKE '%facebook.com%/posts/%' OR
-                        post_url LIKE '%facebook.com%/share/p/%' OR
+                        post_url LIKE '%facebook.com%/share/%' OR
+                        post_url LIKE '%facebook.com%/reel/%' OR
+                        post_url LIKE '%facebook.com%/videos/%' OR
+                        post_url LIKE '%facebook.com%/photo%' OR
                         post_url LIKE '%facebook.com%story_fbid=%' OR
                         post_url LIKE '%facebook.com%fbid=%'
                     ) THEN 1
                     WHEN status = 'published' AND platform = 'tiktok' AND (
-                        post_url LIKE '%tiktok.com/@harutv666/video/%' OR
-                        post_url LIKE '%tiktok.com/@harutv666/photo/%'
+                        post_url LIKE '%tiktok.com/@%/video/%' OR
+                        post_url LIKE '%tiktok.com/@%/photo/%'
                     ) THEN 1
                     ELSE 0
                 END AS is_verified_published
@@ -940,13 +763,13 @@ public sealed partial class StoreDb
             )
             SELECT
                 COUNT(*) as total_posts,
-                SUM(is_verified_published) as published_count,
-                SUM(CASE WHEN status IN ('pending_approval', 'ready_for_publish', 'ready_for_api') THEN 1 ELSE 0 END) as pending_count,
-                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_count,
+                COALESCE(SUM(is_verified_published), 0) as published_count,
+                COALESCE(SUM(CASE WHEN status IN ('pending_approval', 'pending_review', 'ready_for_publish', 'ready_for_api') THEN 1 ELSE 0 END), 0) as pending_count,
+                COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) as failed_count,
                 COALESCE(SUM(CASE WHEN is_verified_published = 1 THEN likes_count ELSE 0 END), 0) as total_likes,
                 COALESCE(SUM(CASE WHEN is_verified_published = 1 THEN shares_count ELSE 0 END), 0) as total_shares,
                 COALESCE(SUM(CASE WHEN is_verified_published = 1 THEN comments_count ELSE 0 END), 0) as total_comments,
-                SUM(CASE WHEN status = 'internal_draft' THEN 1 ELSE 0 END) as draft_count
+                COALESCE(SUM(CASE WHEN status = 'internal_draft' THEN 1 ELSE 0 END), 0) as draft_count
             FROM social_posts;
             """;
         using var reader = command.ExecuteReader();
@@ -1011,10 +834,7 @@ public sealed partial class StoreDb
                 );
             }
         }
-        catch
-        {
-            // Fallback nếu chưa có catalog_products trong CSDL
-        }
+        catch { }
 
         return ("1", "Tai nghe Bluetooth Chống Ồn OmiPro", 890000m, "/products/headphones.svg", "Công nghệ", "Tai nghe chống ồn chủ động cao cấp mang lại trải nghiệm âm thanh tuyệt hảo.");
     }

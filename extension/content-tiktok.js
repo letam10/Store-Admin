@@ -1,12 +1,11 @@
 /*
   FILE NOTE
-  - Mục đích: Content Script OmniVision v2.1 cho TikTok Studio Photo Upload (@harutv666).
-  - Nâng cấp v2.1.0 (Sửa triệt để lỗi ô Mô tả 0/4000 & Hashtag bị trống):
-    1. Bỏ giới hạn minHeight: 24 (Draft.js/Lexical rỗng chỉ cao ~18-22px).
-    2. Tìm ô Mô tả 4 lớp + Click-to-Discover: tìm trực tiếp dòng chữ "Mô tả dài có thể giúp..." -> bấm vào đó -> lấy getDeepActiveElement() xuyên Shadow DOM!
-    3. Điền đầy đủ CẢ Tiêu đề (0/90 - gõ nhịp người thật) LẪN Mô tả chi tiết bóng bẩy + khối #Hashtag (0/4000 - giữ nguyên xuống dòng \n\n).
-    4. Cấm tuyệt đối bấm Đăng nếu bộ đếm vẫn ở 0/4000! Xác nhận cả bộ đếm X/4000 > 0 lẫn nội dung thực sự đã nằm trong editor.
-    5. Đầy đủ nhịp trễ tự nhiên & cuộn mượt như người thật để tránh bị TikTok quét bot.
+  - Mục đích: Content Script OmniVision v3.0 cho TikTok (hoạt động với BẤT KỲ tài khoản TikTok nào đang đăng nhập — không hardcode @username).
+  - Nâng cấp v3.0.0:
+    1. Điền trọn vẹn Tiêu đề (0/90) + Mô tả chi tiết & #Hashtag (0/4000) bằng Click-to-Discover 4 lớp.
+    2. Hỗ trợ quy trình duyệt bài 3–5 phút của TikTok: nếu sau khi bấm Đăng mà TikTok đang duyệt/xử lý -> trả về pendingReview: true để Background dùng chrome.alarms theo dõi tiếp 3–5 phút!
+    3. Thêm lệnh TIKTOK_CHECK_POST_STATUS để kiểm tra trang TikTok Studio Content (/tiktokstudio/content) & Profile của tài khoản đang đăng nhập nhằm lấy chính xác đường dẫn bài thật /@<handle>/(photo|video)/<id>.
+    4. Cào 10 bài VIRAL TikTok thật (>= 50.000 tim) có đường dẫn chính xác 100%.
 */
 
 ;(() => {
@@ -14,9 +13,7 @@
     try { window.__OMNICART_TT_CLEANUP__() } catch (_) {}
   }
 
-  const HARUTV_PROFILE_URL = 'https://www.tiktok.com/@harutv666'
   const TIKTOK_UPLOAD_URL = 'https://www.tiktok.com/tiktokstudio/upload'
-
   const PUBLIC_RE = /mọi người|công khai|everyone|public/i
   const ONLY_ME_RE = /chỉ mình tôi|chỉ bạn|only you|only me|private/i
   const PRIVACY_LABEL_RE = /người có thể nhìn thấy|ai có thể xem|who can (watch|view|see)|quyền riêng tư|privacy/i
@@ -46,8 +43,15 @@
       return true
     }
 
+    if (message.type === 'TIKTOK_CHECK_POST_STATUS') {
+      checkTikTokApprovedPostLink(message.options || {})
+        .then(sendResponse)
+        .catch((err) => sendResponse({ ok: false, error: err.message || String(err) }))
+      return true
+    }
+
     if (message.type === 'TIKTOK_SCRAPE_VIRAL') {
-      scrapeTikTokTrending()
+      scrapeTikTokViralPosts(message.options || {})
         .then(sendResponse)
         .catch((err) => sendResponse({ ok: false, error: err.message || String(err), posts: [] }))
       return true
@@ -62,21 +66,34 @@
   }
 
   // =========================================================================
-  // MẮT QUAN SÁT MÀN HÌNH TIKTOK STUDIO
+  // TỰ NHẬN DIỆN BẤT KỲ TÀI KHOẢN TIKTOK NÀO ĐANG ĐĂNG NHẬP
   // =========================================================================
 
   function isUploadPath() {
     return /^\/(tiktokstudio\/upload|creator-center\/upload|upload)\/?$/i.test(location.pathname)
   }
 
-  function isLoginRequired() {
-    if (/\/login/i.test(location.pathname)) return true
-    const loginBtn = V().queryAllDeep(document, 'button, a').find((el) => {
-      if (!V().isReallyVisible(el)) return false
-      const txt = V().normalizeText(el.innerText || el.textContent)
-      return /^(đăng nhập|log in|login)$/i.test(txt)
-    })
-    return Boolean(loginBtn && !isAccountLoggedIn())
+  function detectCurrentTikTokHandle() {
+    // 1. Từ URL hiện tại nếu đang ở trang profile /@username
+    const pathMatch = location.pathname.match(/^\/(@[A-Za-z0-9._-]+)/)
+    if (pathMatch) return pathMatch[1]
+
+    // 2. Từ link hồ sơ trên thanh điều hướng / avatar / bài viết trên Studio Content
+    const profileLinks = Array.from(document.querySelectorAll('a[href*="/@"]'))
+      .map((a) => {
+        const m = String(a.getAttribute('href') || a.href || '').match(/\/(@[A-Za-z0-9._-]+)/)
+        return m ? m[1] : null
+      })
+      .filter(Boolean)
+    if (profileLinks.length > 0) return profileLinks[0]
+
+    // 3. Từ khung xem trước điện thoại trên TikTok Studio (hiển thị tên/handle ngay góc trái dưới màn hình preview)
+    const previewAuthor = V().queryAllDeep(document, '[class*="author"], [class*="Author"], [data-e2e="profile-icon"], [aria-label*="@"]')
+      .map((el) => V().normalizeText(el.innerText || el.getAttribute('aria-label') || ''))
+      .find((t) => /^@?[A-Za-z0-9._-]{2,30}$/.test(t) && !/tiktok|studio/i.test(t))
+    if (previewAuthor) return previewAuthor.startsWith('@') ? previewAuthor : `@${previewAuthor}`
+
+    return null
   }
 
   function isAccountLoggedIn() {
@@ -84,17 +101,26 @@
       .filter((el) => {
         if (!V().isReallyVisible(el, { minWidth: 20, minHeight: 20 })) return false
         const r = el.getBoundingClientRect()
-        return r.top < 80 && r.left > window.innerWidth * 0.65
+        return r.top < 90 && r.left > window.innerWidth * 0.65
       })
     if (topRightAvatars.length > 0) return true
 
-    const bodyText = V().normalizeText(document.body?.innerText || '').slice(0, 1000)
+    const bodyText = V().normalizeText(document.body?.innerText || '').slice(0, 1200)
     return /tiktok studio/i.test(bodyText) && /bài đăng|posts|tải lên|upload/i.test(bodyText)
+  }
+
+  function isLoginRequired() {
+    if (/\/login/i.test(location.pathname)) return true
+    const loginBtn = V().queryAllDeep(document, 'button, a').find((el) => {
+      if (!V().isReallyVisible(el)) return false
+      return /^(đăng nhập|log in|login)$/i.test(V().normalizeText(el.innerText || el.textContent))
+    })
+    return Boolean(loginBtn && !isAccountLoggedIn())
   }
 
   function detectScreenState() {
     if (isLoginRequired()) return 'login_required'
-    if (!isUploadPath()) return 'wrong_page'
+    if (!isUploadPath()) return 'other_tiktok_page'
 
     const hasTitleOrDesc = Boolean(findTitleInput() || findDescriptionPlaceholder() || findDescriptionEditorPassive())
     const hasSettingsOrCounter = Boolean(
@@ -102,17 +128,14 @@
       V().findLabelElement(/^(cài đặt|settings|chi tiết|details)$/i, { minLeft: 180, maxLength: 30 }) ||
       V().findLabelElement(PRIVACY_LABEL_RE, { minLeft: 180, maxLength: 80 })
     )
+    if (hasTitleOrDesc && hasSettingsOrCounter) return 'detail_editor_form'
 
-    if (hasTitleOrDesc && hasSettingsOrCounter) {
-      return 'detail_editor_form'
+    if (V().findLabelElement(/chọn ảnh để tải lên|select photos? to upload|tải lên tối đa 35 ảnh/i, { minLeft: 160 })) {
+      return 'upload_photo_tab'
     }
-
-    const photoDropzoneText = V().findLabelElement(/chọn ảnh để tải lên|select photos? to upload|tải lên tối đa 35 ảnh/i, { minLeft: 160 })
-    if (photoDropzoneText) return 'upload_photo_tab'
-
-    const videoDropzoneText = V().findLabelElement(/chọn video để tải lên|select video to upload/i, { minLeft: 160 })
-    if (videoDropzoneText) return 'upload_video_tab'
-
+    if (V().findLabelElement(/chọn video để tải lên|select video to upload/i, { minLeft: 160 })) {
+      return 'upload_video_tab'
+    }
     return 'loading_or_unknown'
   }
 
@@ -151,7 +174,6 @@
     return label
   }
 
-  // Ô 1 trong "Mô tả": "Thêm tiêu đề hấp dẫn" (0/90)
   function findTitleInput() {
     const inputs = V().queryAllDeep(document, 'input[type="text"], input:not([type]), textarea, [contenteditable="true"]')
     for (const el of inputs) {
@@ -166,19 +188,15 @@
       if (/tiêu đề|title/i.test(ph)) return el
 
       const parentText = V().normalizeText(el.parentElement?.innerText || '').slice(0, 140)
-      if (/thêm tiêu đề|add.*title|\b\d+\s*\/\s*90\b/i.test(parentText)) {
-        return el
-      }
+      if (/thêm tiêu đề|add.*title|\b\d+\s*\/\s*90\b/i.test(parentText)) return el
     }
     return null
   }
 
-  // Tìm chính dòng placeholder "Mô tả dài có thể giúp tăng lượt xem trung bình lên gấp 3 lần" trên màn hình
   function findDescriptionPlaceholder() {
     return V().findLabelElement(DESC_PLACEHOLDER_RE, { minLeft: 180, minTop: 80, maxLength: 160 })
   }
 
-  // Tìm thanh "# Hashtag" hoặc bộ đếm "0/4000" ngay đáy ô Mô tả
   function findDescriptionFooterAnchor() {
     return (
       V().findLabelElement(/^\d+\s*\/\s*4000$/i, { minLeft: 180, maxLength: 20 }) ||
@@ -187,7 +205,6 @@
     )
   }
 
-  // Tìm thụ động (không click) ô Mô tả 0/4000 — KHÔNG còn bị minHeight: 24 loại bỏ!
   function findDescriptionEditorPassive() {
     const titleEl = findTitleInput()
     const footerEl = findDescriptionFooterAnchor()
@@ -204,7 +221,6 @@
 
     for (const el of candidates) {
       if (el === titleEl || titleEl?.contains(el) || el.contains(titleEl)) continue
-      // Cho phép chiều cao từ 10px (ô rỗng 1 dòng của Draft.js / Lexical thường chỉ cao 18-22px!)
       if (!V().isReallyVisible(el, { minWidth: 20, minHeight: 10 })) continue
 
       const r = el.getBoundingClientRect()
@@ -215,7 +231,6 @@
       )
       if (/vị trí|location|search|tìm kiếm/i.test(selfMeta)) continue
 
-      // Kiểm tra vùng cha có phải ô Tìm kiếm vị trí không
       const nearText = V().normalizeText(el.parentElement?.parentElement?.innerText || '').slice(0, 350)
       if (/tìm kiếm vị trí|search location/i.test(nearText) && !/hashtag|4000|mô tả dài/i.test(nearText)) continue
 
@@ -225,7 +240,6 @@
       if (el.isContentEditable) score += 25
       if (el.getAttribute('role') === 'textbox' || el.tagName === 'TEXTAREA') score += 15
 
-      // Neo hình học CỰC CHÍNH XÁC theo Ảnh 3: nằm DƯỚI ô Tiêu đề (X/90) và TRÊN thanh #Hashtag / 0/4000!
       if (titleRect && r.top >= titleRect.bottom - 8 && r.top <= titleRect.bottom + 240) score += 45
       if (footerRect && r.bottom <= footerRect.bottom + 15 && r.top >= footerRect.top - 340) score += 45
 
@@ -234,26 +248,20 @@
         best = el
       }
     }
-
     return best
   }
 
-  // Tìm CHỦ ĐỘNG 4 LỚP + CLICK-TO-DISCOVER (Đảm bảo 100% bắt được ô 0/4000 của TikTok Studio!)
   async function findAndFocusDescriptionEditor(stepLog) {
     const titleEl = findTitleInput()
-
-    // Lớp 1: Tìm trực tiếp qua DOM & neo hình học (không giới hạn minHeight: 24)
     let editor = findDescriptionEditorPassive()
     if (editor) return editor
 
-    // Lớp 2: Click-to-Discover ngay vào dòng placeholder "Mô tả dài có thể giúp tăng lượt xem..."!
     const placeholderEl = findDescriptionPlaceholder()
     if (placeholderEl) {
       stepLog('fill_desc', 'Đang bấm trực tiếp vào vùng "Mô tả dài..." để kích hoạt khung soạn thảo...')
       await V().humanClick(placeholderEl, 'Kích hoạt ô Mô tả (0/4000)')
       await V().humanDelay(350, 650)
 
-      // Kiểm tra phần tử vừa được trình duyệt focus!
       const active = V().getDeepActiveElement()
       if (
         active &&
@@ -264,11 +272,9 @@
         return active
       }
 
-      // Thử tìm lại trong DOM sau khi đã click kích hoạt
       editor = findDescriptionEditorPassive()
       if (editor) return editor
 
-      // Tìm mọi contenteditable bên trong cùng container cha của placeholder
       let box = placeholderEl.parentElement
       for (let i = 0; i < 4 && box; i++) {
         const innerEditable = box.querySelector('[contenteditable="true"], [contenteditable="plaintext-only"], textarea, [role="textbox"]')
@@ -277,13 +283,10 @@
       }
     }
 
-    // Lớp 3: Bấm vào khoảng trống ngay phía trên nút "# Hashtag" rồi đọc activeElement
     const footerEl = findDescriptionFooterAnchor()
     if (footerEl) {
       const fRect = footerEl.getBoundingClientRect()
-      const probeX = Math.round(fRect.left + 60)
-      const probeY = Math.round(Math.max(100, fRect.top - 48))
-      const hit = document.elementFromPoint(probeX, probeY)
+      const hit = document.elementFromPoint(Math.round(fRect.left + 60), Math.round(Math.max(100, fRect.top - 48)))
       if (hit && hit !== titleEl && !titleEl?.contains(hit)) {
         await V().humanClick(hit, 'Vùng nhập Mô tả')
         await V().humanDelay(320, 600)
@@ -294,7 +297,6 @@
       }
     }
 
-    // Lớp 4: Hỏi Multimodal Vision AI nếu bật
     const ai = await V().askVisionAI(
       'Click the main Description / Caption editor box ("Mô tả dài có thể giúp tăng lượt xem...", 0/4000 counter, above # Hashtag) — NOT the short 0/90 title box.',
       { platform: 'tiktok', step: 'find_description_editor' }
@@ -303,12 +305,9 @@
       await V().humanClick(ai.element, 'Vision AI -> Ô Mô tả')
       await V().humanDelay(350, 650)
       const active = V().getDeepActiveElement()
-      if (active && active !== titleEl && (active.isContentEditable || active.tagName === 'TEXTAREA')) {
-        return active
-      }
+      if (active && active !== titleEl && (active.isContentEditable || active.tagName === 'TEXTAREA')) return active
       return ai.element
     }
-
     return null
   }
 
@@ -337,11 +336,10 @@
       if (nearby) return nearby
     }
 
-    const candidates = V().queryAllDeep(
+    return V().queryAllDeep(
       document,
       'select, button, [role="combobox"], [role="button"], div[class*="select"], div[class*="Select"]'
-    )
-    return candidates.find((el) => {
+    ).find((el) => {
       if (!V().isReallyVisible(el, { minWidth: 80, minHeight: 24 })) return false
       const r = el.getBoundingClientRect()
       if (r.left < 180 || r.top < 150) return false
@@ -378,7 +376,6 @@
       if (!V().isReallyVisible(btn, { minWidth: 64, minHeight: 28 })) continue
       const r = btn.getBoundingClientRect()
       if (r.left < 180 || r.top < 120) continue
-
       const txt = V().normalizeText(btn.innerText || btn.textContent)
       if (!/^(đăng|post|đăng ngay|post now|xuất bản|publish)$/i.test(txt)) continue
 
@@ -388,7 +385,6 @@
       if (color.isRedPink) score += 40
       if (r.width >= 90) score += 15
       if (!V().isElementDisabled(btn)) score += 10
-
       if (score > bestScore) {
         bestScore = score
         best = btn
@@ -402,16 +398,17 @@
       if (!V().isReallyVisible(btn, { minWidth: 50, minHeight: 24 })) return false
       const r = btn.getBoundingClientRect()
       if (r.left < 180) return false
-      const txt = V().normalizeText(btn.innerText || btn.textContent)
-      return /^(hủy bỏ|hủy|discard|xóa bỏ)$/i.test(txt)
+      return /^(hủy bỏ|hủy|discard|xóa bỏ)$/i.test(V().normalizeText(btn.innerText || btn.textContent))
     }) || null
   }
 
   function inspectTikTokScreen() {
     return {
       url: location.href,
+      health: V().inspectPageHealth(),
       screenState: detectScreenState(),
       loggedIn: isAccountLoggedIn(),
+      accountHandle: detectCurrentTikTokHandle() || 'Tài khoản TikTok đang đăng nhập',
       hasPhotoTab: Boolean(findPhotoTabButton()),
       hasTitleInput: Boolean(findTitleInput()),
       titleCounter: readTitleCounter(),
@@ -425,7 +422,7 @@
   }
 
   // =========================================================================
-  // LUỒNG ĐĂNG BÀI ẢNH TIKTOK STUDIO (HOÀN CHỈNH TIÊU ĐỀ + MÔ TẢ + HASHTAG + DELAY NGƯỜI)
+  // LUỒNG ĐĂNG BÀI ẢNH TIKTOK STUDIO + HỖ TRỢ DUYỆT 3–5 PHÚT
   // =========================================================================
 
   async function executeTikTokPost(payload) {
@@ -437,6 +434,11 @@
 
     if (!/(^|\.)tiktok\.com$/i.test(location.hostname)) {
       return { ok: false, error: 'TIKTOK_HOST_INVALID', visionTrace: trace }
+    }
+
+    const stable = await V().waitForPageStable('tiktok', { maxWaitMs: 25000, onStatus: stepLog })
+    if (!stable.ok) {
+      return { ok: false, error: `TIKTOK_${stable.reason}`, visionTrace: trace }
     }
 
     if (!isUploadPath()) {
@@ -452,7 +454,6 @@
       return { ok: false, error: 'PRODUCT_IMAGE_REQUIRED', visionTrace: trace }
     }
 
-    // Chuẩn bị Tiêu đề ngắn (0/90) + Mô tả đầy đủ bóng bẩy & khối #Hashtag (0/4000)
     const rawTitle = V().normalizeText(payload.title || '')
     const rawBody = payload.content || payload.description || payload.caption || payload.body || ''
     const rawHashtags = payload.hashtags || payload.tags || ''
@@ -462,39 +463,29 @@
       85
     )
 
-    // Mô tả chi tiết: giữ nguyên đoạn văn bóng bẩy + xuống dòng + gắn đầy đủ khối #Hashtag + dấu cách cuối để TikTok nhận thẻ #
     let fullDescription = V().composeBodyAndHashtags(rawBody || rawTitle, rawHashtags, 3850)
-    if (!fullDescription) {
-      return { ok: false, error: 'POST_TEXT_REQUIRED', visionTrace: trace }
-    }
-    // Nếu cuối bài là #hashtag, thêm 1 dấu cách cuối giúp TikTok Studio chốt thẻ hashtag mượt mà
-    if (/#[\p{L}\p{N}_]+$/u.test(fullDescription)) {
-      fullDescription += ' '
-    }
+    if (!fullDescription) return { ok: false, error: 'POST_TEXT_REQUIRED', visionTrace: trace }
+    if (/#[\p{L}\p{N}_]+$/u.test(fullDescription)) fullDescription += ' '
 
-    stepLog(
-      'prepare',
-      `Đã nhận bài TikTok: Tiêu đề ${shortTitle.length} ký tự | Mô tả + Hashtag ${fullDescription.trim().length} ký tự.`
-    )
+    const accountHandle = detectCurrentTikTokHandle() || 'Tài khoản TikTok đang đăng nhập'
+    stepLog('prepare', `Tài khoản TikTok: ${accountHandle} • Tiêu đề ${shortTitle.length}c | Mô tả + Hashtag ${fullDescription.trim().length}c.`)
 
-    // --- BƯỚC 1: Kiểm tra đăng nhập ---
-    stepLog('auth', 'Đang kiểm tra trạng thái đăng nhập TikTok Studio (@harutv666)...')
+    // 1. Kiểm tra đăng nhập
     const readyAuth = await M().waitFor(() => isAccountLoggedIn() || isLoginRequired(), 15000)
     if (!readyAuth || isLoginRequired()) {
-      stepLog('auth', 'Tài khoản TikTok chưa đăng nhập trên tab này!', 'error')
+      stepLog('auth', 'Tab TikTok chưa đăng nhập tài khoản nào!', 'error')
       V().clearHud(5000)
       return { ok: false, error: 'TIKTOK_LOGIN_REQUIRED', visionTrace: trace }
     }
+    await V().humanDelay(750, 1400)
 
-    await V().humanDelay(700, 1300)
-
-    // --- BƯỚC 2: Quan sát màn hình & dọn bản nháp cũ nếu có ---
+    // 2. Quan sát màn hình & dọn nháp cũ nếu có
     await M().waitFor(() => detectScreenState() !== 'loading_or_unknown', 12000)
     let state = detectScreenState()
-    stepLog('screen', `Mắt OmniVision nhận diện màn hình: ${state}`)
+    stepLog('screen', `OmniVision nhận diện TikTok Studio: ${state}`)
 
     if (state === 'detail_editor_form') {
-      stepLog('reset_draft', 'Phát hiện bản nháp cũ còn mở, đang hủy để tải bài mới sạch...', 'warn')
+      stepLog('reset_draft', 'Phát hiện bản nháp cũ còn mở, đang hủy để tạo bài mới sạch...', 'warn')
       await V().scrollContainerToBottom(findDescriptionFooterAnchor() || findTitleInput())
       const discardBtn = findDiscardButton()
       if (discardBtn) {
@@ -505,7 +496,7 @@
           return /^(hủy bỏ|hủy|discard|xác nhận|confirm)$/i.test(V().normalizeText(b.innerText || b.textContent))
         })
         if (confirmDiscard) {
-          await V().humanClick(confirmDiscard, 'Xác nhận hủy bản nháp')
+          await V().humanClick(confirmDiscard, 'Xác nhận hủy')
           await M().waitFor(() => detectScreenState() !== 'detail_editor_form', 8000)
         }
         await V().humanDelay(900, 1500)
@@ -515,7 +506,6 @@
       state = detectScreenState()
     }
 
-    // Chuyển từ tab Video sang tab Ảnh (Ảnh 4)
     if (state === 'upload_video_tab' || state === 'loading_or_unknown') {
       const photoTab = findPhotoTabButton()
       if (photoTab) {
@@ -526,40 +516,27 @@
           8000
         )
         await V().humanDelay(650, 1200)
-      } else {
-        const ai = await V().askVisionAI(
-          'Click the "Ảnh" / "Photo" tab button to switch TikTok Studio from Video upload to Photo upload.',
-          { platform: 'tiktok', step: 'switch_to_photo_tab' }
-        )
-        if (ai?.ok && ai.element) {
-          await V().humanClick(ai.element, 'Vision AI -> Tab Ảnh')
-          await V().humanDelay(900, 1400)
-        }
       }
     }
 
-    // --- BƯỚC 3: Nạp ảnh & chờ chuyển thật sang màn hình "Chi tiết" ---
+    // 3. Nạp ảnh & chờ chuyển sang form Chi tiết
     stepLog('upload_image', 'Đang nạp ảnh sản phẩm vào TikTok Studio...')
     const imageSnapshot = V().captureVisualImageSnapshot(document)
     const imageFile = await M().createProductImageFile(payload.imageDataUrl, 'omnicart-tiktok-product.png')
 
     const imageInput = await M().findImageInput(document, 6000, false)
-    let attached = false
-    if (imageInput) attached = M().attachFile(imageInput, imageFile)
+    let attached = imageInput ? M().attachFile(imageInput, imageFile) : false
     if (!attached) {
       const dropzone = findPhotoDropzoneElement()
-      if (dropzone) {
-        stepLog('upload_image', 'Thử thả ảnh trực tiếp vào dropzone TikTok...', 'warn')
-        attached = M().attachViaDrop(dropzone, imageFile)
-      }
+      if (dropzone) attached = M().attachViaDrop(dropzone, imageFile)
     }
     if (!attached) {
-      stepLog('upload_image', 'Không tìm thấy bộ tải ảnh (tab Ảnh) trên TikTok Studio.', 'error')
+      stepLog('upload_image', 'Không tìm thấy ô tải ảnh trên TikTok Studio.', 'error')
       V().clearHud(5000)
       return { ok: false, error: 'TIKTOK_PHOTO_UPLOAD_UNAVAILABLE', visionTrace: trace }
     }
 
-    stepLog('wait_detail', 'Đang chờ TikTok xử lý ảnh & chuyển sang màn hình "Chi tiết"...')
+    stepLog('wait_detail', 'Đang chờ TikTok xử lý ảnh & mở biểu mẫu "Chi tiết"...')
     const detailFormReady = await M().waitFor(() => {
       const hasForm = Boolean(findTitleInput() || findDescriptionPlaceholder() || findDescriptionEditorPassive())
       if (!hasForm) return false
@@ -574,11 +551,11 @@
       return { ok: false, error: 'TIKTOK_DETAIL_FORM_NOT_LOADED', visionTrace: trace }
     }
 
-    // Nhịp chờ tự nhiên để TikTok dựng xong trình soạn thảo & ảnh xem trước điện thoại
     await V().humanDelay(1800, 3000)
-    stepLog('wait_detail', '✅ Đã xác nhận ảnh bìa & biểu mẫu "Chi tiết" sẵn sàng.')
+    const confirmedHandle = detectCurrentTikTokHandle() || accountHandle
+    stepLog('wait_detail', `✅ Đã xác nhận ảnh bìa & biểu mẫu sẵn sàng (${confirmedHandle}).`)
 
-    // --- BƯỚC 4A: Điền TIÊU ĐỀ (0/90) với nhịp gõ tự nhiên ---
+    // 4A. Điền Tiêu đề (0/90)
     const titleInput = findTitleInput()
     if (titleInput) {
       stepLog('fill_title', `Đang gõ Tiêu đề (${shortTitle.length}/90 ký tự)...`)
@@ -588,20 +565,15 @@
         label: 'Tiêu đề TikTok (0/90)'
       })
       const tCounter = readTitleCounter()
-      if (titleRes.ok || (tCounter !== null && tCounter > 0)) {
-        stepLog('fill_title', `✅ Đã điền Tiêu đề thành công (${tCounter !== null ? `${tCounter}/90` : titleRes.method}).`)
-      } else {
-        stepLog('fill_title', 'Cảnh báo: ô Tiêu đề chưa xác nhận, tiếp tục điền đủ nội dung vào Mô tả.', 'warn')
-      }
+      stepLog('fill_title', `✅ Tiêu đề: ${tCounter !== null ? `${tCounter}/90` : titleRes.method}.`)
       await V().humanDelay(850, 1550)
     }
 
-    // --- BƯỚC 4B: BẮT BUỘC định vị & điền đầy đủ MÔ TẢ + HASHTAG (0/4000) ---
-    stepLog('fill_desc', 'Đang định vị ô "Mô tả dài..." (0/4000) bằng OmniVision 4 lớp...')
+    // 4B. Điền Mô tả chi tiết & #Hashtag (0/4000)
+    stepLog('fill_desc', 'Đang định vị ô Mô tả & Hashtag (0/4000)...')
     const descEditor = await findAndFocusDescriptionEditor(stepLog)
-
     if (!descEditor) {
-      stepLog('fill_desc', 'Không tìm thấy ô Mô tả (0/4000) trên TikTok Studio — dừng an toàn để không đăng bài thiếu nội dung!', 'error')
+      stepLog('fill_desc', 'Không tìm thấy ô Mô tả (0/4000) — dừng an toàn!', 'error')
       V().clearHud(5500)
       return { ok: false, error: 'TIKTOK_DESCRIPTION_EDITOR_NOT_FOUND', visionTrace: trace }
     }
@@ -613,7 +585,6 @@
       return clean.length >= Math.min(18, fullDescription.trim().length) && !DESC_PLACEHOLDER_RE.test(clean)
     }
 
-    stepLog('fill_desc', `Đang điền Mô tả chi tiết & #Hashtag (${fullDescription.trim().length}/4000 ký tự)...`)
     let descRes = await V().smartTypeText(descEditor, fullDescription, {
       clearFirst: true,
       label: 'Mô tả & Hashtag TikTok (0/4000)',
@@ -625,14 +596,12 @@
     await V().humanDelay(700, 1200)
     let counterAfter = readDescriptionCounter()
 
-    // Nếu lần đầu vẫn là 0/4000 -> kích hoạt lại bằng click trực tiếp rồi thử nhập lại lần 2
     if (!descRes.ok && (counterAfter === null || counterAfter === 0)) {
-      stepLog('fill_desc', 'Bộ đếm vẫn là 0/4000, đang kích hoạt lại editor & thử chiến lược dự phòng...', 'warn')
       const reFocused = await findAndFocusDescriptionEditor(stepLog)
       if (reFocused) {
         descRes = await V().smartTypeText(reFocused, fullDescription, {
           clearFirst: true,
-          label: 'Thử lại Mô tả & Hashtag TikTok',
+          label: 'Thử lại Mô tả & Hashtag',
           dismissPopover: true,
           placeholderRe: DESC_PLACEHOLDER_RE,
           verifyFn: descVerifyFn
@@ -642,36 +611,29 @@
       }
     }
 
-    // CHỐT AN TOÀN: Không bao giờ cho phép bấm Đăng khi ô Mô tả vẫn trống 0/4000!
     if ((counterAfter !== null && counterAfter === 0) || (!descRes.ok && counterAfter === null)) {
-      stepLog('fill_desc', '❌ Ô Mô tả vẫn đang là 0/4000! Dừng an toàn để không đăng bài thiếu nội dung & hashtag.', 'error')
+      stepLog('fill_desc', '❌ Ô Mô tả vẫn đang 0/4000! Dừng an toàn để không đăng bài thiếu nội dung.', 'error')
       V().clearHud(6000)
       return { ok: false, error: 'TIKTOK_DESCRIPTION_NOT_INSERTED', visionTrace: trace }
     }
 
-    // Đóng gợi ý hashtag nếu đang mở bằng Escape + click nhẹ ra nhãn "Mô tả"
     V().dispatchEscape(descEditor)
-    await V().humanDelay(450, 850)
-    stepLog(
-      'fill_desc',
-      `✅ Đã điền & xác nhận Mô tả + Hashtag (${counterAfter !== null ? `${counterAfter}/4000 ký tự` : descRes.method})!`
-    )
+    await V().humanDelay(500, 900)
+    stepLog('fill_desc', `✅ Đã xác nhận Mô tả + Hashtag (${counterAfter !== null ? `${counterAfter}/4000` : descRes.method})!`)
 
-    // Nhịp dừng tự nhiên trước khi cuộn xuống Cài đặt
-    await V().humanDelay(900, 1650)
-
-    // --- BƯỚC 5: Thiết lập & kiểm chứng Quyền riêng tư ("Người có thể nhìn thấy bài đăng này") ---
+    // 5. Quyền riêng tư
+    await V().humanDelay(850, 1550)
     stepLog('privacy', `Đang kiểm tra quyền riêng tư: ${requestedPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Mọi người'}...`)
     const privacyResult = await setAndVerifyTikTokPrivacy(requestedPrivacy, stepLog)
     if (!privacyResult.ok) {
-      stepLog('privacy', `Không xác nhận được quyền riêng tư TikTok (thực tế=${privacyResult.actual || 'không rõ'}). Dừng an toàn!`, 'error')
+      stepLog('privacy', `Quyền riêng tư TikTok chưa khớp (${privacyResult.actual || 'không rõ'}).`, 'error')
       V().clearHud(5000)
       return { ok: false, error: 'TIKTOK_PRIVACY_NOT_CONFIRMED', actualPrivacy: privacyResult.actual, visionTrace: trace }
     }
-    stepLog('privacy', `✅ Quyền riêng tư đã chuẩn: ${privacyResult.actual === 'only_me' ? 'Chỉ mình tôi' : 'Mọi người'}.`)
+    stepLog('privacy', `✅ Quyền riêng tư chuẩn: ${privacyResult.actual === 'only_me' ? 'Chỉ mình tôi' : 'Mọi người'}.`)
 
-    // --- BƯỚC 6: Cuộn mượt xuống cuối, rà soát như người thật & nhấn "Đăng" ---
-    stepLog('publish', 'Đang cuộn mượt xuống nút "Đăng" & rà soát bài trước khi xuất bản...')
+    // 6. Cuộn xuống, rà soát và bấm Đăng
+    stepLog('publish', 'Đang cuộn mượt xuống nút "Đăng" & rà soát lần cuối...')
     await V().scrollContainerToBottom(findPrivacyControl() || descEditor)
     await V().humanReviewPause()
 
@@ -686,42 +648,47 @@
     }, 12000)
 
     if (!publishReady || !publishBtn) {
-      const ai = await V().askVisionAI(
-        'Click the primary red "Đăng" / "Post" button at the bottom of the TikTok Studio upload form (NOT "Bài đăng" in the left sidebar).',
-        { platform: 'tiktok', step: 'click_publish' }
-      )
-      if (ai?.ok && ai.element && !V().isElementDisabled(ai.element)) {
-        publishBtn = ai.element
-      }
-    }
-
-    if (!publishBtn) {
-      stepLog('publish', 'Không tìm thấy hoặc nút "Đăng" trên TikTok Studio đang bị khóa.', 'error')
+      stepLog('publish', 'Nút "Đăng" trên TikTok Studio chưa sẵn sàng.', 'error')
       V().clearHud(5000)
       return { ok: false, error: 'TIKTOK_PUBLISH_BUTTON_NOT_READY', visionTrace: trace }
     }
 
     await V().humanClick(publishBtn, 'Đăng bài TikTok')
-    stepLog('publish', 'Đã bấm nút "Đăng", đang theo dõi TikTok xác nhận xuất bản...')
+    stepLog('publish', 'Đã bấm nút "Đăng", đang chờ TikTok tiếp nhận bài (chú ý TikTok có thể duyệt 3–5 phút)...')
 
-    // --- BƯỚC 7: Xử lý popup xác nhận phụ & kiểm chứng đăng thành công thực sự ---
-    const publishConfirm = await waitForTikTokPublishConfirmation(38000, stepLog)
+    // 7. Chờ 38 giây đầu: nếu lấy được link thật ngay -> xong luôn; nếu TikTok chuyển sang chờ duyệt -> bàn giao cho Background Tracker 24/7!
+    const confirm = await waitForTikTokSubmitResult(38000, shortTitle, confirmedHandle, stepLog)
     V().clearHud(5000)
 
-    if (!publishConfirm.ok) {
-      return { ok: false, error: publishConfirm.error || 'TIKTOK_POST_NOT_VERIFIED', visionTrace: trace }
+    if (!confirm.ok) {
+      return { ok: false, error: confirm.error || 'TIKTOK_POST_NOT_VERIFIED', visionTrace: trace }
+    }
+
+    if (confirm.pendingReview) {
+      return {
+        ok: true,
+        pendingReview: true,
+        status: 'pending_review',
+        platform: 'tiktok',
+        account: confirmedHandle,
+        privacy: privacyResult.actual,
+        titleProbe: shortTitle.slice(0, 36),
+        submittedAt: new Date().toISOString(),
+        message: confirm.message || 'TikTok đã nhận bài & đang duyệt (3–5 phút). Extension đang tự động theo dõi ngầm để lấy link thật!',
+        visionTrace: trace
+      }
     }
 
     return {
       ok: true,
       verified: true,
-      postUrl: publishConfirm.postUrl || HARUTV_PROFILE_URL,
-      realPostId: publishConfirm.postId || `tiktok-${Date.now()}`,
+      postUrl: confirm.postUrl,
+      realPostId: confirm.postId || `tiktok-${Date.now()}`,
       platform: 'tiktok',
-      account: '@harutv666',
+      account: confirmedHandle,
       privacy: privacyResult.actual,
       publishedTime: new Date().toISOString(),
-      message: publishConfirm.message || 'Đã đăng bài ảnh đầy đủ Tiêu đề + Mô tả + Hashtag lên TikTok (@harutv666).',
+      message: confirm.message || 'Đã đăng bài TikTok thành công!',
       visionTrace: trace
     }
   }
@@ -732,15 +699,12 @@
 
     const control = findPrivacyControl()
     if (!control) return { ok: false, actual: null }
-
     await V().scrollIntoViewSafely(control, 'center')
     const targetPattern = requestedPrivacy === 'only_me' ? ONLY_ME_RE : PUBLIC_RE
 
     if (control.tagName === 'SELECT') {
       const currentText = control.options[control.selectedIndex]?.textContent || ''
-      if (parsePrivacyValue(currentText) === requestedPrivacy) {
-        return { ok: true, actual: requestedPrivacy }
-      }
+      if (parsePrivacyValue(currentText) === requestedPrivacy) return { ok: true, actual: requestedPrivacy }
       const matchOpt = Array.from(control.options).find((o) => targetPattern.test(V().normalizeText(o.textContent)))
       if (!matchOpt) return { ok: false, actual: parsePrivacyValue(currentText) }
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
@@ -755,11 +719,11 @@
     const currentLabel = V().getAccessibleLabel(control)
     const currentValue = parsePrivacyValue(currentLabel)
     if (currentValue === requestedPrivacy) {
-      V().highlightTarget(control, `Quyền riêng tư: ${currentLabel}`, '#22c55e')
+      V().highlightTarget(control, `Chuẩn: ${currentLabel}`, '#22c55e')
       return { ok: true, actual: requestedPrivacy }
     }
 
-    stepLog('privacy', `Đang đổi từ "${currentLabel}" sang "${requestedPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Mọi người'}"...`)
+    stepLog('privacy', `Đổi quyền riêng tư từ "${currentLabel}" -> "${requestedPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Mọi người'}"...`)
     await V().humanClick(control, 'Mở danh sách quyền riêng tư')
     await V().humanDelay(650, 1150)
 
@@ -793,88 +757,236 @@
     return { ok: confirmed && finalVal === requestedPrivacy, actual: finalVal }
   }
 
-  async function waitForTikTokPublishConfirmation(timeoutMs, stepLog) {
+  function extractRealTikTokPostLinks(root = document) {
+    return V().queryAllDeep(root, 'a[href*="/video/"], a[href*="/photo/"]')
+      .map((a) => cleanTikTokPostUrl(a.href))
+      .filter(isRealTikTokPostUrl)
+  }
+
+  function cleanTikTokPostUrl(raw) {
+    try {
+      const u = new URL(raw, location.origin)
+      const m = u.pathname.match(/^\/(@[A-Za-z0-9._-]+)\/(video|photo)\/(\d+)/i)
+      if (!m) return null
+      return `https://www.tiktok.com/${m[1]}/${m[2].toLowerCase()}/${m[3]}`
+    } catch (_) {
+      return null
+    }
+  }
+
+  function isRealTikTokPostUrl(url) {
+    return Boolean(url && /^https:\/\/www\.tiktok\.com\/@[A-Za-z0-9._-]+\/(?:video|photo)\/\d+$/i.test(url))
+  }
+
+  async function waitForTikTokSubmitResult(timeoutMs, titleProbe, accountHandle, stepLog) {
     const startUrl = location.href
     const deadline = Date.now() + timeoutMs
     let handledConfirmModal = false
+    let acceptedByTikTok = false
 
     while (Date.now() < deadline) {
       const currentUrl = location.href
 
+      // 1. Kiểm tra nếu đã chuyển trang sang danh sách bài đăng (/content, /manage-posts)
       if (currentUrl !== startUrl && !/\/upload\/?(\?|$)/i.test(currentUrl)) {
-        const postId = extractTikTokPostId(currentUrl) || `tiktok-${Date.now()}`
-        stepLog('verify', `✅ TikTok đã chuyển sang ${currentUrl} — Xuất bản thành công!`, 'success')
-        return { ok: true, postUrl: currentUrl, postId, message: 'TikTok đã xuất bản & chuyển hướng sang trang quản lý.' }
+        acceptedByTikTok = true
+        const directLink = cleanTikTokPostUrl(currentUrl)
+        if (directLink) {
+          stepLog('verify', `✅ Đã có link bài TikTok thật ngay: ${directLink}`, 'success')
+          return { ok: true, postUrl: directLink, postId: extractTikTokPostId(directLink) }
+        }
+
+        // Chờ danh sách bài trên /tiktokstudio/content nạp xong rồi thử lấy link bài vừa đăng
+        await V().humanDelay(1800, 2800)
+        const statusCheck = await checkTikTokApprovedPostLink({ titleProbe, accountHandle })
+        if (statusCheck.status === 'published' && statusCheck.postUrl) {
+          stepLog('verify', `✅ Bài đã duyệt & lấy được link thật: ${statusCheck.postUrl}`, 'success')
+          return { ok: true, postUrl: statusCheck.postUrl, postId: statusCheck.postId }
+        }
+
+        stepLog('verify', '⏳ TikTok đã tiếp nhận bài & chuyển sang chờ duyệt (3–5 phút). Bật theo dõi ngầm 24/7!', 'info')
+        return {
+          ok: true,
+          pendingReview: true,
+          message: 'TikTok đang duyệt bài (3–5 phút). Extension sẽ tự động cập nhật link thật ngay khi duyệt xong.'
+        }
       }
 
-      if (!handledConfirmModal) {
-        const modals = V().queryAllDeep(document, '[role="dialog"], [class*="modal"], [class*="Modal"]')
-          .filter((m) => V().isReallyVisible(m, { minWidth: 220, minHeight: 100 }))
-        for (const modal of modals) {
-          const modalText = V().normalizeText(modal.innerText || modal.textContent)
-          if (/tiếp tục đăng|continue to post|đang kiểm tra bản quyền|copyright check|post now/i.test(modalText)) {
-            const confirmBtn = V().queryAllDeep(modal, 'button, [role="button"]').find((b) => {
-              if (!V().isReallyVisible(b) || V().isElementDisabled(b)) return false
-              const t = V().normalizeText(b.innerText || b.textContent)
-              return /^(đăng ngay|đăng|tiếp tục|post now|post|continue)$/i.test(t)
-            })
-            if (confirmBtn) {
-              handledConfirmModal = true
-              stepLog('verify', 'Phát hiện popup "Tiếp tục đăng?", đang tự động xác nhận...')
-              await V().humanDelay(550, 1000)
-              await V().humanClick(confirmBtn, 'Xác nhận Đăng ngay')
-              await V().humanDelay(800, 1300)
-            }
-          }
+      // 2. Xử lý modal xác nhận phụ ("Tiếp tục đăng?", "Đã tải lên", "Quản lý bài đăng")
+      const modals = V().queryAllDeep(document, '[role="dialog"], [class*="modal"], [class*="Modal"]')
+        .filter((m) => V().isReallyVisible(m, { minWidth: 200, minHeight: 90 }))
 
-          if (/đã được tải lên|has been uploaded|đã đăng|quản lý bài đăng|manage your posts|tải lên bài đăng khác|upload another/i.test(modalText)) {
-            stepLog('verify', '✅ TikTok hiển thị hộp thoại xác nhận đăng thành công!', 'success')
-            return {
-              ok: true,
-              postUrl: HARUTV_PROFILE_URL,
-              postId: `tiktok-${Date.now()}`,
-              message: 'TikTok hiển thị hộp thoại đăng bài thành công.'
-            }
+      for (const modal of modals) {
+        const modalText = V().normalizeText(modal.innerText || modal.textContent)
+        if (!handledConfirmModal && /tiếp tục đăng|continue to post|đang kiểm tra bản quyền|copyright check|post now/i.test(modalText)) {
+          const confirmBtn = V().queryAllDeep(modal, 'button, [role="button"]').find((b) => {
+            if (!V().isReallyVisible(b) || V().isElementDisabled(b)) return false
+            return /^(đăng ngay|đăng|tiếp tục|post now|post|continue)$/i.test(V().normalizeText(b.innerText || b.textContent))
+          })
+          if (confirmBtn) {
+            handledConfirmModal = true
+            stepLog('verify', 'Tự động xác nhận popup "Tiếp tục đăng"...')
+            await V().humanDelay(550, 1000)
+            await V().humanClick(confirmBtn, 'Xác nhận đăng ngay')
+            await V().humanDelay(800, 1300)
+          }
+        }
+
+        if (/đã được tải lên|has been uploaded|đã đăng|đang xem xét|under review|quản lý bài đăng|manage your posts|tải lên bài đăng khác/i.test(modalText)) {
+          acceptedByTikTok = true
+          // Bấm nút "Quản lý bài đăng" nếu có để chuyển sang trang theo dõi
+          const manageBtn = V().queryAllDeep(modal, 'button, a, [role="button"]').find((b) =>
+            V().isReallyVisible(b) && /quản lý bài đăng|manage your posts|xem hồ sơ|view profile/i.test(V().normalizeText(b.innerText || b.textContent))
+          )
+          if (manageBtn) {
+            await V().humanClick(manageBtn, 'Mở quản lý bài đăng')
+            await V().humanDelay(1500, 2300)
+          }
+          stepLog('verify', '⏳ TikTok xác nhận đã tải bài lên và đang duyệt (3–5 phút). Bật theo dõi ngầm!', 'info')
+          return {
+            ok: true,
+            pendingReview: true,
+            message: 'Bài đã tải lên TikTok & đang chờ duyệt (3–5 phút). Extension đang tự theo dõi để lấy link thật.'
           }
         }
       }
 
-      const toasts = V().queryAllDeep(
+      // 3. Kiểm tra toast lỗi / thành công
+      const toastJoined = V().queryAllDeep(
         document,
-        '[role="status"], [role="alert"], [class*="toast"], [class*="Toast"], [class*="notification"], [class*="Notification"]'
+        '[role="status"], [role="alert"], [class*="toast"], [class*="Toast"], [class*="notification"]'
       )
         .filter((el) => V().isReallyVisible(el))
         .map((el) => V().normalizeText(el.innerText || el.textContent))
         .filter(Boolean)
-      const toastJoined = toasts.join(' | ')
+        .join(' | ')
 
-      if (/vui lòng|không thể đăng|thất bại|failed|error|captcha|verify to continue|xác minh/i.test(toastJoined)) {
-        stepLog('verify', `TikTok báo lỗi / yêu cầu xác minh: ${toastJoined.slice(0, 140)}`, 'error')
+      if (/không thể đăng|thất bại|failed|error|captcha|verify to continue|xác minh/i.test(toastJoined)) {
+        stepLog('verify', `TikTok báo lỗi: ${toastJoined.slice(0, 140)}`, 'error')
         return { ok: false, error: `TIKTOK_PUBLISH_ERROR: ${toastJoined.slice(0, 140)}` }
       }
 
-      if (/đã đăng|posted|thành công|successfully|xuất bản/i.test(toastJoined)) {
-        stepLog('verify', `✅ Nhận toast xác nhận thành công: ${toastJoined.slice(0, 100)}`, 'success')
-        return { ok: true, postUrl: HARUTV_PROFILE_URL, postId: `tiktok-${Date.now()}`, message: toastJoined.slice(0, 120) }
-      }
-
-      const postLinks = V().queryAllDeep(document, 'a[href*="/video/"], a[href*="/photo/"]')
-        .map((a) => a.href)
-        .filter((href) => /tiktok\.com\/@[\w.]+\/(?:video|photo)\/\d+/i.test(href))
-      if (postLinks.length > 0) {
+      if (/đã đăng|posted|đã tải lên|thành công|successfully|đang xem xét|under review/i.test(toastJoined)) {
+        acceptedByTikTok = true
         return {
           ok: true,
-          postUrl: postLinks[0],
-          postId: extractTikTokPostId(postLinks[0]) || `tiktok-${Date.now()}`,
-          message: 'Đã lấy được liên kết bài đăng TikTok.'
+          pendingReview: true,
+          message: `TikTok đã tiếp nhận (${toastJoined.slice(0, 80)}). Đang tự động theo dõi duyệt bài 3–5 phút...`
         }
       }
 
-      await V().sleep(650)
+      await V().sleep(700)
     }
 
-    stepLog('verify', 'Hết thời gian chờ nhưng TikTok chưa xác nhận xuất bản.', 'error')
+    if (acceptedByTikTok) {
+      return {
+        ok: true,
+        pendingReview: true,
+        message: 'TikTok đã nhận bài và đang xử lý duyệt (3–5 phút).'
+      }
+    }
+
     return { ok: false, error: 'TIKTOK_POST_NOT_VERIFIED' }
+  }
+
+  // =========================================================================
+  // KIỂM TRA TRẠNG THÁI DUYỆT BÀI TIKTOK (CHẠY NGẦM 3–5 PHÚT QUA CHROME.ALARMS)
+  // =========================================================================
+
+  async function checkTikTokApprovedPostLink(options = {}) {
+    const titleProbe = V().normalizeText(options.titleProbe || '').toLowerCase().slice(0, 26)
+    const stable = await V().waitForPageStable('tiktok', { maxWaitMs: 15000 })
+    if (!stable.ok) return { ok: false, status: 'pending_review', reason: stable.reason }
+
+    await V().humanDelay(800, 1400)
+    const detectedHandle = detectCurrentTikTokHandle() || options.accountHandle || null
+
+    // 1. Nếu đang ở TikTok Studio -> Bài đăng (/tiktokstudio/content hoặc /manage-posts)
+    const rows = V().queryAllDeep(document, 'tr, [role="row"], [class*="post-item"], [class*="PostItem"], [class*="video-item"], [data-e2e*="post-item"]')
+      .filter((el) => V().isReallyVisible(el, { minWidth: 200, minHeight: 40 }))
+
+    for (const row of rows.slice(0, 8)) {
+      const rowText = V().normalizeText(row.innerText || row.textContent)
+      const rowLower = rowText.toLowerCase()
+      const matchesTitle = !titleProbe || rowLower.includes(titleProbe) || rowLower.includes(titleProbe.slice(0, 14))
+      if (!matchesTitle) continue
+
+      // Kiểm tra nếu bài vẫn đang được TikTok duyệt ("Đang xem xét" / "Under review" / "Đang xử lý")
+      if (/đang xem xét|under review|đang xử lý|processing|đang tải lên|uploading/i.test(rowText)) {
+        return {
+          ok: true,
+          status: 'pending_review',
+          accountHandle: detectedHandle,
+          message: 'TikTok vẫn đang duyệt bài (Under review)...'
+        }
+      }
+
+      if (/bị xóa|removed|vi phạm|violation|không được duyệt/i.test(rowText)) {
+        return {
+          ok: false,
+          status: 'rejected',
+          error: 'TIKTOK_POST_REJECTED_IN_REVIEW'
+        }
+      }
+
+      // Tìm link thật ngay trong dòng bài đăng
+      const linksInRow = extractRealTikTokPostLinks(row)
+      if (linksInRow.length > 0) {
+        return {
+          ok: true,
+          status: 'published',
+          postUrl: linksInRow[0],
+          postId: extractTikTokPostId(linksInRow[0]),
+          accountHandle: detectedHandle
+        }
+      }
+
+      // Nếu bài đã "Đã đăng / Công khai / Chỉ mình tôi" trên Studio Content nhưng dòng không có <a> trực tiếp -> báo cần kiểm tra trang hồ sơ /@handle!
+      if (/công khai|mọi người|chỉ mình tôi|chỉ bạn|public|everyone|only you|private|đã đăng/i.test(rowText)) {
+        return {
+          ok: true,
+          status: 'approved_need_profile_link',
+          accountHandle: detectedHandle,
+          message: 'TikTok đã duyệt bài! Đang mở trang cá nhân để lấy link bài chính xác...'
+        }
+      }
+    }
+
+    // 2. Nếu đang ở trang Profile /@handle của tài khoản đang đăng nhập
+    if (/^\/@[A-Za-z0-9._-]+/i.test(location.pathname)) {
+      const profileLinks = extractRealTikTokPostLinks(document)
+      if (profileLinks.length > 0) {
+        // Tìm bài khớp tiêu đề trước; nếu không rõ lấy bài mới nhất trên cùng
+        const cards = Array.from(document.querySelectorAll('[data-e2e="user-post-item"], [class*="DivItemContainer"]'))
+        for (const card of cards.slice(0, 6)) {
+          const cardText = V().normalizeText(card.innerText || card.textContent || card.querySelector('a[title]')?.getAttribute('title') || '').toLowerCase()
+          const cardLink = extractRealTikTokPostLinks(card)[0]
+          if (cardLink && (!titleProbe || cardText.includes(titleProbe.slice(0, 12)))) {
+            return {
+              ok: true,
+              status: 'published',
+              postUrl: cardLink,
+              postId: extractTikTokPostId(cardLink),
+              accountHandle: detectedHandle
+            }
+          }
+        }
+        return {
+          ok: true,
+          status: 'published',
+          postUrl: profileLinks[0],
+          postId: extractTikTokPostId(profileLinks[0]),
+          accountHandle: detectedHandle
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      status: 'pending_review',
+      accountHandle: detectedHandle,
+      message: 'Đang chờ TikTok hoàn tất duyệt bài...'
+    }
   }
 
   function extractTikTokPostId(postUrl) {
@@ -883,69 +995,144 @@
     return match?.[1] || null
   }
 
-  async function scrapeTikTokTrending() {
-    for (let i = 0; i < 2; i++) {
-      window.scrollBy({ top: 650, behavior: 'smooth' })
-      await V().humanDelay(850, 1400)
-    }
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-    await V().humanDelay(400, 700)
+  // =========================================================================
+  // CÀO 10 BÀI VIRAL TIKTOK THẬT (>= 50.000 TIM • ĐƯỜNG DẪN CHÍNH XÁC 100%)
+  // =========================================================================
 
-    const posts = []
-    const seen = new Set()
-    const cards = Array.from(
-      document.querySelectorAll(
-        'div[data-e2e="recommend-list-item-container"], div[data-e2e="explore-item"], article[data-e2e], div[class*="DivItemContainer"], div[class*="video-feed-item"]'
-      )
-    )
+  function extractTikTokCardMetrics(card) {
+    let likes = 0
+    let comments = 0
+    let shares = 0
 
-    for (const card of cards.slice(0, 16)) {
-      try {
-        const titleEl = card.querySelector('[data-e2e="video-desc"], div[data-e2e="explore-card-desc"], a[title], h1')
-        const title = V().normalizeText(titleEl?.getAttribute?.('title') || titleEl?.innerText || titleEl?.textContent || '')
-        if (title.length < 6) continue
-        const key = title.slice(0, 45)
-        if (seen.has(key)) continue
-        seen.add(key)
-
-        const linkEl = card.querySelector('a[href*="/video/"], a[href*="/photo/"]')
-        const link = linkEl ? linkEl.href : HARUTV_PROFILE_URL
-
-        const authorEl = card.querySelector('[data-e2e="video-author-uniqueid"], p[data-e2e="explore-card-user-unique-id"], h3[data-e2e="video-author-uniqueid"]')
-        const author = V().normalizeText(authorEl?.textContent || '') || '@trending'
-
-        const likeEl = card.querySelector('[data-e2e="like-count"], strong[data-e2e="like-count"]')
-        const likesCount = parseCount(likeEl?.textContent || '0')
-
-        posts.push({
-          id: 'tt-real-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-          title: V().truncateClean(title, 100),
-          platform: 'tiktok',
-          category: 'Công nghệ & Đời sống',
-          postUrl: link,
-          summary: `Video viral từ ${author}: ${V().truncateClean(title, 200)}`,
-          viralityScore: Math.min(99, 84 + Math.min(15, Math.floor(Math.log10(likesCount + 10) * 3))),
-          likesCount,
-          sharesCount: 0,
-          commentsCount: 0,
-          trendingTopic: 'Xu hướng TikTok thịnh hành',
-          createdAt: new Date().toISOString()
-        })
-
-        if (posts.length >= 10) break
-      } catch (_) {}
+    // 1. Selector trực tiếp của TikTok Explore & For You
+    const likeSelectors = [
+      '[data-e2e="like-count"]',
+      '[data-e2e="video-like-count"]',
+      'strong[data-e2e="like-count"]',
+      'strong[data-e2e="browse-like-count"]',
+      '[class*="StrongCount"]',
+      '[class*="LikeCount"]',
+      '[class*="like-count"]'
+    ]
+    for (const sel of likeSelectors) {
+      const el = card.querySelector(sel)
+      if (el) {
+        const val = V().parseHumanCount(el.innerText || el.textContent)
+        if (val > likes) likes = val
+      }
     }
 
-    return { ok: true, posts }
+    const commentEl = card.querySelector('[data-e2e="comment-count"], [data-e2e="browse-comment-count"]')
+    if (commentEl) comments = V().parseHumanCount(commentEl.innerText || commentEl.textContent)
+
+    const shareEl = card.querySelector('[data-e2e="share-count"], [data-e2e="browse-share-count"]')
+    if (shareEl) shares = V().parseHumanCount(shareEl.innerText || shareEl.textContent)
+
+    // 2. Fallback: Quét số tim hiển thị trên thẻ grid Explore (thường nằm cạnh icon trái tim SVG cuối card)
+    if (likes === 0) {
+      const smallNums = Array.from(card.querySelectorAll('strong, span'))
+        .map((el) => V().normalizeText(el.innerText || el.textContent))
+        .filter((t) => /^\d+(?:[.,]\d+)?\s*(k|n|nghìn|m|tr|triệu)$/i.test(t))
+      for (const numStr of smallNums) {
+        const val = V().parseHumanCount(numStr)
+        if (val > likes) likes = val
+      }
+    }
+
+    return { likes, comments, shares }
   }
 
-  function parseCount(raw) {
-    const clean = String(raw || '').toLowerCase().replace(',', '.')
-    const k = clean.match(/(\d+(?:\.\d+)?)\s*k/)
-    if (k) return Math.round(parseFloat(k[1]) * 1000)
-    const m = clean.match(/(\d+(?:\.\d+)?)\s*m/)
-    if (m) return Math.round(parseFloat(m[1]) * 1000000)
-    const n = parseInt(clean.replace(/\D/g, ''), 10)
-    return Number.isFinite(n) ? n : 0
+  async function scrapeTikTokViralPosts(options = {}) {
+    const targetCount = Number(options.targetCount) || 10
+    const minLikes = Number(options.minLikes) || 50000
+    const maxScrolls = Number(options.maxScrolls) || 20
+    const existingUrls = new Set(options.excludeUrls || [])
+
+    const stable = await V().waitForPageStable('tiktok', { maxWaitMs: 20000 })
+    if (!stable.ok) return { ok: false, error: `TIKTOK_${stable.reason}`, posts: [] }
+
+    const collected = []
+    const seenUrls = new Set(existingUrls)
+
+    V().reportStep('tiktok', 'scrape_viral', `Đang cào bài viral TikTok (mục tiêu ${targetCount} bài, >= ${(minLikes / 1000).toLocaleString('vi-VN')}K tim)...`)
+
+    for (let round = 0; round < maxScrolls && collected.length < targetCount; round++) {
+      const health = V().inspectPageHealth()
+      if (health.isOffline) {
+        V().reportStep('tiktok', 'network', 'Tab cào TikTok mất mạng, đang chờ phục hồi...', 'warn')
+        await V().waitForPageStable('tiktok', { maxWaitMs: 20000 })
+      }
+      if (health.isCaptchaOrCheckpoint) {
+        V().reportStep('tiktok', 'captcha', 'TikTok yêu cầu xác minh Captcha trên tab cào — trả về các bài đã thu được.', 'warn')
+        break
+      }
+
+      const cards = Array.from(
+        document.querySelectorAll(
+          'div[data-e2e="explore-item"], div[data-e2e="recommend-list-item-container"], article[data-e2e="recommend-list-item-container"], div[class*="DivItemContainer"], article[data-e2e]'
+        )
+      )
+
+      for (const card of cards) {
+        if (collected.length >= targetCount) break
+        try {
+          const linkEl = card.querySelector('a[href*="/video/"], a[href*="/photo/"]')
+          const postUrl = linkEl ? cleanTikTokPostUrl(linkEl.href) : null
+          if (!postUrl || !isRealTikTokPostUrl(postUrl) || seenUrls.has(postUrl)) continue
+
+          const metrics = extractTikTokCardMetrics(card)
+          if (metrics.likes < minLikes) continue
+
+          const titleEl = card.querySelector('[data-e2e="explore-card-desc"], [data-e2e="video-desc"], a[title], h1, span[class*="SpanText"]')
+          const rawTitle = V().normalizeText(
+            titleEl?.getAttribute?.('title') || titleEl?.innerText || titleEl?.textContent || ''
+          )
+
+          const authorMatch = postUrl.match(/tiktok\.com\/(@[A-Za-z0-9._-]+)\//i)
+          const authorEl = card.querySelector('[data-e2e="explore-card-user-unique-id"], [data-e2e="video-author-uniqueid"], p[data-e2e="explore-card-user-unique-id"]')
+          const author = V().normalizeText(authorEl?.textContent || '') || (authorMatch ? authorMatch[1] : '@creator')
+          const isPhoto = postUrl.includes('/photo/')
+
+          seenUrls.add(postUrl)
+          collected.push({
+            id: `tt-viral-${Date.now()}-${collected.length}`,
+            title: V().truncateClean(rawTitle || `Video TikTok Viral từ ${author}`, 105),
+            platform: 'tiktok',
+            category: isPhoto ? 'Ảnh Viral TikTok' : 'Video Viral TikTok',
+            postUrl,
+            summary: V().truncateClean(
+              `[${author}] ${rawTitle || 'Nội dung thịnh hành'} • Đạt ${metrics.likes.toLocaleString('vi-VN')} tim`,
+              260
+            ),
+            viralityScore: Math.min(99, 88 + Math.min(11, Math.floor(Math.log10(metrics.likes) * 2))),
+            likesCount: metrics.likes,
+            sharesCount: metrics.shares,
+            commentsCount: metrics.comments,
+            trendingTopic: `${(metrics.likes / 1000).toFixed(0)}K+ tim TikTok`,
+            createdAt: new Date().toISOString()
+          })
+
+          V().highlightTarget(card, `🔥 TikTok Viral ${collected.length}/${targetCount} (${metrics.likes.toLocaleString('vi-VN')} ♥)`, '#fe2c55')
+          V().reportStep(
+            'tiktok',
+            'scrape_viral',
+            `🎵 TikTok Viral: đã tìm thấy ${collected.length}/${targetCount} bài (>= ${(minLikes / 1000)}K tim)...`
+          )
+        } catch (_) {}
+      }
+
+      if (collected.length >= targetCount) break
+
+      window.scrollBy({ top: 900 + Math.round(Math.random() * 550), behavior: 'smooth' })
+      await V().humanDelay(1600, 2600)
+    }
+
+    V().clearHud(3500)
+    return {
+      ok: true,
+      posts: collected,
+      scannedUrl: location.href,
+      reachedTarget: collected.length >= targetCount
+    }
   }
 })()

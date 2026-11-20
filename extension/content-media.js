@@ -1,17 +1,14 @@
 /*
   FILE NOTE
-  - Mục đích: Chuẩn hóa ảnh sản phẩm và gắn an toàn vào input tải ảnh hoặc dropzone của Facebook/TikTok.
-  - Sửa lỗi quan trọng v2.1.0:
-    1. Kiểm tra input.files TRƯỚC khi bắn sự kiện 'change'!
-       (Trên Facebook, React onChange xử lý ảnh xong sẽ lập tức reset input.value = '' làm input.files.length về 0 — kiểm tra sau 'change' gây lỗi giả FACEBOOK_IMAGE_NOT_ATTACHED dù ảnh đã tải lên thành công!)
-    2. Quét xuyên Shadow DOM & same-origin iframe, phân biệt chặt input ảnh với input chỉ nhận video.
+  - Mục đích: Chuẩn hóa ảnh sản phẩm và gắn an toàn vào input[type="file"] hoặc dropzone của Facebook / TikTok (v3.0.0).
+  - Kiểm tra input.files TRƯỚC khi bắn sự kiện 'change' để tương thích với React onChange tự reset input.value = ''.
 */
 
 ;(() => {
-  if (globalThis.__OMNICART_MEDIA_VERSION__ === '2.1.0' && globalThis.OmniCartMedia) {
+  if (globalThis.__OMNICART_MEDIA_VERSION__ === '3.0.0' && globalThis.OmniCartMedia) {
     return
   }
-  globalThis.__OMNICART_MEDIA_VERSION__ = '2.1.0'
+  globalThis.__OMNICART_MEDIA_VERSION__ = '3.0.0'
 
   function deepQueryFiles(root) {
     if (globalThis.OmniVision?.queryAllDeep) {
@@ -52,10 +49,7 @@
       }
 
       const maxDimension = 2048
-      const scale = Math.min(
-        1,
-        maxDimension / Math.max(sourceImage.naturalWidth, sourceImage.naturalHeight)
-      )
+      const scale = Math.min(1, maxDimension / Math.max(sourceImage.naturalWidth, sourceImage.naturalHeight))
       const canvas = document.createElement('canvas')
       canvas.width = Math.max(1, Math.round(sourceImage.naturalWidth * scale))
       canvas.height = Math.max(1, Math.round(sourceImage.naturalHeight * scale))
@@ -71,31 +65,24 @@
         }, 'image/png')
       })
 
-      return new File([blob], fileName, {
-        type: 'image/png',
-        lastModified: Date.now()
-      })
+      return new File([blob], fileName, { type: 'image/png', lastModified: Date.now() })
     },
 
     async findImageInput(root = document, timeoutMs = 8000, allowUnspecified = true) {
       const deadline = Date.now() + timeoutMs
       while (Date.now() < deadline) {
         const inputs = deepQueryFiles(root)
-
         const strictMatch = inputs.find((el) => isImageAccept(el.getAttribute('accept'), false))
         if (strictMatch) return strictMatch
-
         if (allowUnspecified) {
           const fallbackMatch = inputs.find((el) => isImageAccept(el.getAttribute('accept'), true))
           if (fallbackMatch) return fallbackMatch
         }
-
         await new Promise((resolve) => setTimeout(resolve, 250))
       }
       return null
     },
 
-    // Gắn file vào input[type="file"] an toàn với React (kiểm tra files TRƯỚC khi dispatch change!)
     attachFile(input, file) {
       if (!input || !file) return false
       try {
@@ -103,8 +90,6 @@
         transfer.items.add(file)
         input.files = transfer.files
 
-        // Xác nhận trình duyệt đã gán file thành công TRƯỚC khi bắn sự kiện change
-        // (vì React onChange trên Facebook lập tức xóa input.value = '' sau khi đọc file!)
         const assignedOk = Boolean(input.files && input.files.length >= 1 && input.files[0].name === file.name)
         if (!assignedOk) return false
 

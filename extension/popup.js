@@ -1,7 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Xử lý giao diện Popup OmniVision v2.1 — kiểm tra 3 tab, soi màn hình FB/TikTok, cấu hình delay giống người & Vision AI.
-  - Liên kết trực tiếp: popup.html, background.js.
+  - Mục đích: Kịch bản điều khiển Popup OmniVision v3.0 (Đa tài khoản, không hardcode tên/ID nick, theo dõi duyệt TikTok 3–5 phút).
 */
 
 const ADMIN_BASE_URL = 'http://localhost:5174'
@@ -27,11 +26,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   function sendBg(message) {
     return new Promise((resolve) => {
       chrome.runtime.sendMessage(message, (res) => {
-        if (chrome.runtime.lastError) {
-          resolve({ ok: false, error: chrome.runtime.lastError.message })
-        } else {
-          resolve(res || { ok: false, error: 'NO_RESPONSE' })
-        }
+        if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message })
+        else resolve(res || { ok: false, error: 'NO_RESPONSE' })
       })
     })
   }
@@ -77,13 +73,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       return
     }
     const t = res.tabs || {}
-    const jobs = (res.activeJobs || []).map((j) => j.platform).join(', ')
+    const pendingCount = (res.pendingVerifications || []).length
     const pacingLabel = { normal: 'Tự nhiên', careful: 'Cẩn trọng', fast: 'Nhanh' }[res.vision?.pacingMode || 'normal']
     tabsStatusEl.innerHTML = `
-      <div>${t.admin ? '🟢' : '⚪'} Tab 1: Store-Admin (${t.admin ? 'Đang mở' : 'Chưa mở'})</div>
-      <div>${t.facebook ? '🟢' : '⚪'} Tab 2: FB Hoàng Thái HT (${t.facebook ? 'Sẵn sàng' : 'Tự mở khi đăng'})</div>
-      <div>${t.tiktok ? '🟢' : '⚪'} Tab 3: TikTok @harutv666 (${t.tiktok ? 'Sẵn sàng' : 'Tự mở khi đăng'})</div>
-      <div style="margin-top:4px;color:#86efac;">⏱️ Nhịp người: <b>${pacingLabel}</b> • 👁️ AI: <b>${res.vision?.aiMode || 'layout'}</b>${jobs ? ` • Chạy: ${jobs}` : ''}</div>
+      <div>${t.admin ? '🟢' : '⚪'} Tab Store-Admin (${t.admin ? 'Đang mở' : 'Chưa mở'})</div>
+      <div>${t.facebook ? '🟢' : '⚪'} Tab Facebook (${t.facebook ? 'Đã phát hiện' : 'Tự mở khi cần'})</div>
+      <div>${t.tiktok ? '🟢' : '⚪'} Tab TikTok (${t.tiktok ? 'Đã phát hiện' : 'Tự mở khi cần'})</div>
+      <div style="margin-top:4px;color:#86efac;">⏱️ Nhịp: <b>${pacingLabel}</b> • ⏳ Chờ TikTok duyệt: <b>${pendingCount}</b></div>
     `
   }
 
@@ -100,72 +96,60 @@ document.addEventListener('DOMContentLoaded', async () => {
     cfgApiKey.value = c.apiKey || ''
   }
 
-  async function openAdminTab() {
+  document.getElementById('btn-open-admin')?.addEventListener('click', async () => {
     const tabs = await chrome.tabs.query({})
     const adminTab = tabs.find((tab) => tab.url && /^http:\/\/(localhost|127\.0\.0\.1):5174\//i.test(tab.url))
-    if (adminTab) {
-      await chrome.tabs.update(adminTab.id, { active: true })
-    } else {
-      await chrome.tabs.create({ url: ADMIN_BASE_URL + '/', active: true })
-    }
-    log('Đã mở Store-Admin. Chọn bài viết AI & bấm Đăng Thật FB / TikTok.')
-  }
-
-  document.getElementById('btn-open-admin')?.addEventListener('click', openAdminTab)
+    if (adminTab) await chrome.tabs.update(adminTab.id, { active: true })
+    else await chrome.tabs.create({ url: ADMIN_BASE_URL + '/', active: true })
+    log('Đã mở Store-Admin.')
+  })
 
   document.getElementById('btn-inspect-fb')?.addEventListener('click', async () => {
-    log('👁️ Đang dùng OmniVision soi tab Facebook...')
+    log('👁️ Đang soi Tab Facebook...')
     const res = await sendBg({ type: 'INSPECT_TAB', platform: 'facebook' })
     if (res?.ok) {
       const i = res.inspection || {}
-      log(`FB Vision → Profile đúng: ${i.isOnTargetProfile ? 'CÓ' : 'KHÔNG'} | Khung đăng: ${i.hasComposerTrigger ? 'THẤY' : 'CHƯA'} | Hộp thoại mở: ${i.hasOpenComposerDialog ? 'CÓ' : 'KHÔNG'} | Có ảnh cũ: ${i.hasExistingMediaInDialog ? 'CÓ' : 'KHÔNG'}`)
+      log(`FB Vision → Nick: ${i.accountName} | Đăng nhập: ${i.loggedIn ? 'CÓ' : 'CHƯA'} | Mạng: ${i.health?.online ? 'OK' : 'OFFLINE'} | Khung đăng: ${i.hasComposerTrigger ? 'THẤY' : 'CHƯA'} | Nút quyền: "${i.audienceButtonText || '—'}"`)
     } else {
-      log('⚠️ Soi FB lỗi: ' + (res?.error || 'Không rõ'))
+      log('⚠️ Lỗi soi FB: ' + (res?.error || ''))
     }
   })
 
   document.getElementById('btn-inspect-tt')?.addEventListener('click', async () => {
-    log('👁️ Đang dùng OmniVision soi tab TikTok Studio...')
+    log('👁️ Đang soi Tab TikTok...')
     const res = await sendBg({ type: 'INSPECT_TAB', platform: 'tiktok' })
     if (res?.ok) {
       const i = res.inspection || {}
-      log(`TikTok Vision → ${i.screenState} | Tiêu đề: ${i.titleCounter ?? '—'}/90 | Mô tả: ${i.descriptionCounter ?? '—'}/4000 | Quyền: "${i.privacyControlText || '—'}" | Đăng: ${i.publishButtonEnabled ? 'SẴN SÀNG' : 'CHƯA'}`)
+      log(`TikTok Vision → ${i.accountHandle} | Trạng thái: ${i.screenState} | Tiêu đề: ${i.titleCounter ?? '—'}/90 | Mô tả: ${i.descriptionCounter ?? '—'}/4000 | Đăng: ${i.publishButtonEnabled ? 'SẴN SÀNG' : 'CHƯA'}`)
     } else {
-      log('⚠️ Soi TikTok lỗi: ' + (res?.error || 'Không rõ'))
+      log('⚠️ Lỗi soi TikTok: ' + (res?.error || ''))
     }
   })
 
-  document.getElementById('btn-scrape-viral')?.addEventListener('click', async () => {
-    log('🔥 Đang quét bài viral thực tế từ Facebook...')
-    const res = await sendBg({ type: 'FETCH_REAL_VIRAL', platform: 'facebook' })
-    if (res?.ok) {
-      log(`✅ Quét được ${(res.posts || []).length} bài viết viral thực tế!`)
-    } else {
-      log(`⚠️ Lỗi quét: ${res?.error || 'Không có dữ liệu'}`)
-    }
+  document.getElementById('btn-check-pending')?.addEventListener('click', async () => {
+    log('⏳ Đang kiểm tra ngay trạng thái bài TikTok chờ duyệt...')
+    const res = await sendBg({ type: 'CHECK_PENDING_NOW' })
+    log(res?.ok ? `Còn ${(res.pending || []).length} bài đang chờ duyệt.` : `Lỗi: ${res?.error}`)
+    await refreshStatus()
   })
 
   document.getElementById('btn-reset-jobs')?.addEventListener('click', async () => {
     await sendBg({ type: 'CANCEL_JOB' })
-    log('🧹 Đã mở khóa hàng đợi tác vụ Facebook & TikTok.')
+    log('🧹 Đã mở khóa hàng đợi tác vụ.')
     await refreshStatus()
   })
 
   document.getElementById('btn-save-vision')?.addEventListener('click', async () => {
     const res = await sendBg({ type: 'SAVE_VISION_CONFIG', config: collectConfig() })
-    if (res?.ok) {
-      log('✅ Đã lưu cấu hình Delay & OmniVision!', visionLogEl)
-      await refreshStatus()
-    } else {
-      log('⚠️ Lỗi lưu cấu hình: ' + res?.error, visionLogEl)
-    }
+    log(res?.ok ? '✅ Đã lưu cấu hình!' : `⚠️ Lỗi: ${res?.error}`, visionLogEl)
+    await refreshStatus()
   })
 
   document.getElementById('btn-test-vision')?.addEventListener('click', async () => {
-    log('🧪 Đang kiểm tra kết nối Vision AI...', visionLogEl)
+    log('🧪 Đang kiểm tra Vision AI...', visionLogEl)
     await sendBg({ type: 'SAVE_VISION_CONFIG', config: collectConfig() })
     const res = await sendBg({ type: 'TEST_VISION_AI' })
-    log((res?.ok ? '✅ ' : '⚠️ ') + (res?.message || res?.error || 'Hoàn tất'), visionLogEl)
+    log((res?.ok ? '✅ ' : '⚠️ ') + (res?.message || res?.error || ''), visionLogEl)
   })
 
   await Promise.all([refreshStatus(), loadVisionConfig()])
