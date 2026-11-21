@@ -1510,7 +1510,6 @@ html[data-admin-theme="dark"] input[type="password"],
 html[data-admin-theme="dark"] textarea,
 html[data-admin-theme="dark"] select {
   border-color: #244d35 !important;
-  color: #eef8f1 !important;
   color-scheme: dark;
 }
 html[data-admin-theme="dark"] input:focus,
