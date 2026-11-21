@@ -336,6 +336,15 @@ public sealed class AdminController(StoreDb db, AiChatService aiChatService, Cha
         return db.ReplyAdminReview(id, request.Reply.Trim()) ? Ok(new { ok = true, reply = request.Reply.Trim() }) : NotFound(new { error = "REVIEW_NOT_FOUND" });
     }
 
+    [HttpDelete("reviews/{id:long}")]
+    [HttpPost("reviews/{id:long}/delete")]
+    public IActionResult DeleteReview(long id)
+    {
+        if (RequireAdmin() is null) return Unauthorized(new { error = "UNAUTHENTICATED" });
+        if (!CsrfValid()) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        return db.DeleteAdminReview(id) ? Ok(new { ok = true, id }) : NotFound(new { error = "REVIEW_NOT_FOUND" });
+    }
+
     [HttpGet("settings")]
     public IActionResult Settings() => RequireAdmin() is null ? Unauthorized(new { error = "UNAUTHENTICATED" }) : Ok(new { contextSize = aiChatService.ContextSize, allowedContextSizes = aiChatService.AllowedContextSizes, model = aiChatService.ModelName, thinking = aiChatService.ThinkingEnabled, thinkingMode = aiChatService.ThinkingMode });
 

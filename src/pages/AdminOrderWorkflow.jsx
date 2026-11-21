@@ -1,10 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Quản lý quy trình xử lý đơn hàng, đối soát thanh toán chuyển khoản và cập nhật trạng thái giao nhận.
-  - Liên kết trực tiếp: Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/src/pages/AdminCommerce.css, Store-Admin/src/pages/AdminUnmatchedPayments.jsx
-  - Vùng ảnh hưởng khi sửa: Bảng danh sách đơn hàng, form chi tiết đơn hàng admin và các thao tác cập nhật đơn.
+  - Mục đích: Quản lý đơn hàng khách hàng, đối soát thanh toán, kèm thanh tìm kiếm (mã đơn / tên khách / người nhận / SĐT) và bộ lọc trạng thái đầy đủ.
 */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
 import './AdminCommerce.css'
 import AdminUnmatchedPayments from './AdminUnmatchedPayments'
@@ -15,6 +13,27 @@ const date = value => value ? new Date(value).toLocaleString('vi-VN') : 'Chưa h
 const mailStates = { sent: 'Đã gửi', queued: 'Đang chờ gửi / thử lại', not_sent: 'Chưa gửi' }
 const statuses = { unmatched_received: 'Đã nhận khoản cần hoàn', refunded_unmatched: 'Đã hoàn khoản chuyển không khớp', expired: 'Hết hạn QR', needs_review: 'Cần đối soát riêng', reported: 'Khách báo đã chuyển', pending: 'Chờ thanh toán', paid: 'Đã thanh toán', completed: 'Đã nhận hàng', cancelled: 'Đã hủy', refunded: 'Đã hoàn tiền' }
 const delivery = { processing: 'Đang chuẩn bị', ready: 'Sẵn sàng nhận', shipped: 'Đang giao', delivered: 'Đã giao / nhận', returned: 'Đã nhận hàng trả', cancelled: 'Đã dừng giao' }
+
+const ORDER_FILTERS = [
+  ['all', 'Tất cả'],
+  ['pending', 'Chờ thanh toán'],
+  ['needs_review', 'Cần đối soát'],
+  ['paid', 'Đã thanh toán'],
+  ['shipped', 'Đang giao'],
+  ['refunded', 'Hoàn tiền'],
+  ['cancelled', 'Đã hủy']
+]
+
+function matchesOrderStatusFilter(item, filterKey) {
+  if (filterKey === 'all') return true
+  if (filterKey === 'pending') return item.status === 'pending' && !['needs_review', 'reported', 'unmatched_received'].includes(item.paymentState)
+  if (filterKey === 'needs_review') return ['needs_review', 'reported', 'unmatched_received'].includes(item.paymentState)
+  if (filterKey === 'paid') return ['paid', 'completed'].includes(item.status) && item.deliveryStatus !== 'shipped'
+  if (filterKey === 'shipped') return item.deliveryStatus === 'shipped'
+  if (filterKey === 'refunded') return item.status === 'refunded' || item.paymentState === 'refunded_unmatched' || Number(item.refundAmount || 0) > 0
+  if (filterKey === 'cancelled') return item.status === 'cancelled' || item.paymentState === 'expired'
+  return true
+}
 
 function useData(path, refreshMs = 0) {
   const [data, setData] = useState(null), [error, setError] = useState('')
@@ -44,13 +63,28 @@ export function AdminOrders({ csrfToken, role = 'admin' }) {
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [problem, setProblem] = useState('')
   const [receivedAt, setReceivedAt] = useState('')
   const [receivedAmount, setReceivedAmount] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
   const gate = useRef(false)
-  const order = data?.orders.find(item => item.id === selected)
+
+  const allOrders = data?.orders || []
+  const filteredOrders = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    return allOrders.filter((item) => {
+      if (!matchesOrderStatusFilter(item, statusFilter)) return false
+      if (!q) return true
+      const hay = `${item.id || ''} ${item.username || ''} ${item.recipient || ''} ${item.phone || ''} ${item.paymentReference || ''}`.toLowerCase()
+      return hay.includes(q)
+    })
+  }, [allOrders, searchQuery, statusFilter])
+
+  const order = allOrders.find(item => item.id === selected)
   const nextDelivery = order?.deliveryStatus === 'processing' ? ['ready']
     : order?.deliveryStatus === 'ready' ? order.fulfillment === 'delivery'
       ? (order.status === 'paid' || order.paymentMethod === 'cod' ? ['shipped'] : [])
       : (order.status === 'paid' ? ['delivered'] : [])
       : order?.deliveryStatus === 'shipped' && order.status === 'paid' ? ['delivered'] : []
+
   async function act(suffix, body, method = 'POST') {
     if (gate.current || !order) return
     gate.current = true; setBusy(true); setProblem(''); setMessage('')
@@ -62,7 +96,7 @@ export function AdminOrders({ csrfToken, role = 'admin' }) {
   }
   function select(item) { setReceivedAt(''); setReceivedAmount(String(item.total)); setSelected(item.id); setReference(item.paymentReference || ''); setConfirmed(false); setProblem(''); setMessage('') }
   function selectTransfer(transfer) {
-    const item = data?.orders.find(candidate => candidate.id === transfer.paymentId)
+    const item = allOrders.find(candidate => candidate.id === transfer.paymentId)
     if (!item) { setProblem('Chưa tìm thấy đơn trong danh sách hiện tại; hãy làm mới để kiểm tra.'); return }
     select(item)
     setReference(transfer.reference)
@@ -70,9 +104,40 @@ export function AdminOrders({ csrfToken, role = 'admin' }) {
     const received = new Date(transfer.receivedAt)
     setReceivedAt(new Date(received.getTime() - received.getTimezoneOffset() * 60000).toISOString().slice(0, 19))
   }
-  return <section className="admin-module-card"><div className="admin-commerce-head"><div><p className="admin-eyebrow">Bán hàng & thanh toán</p><h2>Đơn hàng khách hàng</h2><p>Đối soát tiền thực nhận và theo dõi lịch giao / nhận.</p></div><button type="button" disabled={busy} onClick={() => reload().catch(failure => setProblem(failure.message))}>Làm mới</button></div>
+
+  return <section className="admin-module-card">
+    <div className="admin-commerce-head">
+      <div><p className="admin-eyebrow">Bán hàng & thanh toán</p><h2>Đơn hàng khách hàng</h2><p>Đối soát tiền thực nhận và theo dõi lịch giao / nhận.</p></div>
+      <button type="button" disabled={busy} onClick={() => reload().catch(failure => setProblem(failure.message))}>Làm mới</button>
+    </div>
+
+    {/* Thanh tìm kiếm & Bộ lọc trạng thái đơn hàng */}
+    <div className="admin-module-toolbar" style={{ flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
+      <input
+        type="search"
+        className="admin-wide-search"
+        style={{ maxWidth: '380px' }}
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        placeholder="🔍 Tìm mã đơn (ST...), tên khách, người nhận hoặc SĐT..."
+        aria-label="Tìm kiếm đơn hàng"
+      />
+      <span>Hiển thị {filteredOrders.length}/{allOrders.length} đơn</span>
+    </div>
+    <div className="admin-voucher-filters" style={{ marginTop: '0', marginBottom: '16px' }} role="group" aria-label="Lọc trạng thái đơn hàng">
+      {ORDER_FILTERS.map(([key, label]) => {
+        const cnt = allOrders.filter((o) => matchesOrderStatusFilter(o, key)).length
+        return (
+          <button key={key} type="button" className={statusFilter === key ? 'is-active' : ''} aria-pressed={statusFilter === key} onClick={() => setStatusFilter(key)}>
+            {label}<span>{cnt}</span>
+          </button>
+        )
+      })}
+    </div>
+
     {(error || problem) && <p className="admin-error" role="alert">{problem || error}</p>}{message && <p role="status">{message}</p>}
     {!data && !error && <p role="status">Đang tải đơn…</p>}
+
     {order && <section className="admin-detail-panel admin-order-detail"><header><div><p className="admin-eyebrow">Chi tiết đơn</p><h3>{order.id}</h3></div><button type="button" onClick={() => setSelected(null)}>Đóng</button></header>
       <p>{order.recipient} · {order.phone}<br />{order.address || 'Nhận tại cửa hàng'}<br />Lịch hẹn: <b>{date(order.scheduledAt)}</b></p>
       <p>Thư điện tử biên nhận khách: {mailStates[order.invoiceEmailStatus] || 'Chưa gửi'} · Thông báo quản trị: {mailStates[order.adminEmailStatus] || 'Chưa gửi'}</p>
@@ -89,8 +154,19 @@ export function AdminOrders({ csrfToken, role = 'admin' }) {
       <AdminUnmatchedPayments key={order.id} order={order} csrfToken={csrfToken} onChanged={reload} />
       {['pending','paid'].includes(order.status) && <div className="admin-order-actions">{nextDelivery.map(key => <button type="button" key={key} disabled={busy} onClick={() => act('/fulfillment', { status: key }, 'PATCH')}>{delivery[key]}</button>)}</div>}
     </section>}
-    <div className="admin-table-scroll"><table className="admin-order-table"><thead><tr><th>Đơn / khách</th><th>Giá trị</th><th>Thanh toán</th><th>Giao / nhận</th><th>Lịch hẹn</th><th>Thao tác</th></tr></thead><tbody>{data?.orders.map(item => <tr key={item.id}><td><b>{item.id}</b><small>{item.username} · {item.recipient}</small></td><td>{money(item.total)}</td><td>{item.status === 'refunded' ? statuses.refunded : statuses[item.paymentState] || statuses[item.status]}<small>{item.paymentMethod === 'voucher' ? 'Mã giảm giá đủ giá trị (0đ)' : item.paymentMethod === 'bank_transfer' ? 'Chuyển khoản' : item.paymentMethod === 'cash' ? 'Thu tại quầy' : 'Thu khi giao'}</small></td><td>{delivery[item.deliveryStatus] || item.deliveryStatus}</td><td>{date(item.scheduledAt)}</td><td><button type="button" onClick={() => select(item)} aria-pressed={selected === item.id}>Xử lý</button></td></tr>)}</tbody></table></div>
-    {data && !data.orders.length && <p className="admin-empty">Chưa có đơn hàng.</p>}
+
+    <div className="admin-table-scroll"><table className="admin-order-table">
+      <thead><tr><th>Đơn / khách</th><th>Giá trị</th><th>Thanh toán</th><th>Giao / nhận</th><th>Lịch hẹn</th><th>Thao tác</th></tr></thead>
+      <tbody>{filteredOrders.map(item => <tr key={item.id}>
+        <td><b>{item.id}</b><small>{item.username} · {item.recipient}{item.phone ? ` · ${item.phone}` : ''}</small></td>
+        <td>{money(item.total)}</td>
+        <td>{item.status === 'refunded' ? statuses.refunded : statuses[item.paymentState] || statuses[item.status]}<small>{item.paymentMethod === 'voucher' ? 'Mã giảm giá đủ giá trị (0đ)' : item.paymentMethod === 'bank_transfer' ? 'Chuyển khoản' : item.paymentMethod === 'cash' ? 'Thu tại quầy' : 'Thu khi giao'}</small></td>
+        <td>{delivery[item.deliveryStatus] || item.deliveryStatus}</td>
+        <td>{date(item.scheduledAt)}</td>
+        <td><button type="button" className="table-action" onClick={() => select(item)} aria-pressed={selected === item.id}>Xử lý</button></td>
+      </tr>)}</tbody>
+    </table></div>
+    {data && filteredOrders.length === 0 && <p className="admin-empty">Không có đơn hàng nào khớp bộ lọc.</p>}
     {role === 'admin' && <><AdminSePay onSelectPayment={selectTransfer} /><details className="admin-module-card"><summary>Cấu hình ngân hàng nhận tiền</summary><AdminPaymentSettings csrfToken={csrfToken} /></details></>}
   </section>
 }
@@ -99,24 +175,16 @@ export { default as AdminAfterSales } from './AdminAfterSales'
 
 export function AdminPaymentSettings({ csrfToken }) {
   const { data, error } = useData('/api/admin/payment-settings')
-  const [form, setForm] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState('')
-  const [problem, setProblem] = useState('')
-  const [confirmed, setConfirmed] = useState(false)
+  const [form, setForm] = useState(null), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [problem, setProblem] = useState(''), [confirmed, setConfirmed] = useState(false)
   const gate = useRef(false)
   const values = form || data?.settings
   async function save(event) {
     event.preventDefault()
     if (gate.current || !confirmed) return
-    gate.current = true
-    setBusy(true)
-    setMessage('')
-    setProblem('')
+    gate.current = true; setBusy(true); setMessage(''); setProblem('')
     try {
       const result = await apiJson('/api/admin/payment-settings', { method: 'PUT', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify({ ...values, mode: 'manual' }) })
-      setForm(result.settings)
-      setConfirmed(false)
+      setForm(result.settings); setConfirmed(false)
       setMessage('Đã lưu tài khoản nhận tiền. Các phiên QR đang mở vẫn giữ tài khoản đã xác nhận khi tạo phiên.')
     } catch (failure) { setProblem(failure.message) }
     finally { gate.current = false; setBusy(false) }

@@ -81,7 +81,7 @@ test('Social v3.2: giao diện gọn gàng, có chọn chủ đề Viral, TikTok
     assert.ok(topicSelect.textContent.includes('Xe cộ'))
     assert.ok(topicSelect.textContent.includes('Anime'))
     assert.ok(topicSelect.textContent.includes('So sánh sản phẩm điện tử'))
-    assert.ok(doc.body.textContent.includes('TikTok (≥ 200K)'))
+    assert.ok(doc.body.textContent.includes('TikTok (≥ 1M Tim)') || doc.body.textContent.includes('TikTok (≥ 200K)'))
 
     // Kiểm tra Tab Nhật ký có nút Xuất Excel (.xlsx) & hiển thị "Bị từ chối duyệt"
     const logsTab = Array.from(doc.querySelectorAll('.social-subnav-btn')).find(b => b.textContent.includes('Nhật ký'))

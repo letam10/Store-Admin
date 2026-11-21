@@ -701,6 +701,309 @@ public sealed class SocialCopywriterService(IConfiguration configuration)
         var comma = raw.IndexOf(',');
         return comma >= 0 ? raw[(comma + 1)..] : raw;
     }
+
+    // 1. Biến kho bài Viral thành Ý tưởng bán hàng gắn sản phẩm thật trong Store
+    public async Task<object> GenerateViralSalesIdeasAsync(
+        IReadOnlyList<SocialViralPost> viralPosts,
+        IReadOnlyList<CatalogProduct> catalog,
+        int count = 4)
+    {
+        var topViral = viralPosts.OrderByDescending(v => v.LikesCount).Take(12)
+            .Select(v => new { v.Platform, v.Category, title = v.Title.Length > 100 ? v.Title[..100] : v.Title, v.LikesCount, v.CommentsCount }).ToArray();
+        var topProducts = catalog.Where(p => p.StockCount > 0)
+            .OrderByDescending(p => p.DiscountPercent > 0).ThenByDescending(p => p.ViewCount).Take(18)
+            .Select(p => new { p.Id, p.Name, p.Category, p.Price, p.DiscountPercent, p.StockCount }).ToArray();
+
+        if (topViral.Length == 0 || topProducts.Length == 0)
+            return new { ok = true, summary = "Chưa đủ bài Viral hoặc sản phẩm để tạo ý tưởng.", ideas = Array.Empty<object>(), generatedBy = "Fallback" };
+
+        try
+        {
+            var prompt =
+                "Bạn là Giám đốc sáng tạo Marketing cho cửa hàng OmniCart.\n" +
+                $"Dựa trên {topViral.Length} bài đăng Viral thực tế và danh sách sản phẩm thật của cửa hàng bên dưới, hãy phân tích xu hướng nổi bật nhất và đề xuất {Math.Clamp(count, 2, 6)} Ý TƯỞNG BÀI BÁN HÀNG BẮT TREND cụ thể.\n" +
+                "CHỈ TRẢ VỀ JSON HỢP LỆ (không giải thích ngoài JSON):\n" +
+                "{\"summary\":\"Tóm tắt 2 câu về xu hướng nổi bật\",\"ideas\":[{\"trendName\":\"...\",\"productId\":\"mã sp trong danh sách\",\"productName\":\"tên sp\",\"platform\":\"facebook hoặc tiktok\",\"hook\":\"Câu mở đầu giật tít\",\"angle\":\"Góc triển khai bắt trend\",\"hashtags\":\"#...\",\"tone\":\"viral_engaging\"}]}\n" +
+                "BÀI VIRAL:\n" + JsonSerializer.Serialize(topViral) + "\n" +
+                "SẢN PHẨM CỬA HÀNG:\n" + JsonSerializer.Serialize(topProducts);
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var raw = await TryGenerateWithOllamaAsync(prompt, maxTokens: 1100, cts.Token);
+            var json = ExtractJsonObject(raw);
+            if (json is not null)
+            {
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement.Clone();
+                return new
+                {
+                    ok = true,
+                    summary = root.TryGetProperty("summary", out var s) ? s.GetString() : "Phân tích xu hướng Viral thành công.",
+                    ideas = root.TryGetProperty("ideas", out var arr) && arr.ValueKind == JsonValueKind.Array ? (object)arr : Array.Empty<object>(),
+                    generatedBy = $"Local Qwen ({ModelName})"
+                };
+            }
+        }
+        catch (Exception ex) { Console.WriteLine($"[SocialCopywriter] ViralSalesIdeas fallback: {ex.Message}"); }
+
+        var fallbackIdeas = topViral.Take(Math.Min(count, topProducts.Length)).Select((v, idx) =>
+        {
+            var prod = topProducts[idx % topProducts.Length];
+            return new
+            {
+                trendName = string.IsNullOrWhiteSpace(v.Category) ? "Xu hướng Viral" : v.Category,
+                productId = prod.Id,
+                productName = prod.Name,
+                platform = v.Platform,
+                hook = $"Bắt trend {v.Category}: Không thể bỏ qua {prod.Name} đang cực hot!",
+                angle = $"Lấy cảm hứng từ bài đạt {v.LikesCount:N0} tương tác để dẫn dắt nhu cầu sử dụng {prod.Name}.",
+                hashtags = "#OmniCart #BatTrend #Viral2026 #DealHot",
+                tone = "viral_engaging"
+            };
+        }).ToArray();
+        return new { ok = true, summary = $"Tổng hợp nhanh từ {topViral.Length} bài viral nổi bật.", ideas = fallbackIdeas, generatedBy = "Smart Fallback" };
+    }
+
+    // 2. Vision AI qwen3.5:4b nhìn ảnh sản phẩm -> tự điền Tên, Danh mục, Mô tả, Đặc điểm, Giá gợi ý
+    public async Task<object> ExtractProductFromImageAsync(string imageBase64, string? hint, long? suggestedPrice)
+    {
+        if (string.IsNullOrWhiteSpace(imageBase64))
+            return new { ok = false, error = "IMAGE_REQUIRED" };
+
+        var prompt =
+            "Bạn là chuyên gia nhập liệu sản phẩm thương mại điện tử Việt Nam.\n" +
+            "Hãy nhìn thật kỹ tấm ảnh sản phẩm này" + (string.IsNullOrWhiteSpace(hint) ? "" : $" (gợi ý thêm: {hint})") + ".\n" +
+            "Tạo thông tin sản phẩm chuẩn tiếng Việt ngắn gọn, tự nhiên.\n" +
+            "Danh mục chọn 1 trong: Điện tử, Đồ gia dụng, Làm đẹp, Laptop, Linh kiện, Trang phục, Trang sức, Tự Thiết Kế.\n" +
+            "CHỈ TRẢ VỀ JSON HỢP LỆ:\n" +
+            "{\"name\":\"Tên tiếng Việt <= 55 ký tự\",\"category\":\"...\",\"price\":250000,\"description\":\"Mô tả 2-3 câu hấp dẫn rõ công dụng/chất liệu\",\"features\":[\"Đặc điểm 1\",\"Đặc điểm 2\",\"Đặc điểm 3\"],\"label\":\"Mới\"}";
+
+        try
+        {
+            var payload = new
+            {
+                model = ModelName,
+                messages = new[]
+                {
+                    new { role = "user", content = prompt, images = new[] { StripDataUrlPrefix(imageBase64) } }
+                },
+                stream = false,
+                think = false,
+                options = new { temperature = 0.25, num_predict = 550 }
+            };
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            using var resp = await _httpClient.PostAsync(OllamaHost + "/api/chat", content, cts.Token);
+            if (resp.IsSuccessStatusCode)
+            {
+                using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(cts.Token));
+                var raw = doc.RootElement.TryGetProperty("message", out var m) && m.TryGetProperty("content", out var c) ? c.GetString() : null;
+                var json = ExtractJsonObject(raw);
+                if (json is not null)
+                {
+                    using var parsed = JsonDocument.Parse(json);
+                    var r = parsed.RootElement;
+                    long parsedPrice = suggestedPrice is > 0 ? suggestedPrice.Value
+                        : (r.TryGetProperty("price", out var pP) && pP.TryGetInt64(out var pv) && pv > 0 ? pv : 199000);
+                    return new
+                    {
+                        ok = true,
+                        product = new
+                        {
+                            name = r.TryGetProperty("name", out var nP) ? (nP.GetString() ?? "Sản phẩm mới") : "Sản phẩm mới",
+                            category = r.TryGetProperty("category", out var cP) ? (cP.GetString() ?? "Đồ gia dụng") : "Đồ gia dụng",
+                            price = parsedPrice,
+                            description = r.TryGetProperty("description", out var dP) ? (dP.GetString() ?? "") : "",
+                            features = ReadStringList(r, "features"),
+                            label = r.TryGetProperty("label", out var lP) ? (lP.GetString() ?? "Mới") : "Mới"
+                        },
+                        generatedBy = $"Local Vision ({ModelName})"
+                    };
+                }
+            }
+        }
+        catch (Exception ex) { Console.WriteLine($"[SocialCopywriter] Vision Product lỗi: {ex.Message}"); }
+
+        return new
+        {
+            ok = true,
+            product = new
+            {
+                name = string.IsNullOrWhiteSpace(hint) ? "Sản phẩm tiện ích mới" : hint.Trim(),
+                category = "Đồ gia dụng",
+                price = suggestedPrice is > 0 ? suggestedPrice.Value : 199000,
+                description = "Sản phẩm thiết kế gọn đẹp, chất lượng bền bỉ, phù hợp sử dụng hằng ngày.",
+                features = new[] { "Thiết kế hiện đại", "Chất liệu bền đẹp", "Dễ sử dụng hằng ngày" },
+                label = "Mới"
+            },
+            generatedBy = "Fallback"
+        };
+    }
+
+    // 3. Phân tích Bình luận bài FB / TikTok: top chủ đề thảo luận, bình luận viết nhiều nhất, bình luận nhiều tim nhất
+    public async Task<object> AnalyzeCommentsAsync(AnalyzeCommentsRequest req)
+    {
+        var comments = (req.Comments ?? []).Where(c => !string.IsNullOrWhiteSpace(c.Text)).ToList();
+        var topLiked = comments.OrderByDescending(c => c.Likes).Take(10).ToArray();
+
+        // Thống kê cụm bình luận lặp lại nhiều nhất bằng chuẩn hóa văn bản
+        var repeated = comments
+            .GroupBy(c => Regex.Replace(c.Text.ToLowerInvariant(), @"[^\p{L}\p{N}\s]+", "").Trim())
+            .Where(g => g.Key.Length >= 2)
+            .Select(g => new { text = g.First().Text, count = g.Count(), totalLikes = g.Sum(x => x.Likes) })
+            .OrderByDescending(x => x.count).ThenByDescending(x => x.totalLikes)
+            .Take(8).ToArray();
+
+        object[] aiTopics = [];
+        string summary = $"Đã phân tích {comments.Count} bình luận.";
+        string generatedBy = "Smart Stats";
+
+        if (comments.Count > 0)
+        {
+            try
+            {
+                var sample = comments.Take(45).Select(c => new { t = c.Text.Length > 110 ? c.Text[..110] : c.Text, l = c.Likes });
+                var prompt =
+                    "Bạn là chuyên gia phân tích tâm lý người dùng mạng xã hội.\n" +
+                    $"Dưới đây là các bình luận thực tế của bài đăng ({req.Platform}): \"{req.PostTitle}\".\n" +
+                    "Hãy phân tích và gom nhóm xem người dùng đang thảo luận về những CHỦ ĐỀ nào nhiều nhất, thái độ chung (tích cực/hài hước/tranh cãi/hỏi mua) và đề xuất 1 góc bán hàng ăn theo.\n" +
+                    "CHỈ TRẢ VỀ JSON HỢP LỆ:\n" +
+                    "{\"summary\":\"Tóm tắt ngắn gọn 2 câu\",\"sentiment\":\"Tích cực / Hài hước / Tranh luận...\",\"salesHook\":\"Gợi ý câu dẫn bán hàng\",\"topics\":[{\"topic\":\"Tên chủ đề thảo luận\",\"mentionsEstimate\":12,\"sampleQuote\":\"Ví dụ tiêu biểu\",\"interestLevel\":\"Rất cao\"}]}\n" +
+                    "BÌNH LUẬN:\n" + JsonSerializer.Serialize(sample);
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(28));
+                var raw = await TryGenerateWithOllamaAsync(prompt, maxTokens: 750, cts.Token);
+                var json = ExtractJsonObject(raw);
+                if (json is not null)
+                {
+                    using var doc = JsonDocument.Parse(json);
+                    var r = doc.RootElement.Clone();
+                    return new
+                    {
+                        ok = true,
+                        totalComments = comments.Count,
+                        summary = r.TryGetProperty("summary", out var s) ? s.GetString() : summary,
+                        sentiment = r.TryGetProperty("sentiment", out var se) ? se.GetString() : "Đa dạng",
+                        salesHook = r.TryGetProperty("salesHook", out var sh) ? sh.GetString() : "",
+                        topics = r.TryGetProperty("topics", out var tp) && tp.ValueKind == JsonValueKind.Array ? (object)tp : aiTopics,
+                        mostRepeated = repeated,
+                        topLiked,
+                        generatedBy = $"Local Qwen ({ModelName})"
+                    };
+                }
+            }
+            catch (Exception ex) { Console.WriteLine($"[SocialCopywriter] AnalyzeComments fallback: {ex.Message}"); }
+        }
+
+        return new { ok = true, totalComments = comments.Count, summary, sentiment = "Chưa rõ", salesHook = "", topics = aiTopics, mostRepeated = repeated, topLiked, generatedBy };
+    }
+
+    // 4. Lọc Kênh / Trang cá nhân theo chủ đề (xác định kênh đó thiên về mảng nào & chấm điểm khớp %)
+    public async Task<object> ClassifyChannelsAsync(ClassifyChannelsRequest req)
+    {
+        var channels = (req.Channels ?? []).Take(25).ToList();
+        var target = (req.TargetTopic ?? "").Trim();
+        if (channels.Count == 0) return new { ok = true, channels = Array.Empty<object>(), generatedBy = "None" };
+
+        try
+        {
+            var compact = channels.Select((c, idx) => new
+            {
+                idx,
+                c.Platform,
+                name = c.ChannelName,
+                handle = c.Handle,
+                bio = c.Bio.Length > 140 ? c.Bio[..140] : c.Bio,
+                followers = c.FollowersCount,
+                samples = (c.SampleTitles ?? []).Take(8).Select(s => s.Length > 75 ? s[..75] : s).ToArray()
+            });
+
+            var prompt =
+                "Bạn là chuyên gia phân loại kênh TikTok & trang Facebook.\n" +
+                $"Chủ đề người dùng muốn lọc: \"{(string.IsNullOrWhiteSpace(target) ? "Tất cả (tự nhận diện chủ đề chính)" : target)}\".\n" +
+                "Với mỗi kênh, hãy đọc tiểu sử (bio) và tiêu đề các video/bài gần nhất để xác định:\n" +
+                "- mainTopic: Kênh này thực sự thiên về chủ đề gì bằng Tiếng Việt ngắn gọn (vd: Anime Edit, Âm nhạc Trung Quốc, Review Xe cộ, Ẩm thực, Công nghệ, Game, Gia dụng...).\n" +
+                "- matchScore: Điểm phù hợp 0-100 với chủ đề cần lọc (nếu lọc Tất cả thì cho 100).\n" +
+                "- isMatch: true nếu matchScore >= 60.\n" +
+                "- reason: Lý do nhận định ngắn 1 câu.\n" +
+                "CHỈ TRẢ VỀ MẢNG JSON HỢP LỆ: [{\"idx\":0,\"mainTopic\":\"...\",\"matchScore\":92,\"isMatch\":true,\"reason\":\"...\"}]\n" +
+                "DANH SÁCH KÊNH:\n" + JsonSerializer.Serialize(compact);
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var raw = await TryGenerateWithOllamaAsync(prompt, maxTokens: 900, cts.Token);
+            var jsonArr = ExtractJsonArray(raw);
+            if (jsonArr is not null)
+            {
+                var map = new Dictionary<int, (string Topic, int Score, bool Match, string Reason)>();
+                using var doc = JsonDocument.Parse(jsonArr);
+                foreach (var e in doc.RootElement.EnumerateArray())
+                {
+                    if (!e.TryGetProperty("idx", out var ip) || !ip.TryGetInt32(out var idx)) continue;
+                    var tp = e.TryGetProperty("mainTopic", out var tP) ? (tP.GetString() ?? "Đa chủ đề") : "Đa chủ đề";
+                    var sc = e.TryGetProperty("matchScore", out var sP) && sP.TryGetInt32(out var sV) ? sV : 50;
+                    var mt = e.TryGetProperty("isMatch", out var mP) ? mP.ValueKind == JsonValueKind.True : sc >= 60;
+                    var rs = e.TryGetProperty("reason", out var rP) ? (rP.GetString() ?? "") : "";
+                    map[idx] = (tp, sc, mt, rs);
+                }
+
+                var enriched = channels.Select((c, idx) =>
+                {
+                    (string Topic, int Score, bool Match, string Reason) d = map.TryGetValue(idx, out var info) ? info : ("Đa chủ đề", 50, string.IsNullOrWhiteSpace(target), "Phân tích sơ bộ");
+                    return new
+                    {
+                        c.Platform, c.ChannelUrl, c.ChannelName, c.Handle, c.Bio, c.AvatarUrl,
+                        c.FollowersCount, c.TotalLikesCount, c.SampleTitles,
+                        mainTopic = d.Topic, matchScore = d.Score, isMatch = d.Match, reason = d.Reason
+                    };
+                }).OrderByDescending(x => x.matchScore).ThenByDescending(x => x.FollowersCount).ToArray();
+
+                return new { ok = true, channels = enriched, generatedBy = $"Local Qwen ({ModelName})" };
+            }
+        }
+        catch (Exception ex) { Console.WriteLine($"[SocialCopywriter] ClassifyChannels fallback: {ex.Message}"); }
+
+        var fallback = channels.Select(c =>
+        {
+            var hay = $"{c.ChannelName} {c.Bio} {string.Join(' ', c.SampleTitles ?? [])}".ToLowerInvariant();
+            var match = string.IsNullOrWhiteSpace(target) || hay.Contains(target.ToLowerInvariant());
+            return new
+            {
+                c.Platform, c.ChannelUrl, c.ChannelName, c.Handle, c.Bio, c.AvatarUrl,
+                c.FollowersCount, c.TotalLikesCount, c.SampleTitles,
+                mainTopic = match && !string.IsNullOrWhiteSpace(target) ? target : "Tổng hợp",
+                matchScore = match ? 80 : 30, isMatch = match, reason = "So khớp từ khóa trong tiểu sử và tiêu đề bài viết."
+            };
+        }).ToArray();
+        return new { ok = true, channels = fallback, generatedBy = "Smart Fallback" };
+    }
+
+    // 5. Tổng hợp phiên Lướt FB/TikTok theo thời gian -> tìm chủ đề đang nóng nhất & xếp hạng bài đứng top
+    public async Task<object> AnalyzeSurfSessionAsync(AnalyzeSurfFeedRequest req)
+    {
+        var posts = (req.Posts ?? []).OrderByDescending(p => p.LikesCount).ToList();
+        var classified = await ClassifyAndFilterViralPostsAsync(
+            string.IsNullOrWhiteSpace(req.TargetTopic) || req.TargetTopic == "all" ? "all" : "custom",
+            req.TargetTopic,
+            posts);
+
+        var topTopics = classified.Posts
+            .GroupBy(p => string.IsNullOrWhiteSpace(p.Category) ? "Xu hướng chung" : p.Category)
+            .Select(g => new { topic = g.Key, postCount = g.Count(), totalLikes = g.Sum(x => (long)x.LikesCount), topPostTitle = g.OrderByDescending(x => x.LikesCount).First().Title })
+            .OrderByDescending(x => x.totalLikes).ThenByDescending(x => x.postCount)
+            .Take(8).ToArray();
+
+        return new
+        {
+            ok = true,
+            platform = req.Platform,
+            durationMinutes = req.DurationMinutes,
+            scannedCount = posts.Count,
+            matchedCount = classified.Posts.Count,
+            topTopics,
+            topPosts = classified.Posts.OrderByDescending(p => p.LikesCount).Take(25).ToArray(),
+            generatedBy = classified.GeneratedBy
+        };
+    }
+
 }
 
     public sealed record ExtensionLearnedRule(

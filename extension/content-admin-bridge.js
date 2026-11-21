@@ -1,7 +1,7 @@
 /*
   FILE NOTE
-  - Mục đích: Cầu nối bền vững 24/7 giữa Store-Admin và Service Worker v3.4.0.
-  - Bổ sung v3.4.0: Cầu nối BRIDGE_API_FETCH để Extension gọi thẳng API AI Local qwen3.5:4b và đồng bộ kho kiến thức giao diện học được vào SQL Server mà không dính CORS.
+  - Mục đích: Cầu nối bền vững 24/7 giữa Store-Admin và Service Worker v3.5.0.
+  - Bổ sung v3.5.0: Cầu nối BRIDGE_API_FETCH để Extension gọi thẳng API AI Local qwen3.5:4b và đồng bộ kho kiến thức giao diện học được vào SQL Server mà không dính CORS.
 */
 
 ;(() => {
@@ -20,7 +20,7 @@
   let dockShadow = null
 
   function getExtensionVersion() {
-    try { return chrome.runtime.getManifest().version } catch (_) { return '3.4.0' }
+    try { return chrome.runtime.getManifest().version } catch (_) { return '3.5.0' }
   }
 
   function isRuntimeAlive() {
@@ -164,6 +164,10 @@
       port.onMessage.addListener((msg) => {
         if (!msg) return
         if (msg.type === 'BRIDGE_API_FETCH' && msg.fetchId) { handleBridgeApiFetch(msg); return }
+        if (msg.type === 'VIRAL_BATCH_READY' && msg.payload) {
+          window.postMessage({ source: 'OMNICART_VIRAL_BATCH', payload: msg.payload }, window.location.origin)
+          return
+        }
         if (msg.type === 'BRIDGE_HELLO') {
           const pendingCount = Array.isArray(msg.pendingVerifications) ? msg.pendingVerifications.length : 0
           updateDockStatus(pendingCount > 0 ? `⏳ Đang theo dõi ${pendingCount} bài TikTok chờ duyệt...` : `👁️ OmniVision v${msg.version || getExtensionVersion()} • AI Ready`, pendingCount > 0 ? 'busy' : 'ready')
@@ -243,7 +247,7 @@
       return
     }
 
-    if (['AUTO_POST', 'FETCH_REAL_VIRAL', 'SCRAPE_FB_GROUPS'].includes(action)) {
+    if (['AUTO_POST', 'FETCH_REAL_VIRAL', 'SCRAPE_FB_GROUPS', 'AUTO_WATCH_TASK', 'SCRAPE_POST_COMMENTS', 'SCRAPE_CHANNEL_PROFILES', 'SURF_AND_COLLECT'].includes(action)) {
       dockExpanded = true
       dockShadow?.getElementById('panel')?.classList.add('open')
       updateDockStatus(

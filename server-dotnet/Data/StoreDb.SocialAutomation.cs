@@ -140,6 +140,15 @@ public sealed partial class StoreDb
             END;
             """);
 
+        ExecuteNonQuery(db, """
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('social_viral_posts') AND name = 'thumbnail_url')
+                ALTER TABLE social_viral_posts ADD thumbnail_url NVARCHAR(1000) NULL;
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('social_viral_posts') AND name = 'author_name')
+                ALTER TABLE social_viral_posts ADD author_name NVARCHAR(255) NULL;
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('social_viral_posts') AND name = 'author_url')
+                ALTER TABLE social_viral_posts ADD author_url NVARCHAR(500) NULL;
+            """);
+
         // Làm sạch dữ liệu mẫu hardcode nick cũ nếu còn sót
         ExecuteNonQuery(db, """
             UPDATE social_auto_posts
@@ -637,12 +646,12 @@ public sealed partial class StoreDb
         using var command = db.CreateCommand();
         if (!string.IsNullOrWhiteSpace(category) && category != "all")
         {
-            command.CommandText = "SELECT id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, created_at FROM social_viral_posts WHERE category = @cat ORDER BY likes_count DESC, created_at DESC";
+            command.CommandText = "SELECT id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, created_at, thumbnail_url, author_name, author_url FROM social_viral_posts WHERE category = @cat ORDER BY likes_count DESC, created_at DESC";
             command.Parameters.Add(new SqlParameter("@cat", SqlDbType.NVarChar, 100) { Value = category.Trim() });
         }
         else
         {
-            command.CommandText = "SELECT id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, created_at FROM social_viral_posts ORDER BY likes_count DESC, created_at DESC";
+            command.CommandText = "SELECT id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, created_at, thumbnail_url, author_name, author_url FROM social_viral_posts ORDER BY likes_count DESC, created_at DESC";
         }
 
         var list = new List<SocialViralPost>();
@@ -662,7 +671,10 @@ public sealed partial class StoreDb
                 SharesCount = reader.GetInt32(8),
                 CommentsCount = reader.GetInt32(9),
                 TrendingTopic = reader.GetString(10),
-                CreatedAt = reader.GetString(11)
+                CreatedAt = reader.GetString(11),
+                ThumbnailUrl = reader.IsDBNull(12) ? null : reader.GetString(12),
+                AuthorName = reader.IsDBNull(13) ? null : reader.GetString(13),
+                AuthorUrl = reader.IsDBNull(14) ? null : reader.GetString(14)
             });
         }
         return list;
@@ -677,9 +689,9 @@ public sealed partial class StoreDb
         using var command = db.CreateCommand();
         command.CommandText = """
             INSERT INTO social_viral_posts (
-                id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, created_at
+                id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, thumbnail_url, author_name, author_url, created_at
             ) VALUES (
-                @id, @title, @platform, @category, @post_url, @summary, @virality_score, @likes_count, @shares_count, @comments_count, @trending_topic, @created_at
+                @id, @title, @platform, @category, @post_url, @summary, @virality_score, @likes_count, @shares_count, @comments_count, @trending_topic, @thumbnail_url, @author_name, @author_url, @created_at
             );
             """;
         command.Parameters.Add(new SqlParameter("@id", SqlDbType.NVarChar, 100) { Value = viral.Id });
@@ -693,6 +705,9 @@ public sealed partial class StoreDb
         command.Parameters.Add(new SqlParameter("@shares_count", SqlDbType.Int) { Value = viral.SharesCount });
         command.Parameters.Add(new SqlParameter("@comments_count", SqlDbType.Int) { Value = viral.CommentsCount });
         command.Parameters.Add(new SqlParameter("@trending_topic", SqlDbType.NVarChar, 255) { Value = viral.TrendingTopic ?? "Viral thực tế" });
+        command.Parameters.Add(new SqlParameter("@thumbnail_url", SqlDbType.NVarChar, 1000) { Value = (object?)viral.ThumbnailUrl ?? DBNull.Value });
+        command.Parameters.Add(new SqlParameter("@author_name", SqlDbType.NVarChar, 255) { Value = (object?)viral.AuthorName ?? DBNull.Value });
+        command.Parameters.Add(new SqlParameter("@author_url", SqlDbType.NVarChar, 500) { Value = (object?)viral.AuthorUrl ?? DBNull.Value });
         command.Parameters.Add(new SqlParameter("@created_at", SqlDbType.NVarChar, 100) { Value = viral.CreatedAt });
         command.ExecuteNonQuery();
 

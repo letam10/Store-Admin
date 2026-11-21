@@ -870,67 +870,153 @@ async function scrapeTikTokViralStream(sources, targetCount, minLikes, initialEx
   return { ok: true, posts: allPosts, timedOut: allPosts.length < targetCount && Date.now() - lastFoundAt >= SLIDING_IDLE_MS }
 }
 
-async function scrapeBothViralPlatforms(options = {}) {
   if (activeJobs.has('scrape_viral')) return { ok: false, error: 'VIRAL_SCRAPE_ALREADY_RUNNING', posts: [], facebookPosts: [], tiktokPosts: [] }
   activeJobs.set('scrape_viral', { platform: 'both', startedAt: new Date().toISOString(), step: 'scraping' })
   ensureKeepAlive()
   try {
     const fbTarget = Number(options.fbCount) || 10
     const ttTarget = Number(options.tiktokCount) || 10
-    const fbMinLikes = Number(options.fbMinLikes) || 5000
-    const ttMinLikes = Number(options.tiktokMinLikes) || 200000
-    const fbSourceMode = String(options.fbSourceMode || 'both').toLowerCase() // 'feed' | 'reels' | 'both'
+    const fbFeedMinLikes = Number(options.fbFeedMinLikes) || 1000
+    const fbReelMinLikes = Number(options.fbReelMinLikes) || 10000
+    const ttMinLikes = Number(options.tiktokMinLikes) || 1000000
+    const fbSourceMode = String(options.fbSourceMode || 'both').toLowerCase()
+    const targetPlatform = String(options.platform || 'both').toLowerCase()
     const excludeUrls = Array.isArray(options.excludeUrls) ? options.excludeUrls : []
     const topicCfg = buildTopicSources(options)
 
     pushLog({
-      platform: 'system',
-      step: 'scrape_both',
-      level: 'info',
-      message: `🔥 Đang cào Viral (${topicCfg.label || 'Tất cả'} • FB: ${fbSourceMode} ≥${fbMinLikes} • TikTok ≥${ttMinLikes})...`
+      platform: 'system', step: 'scrape_both', level: 'info',
+      message: `🔥 Cào Viral (${topicCfg.label || 'Tất cả'} • FB bài ≥${fbFeedMinLikes.toLocaleString('vi-VN')} • FB Reels ≥${fbReelMinLikes.toLocaleString('vi-VN')} • TikTok ≥${ttMinLikes.toLocaleString('vi-VN')})...`
     })
 
-    const tasks = []
-    if (fbSourceMode === 'feed') {
-      tasks.push(scrapeFacebookViralStream('fbFeed', topicCfg.fbFeedSources, fbTarget, fbMinLikes, excludeUrls, topicCfg, 'FB Trang chủ'))
-      tasks.push(Promise.resolve({ ok: true, posts: [], timedOut: false }))
-    } else if (fbSourceMode === 'reels') {
-      tasks.push(Promise.resolve({ ok: true, posts: [], timedOut: false }))
-      tasks.push(scrapeFacebookViralStream('fbReels', topicCfg.fbReelSources, fbTarget, fbMinLikes, excludeUrls, topicCfg, 'FB Thước phim'))
-    } else {
-      const feedCount = Math.ceil(fbTarget / 2)
-      const reelCount = fbTarget - feedCount
-      tasks.push(scrapeFacebookViralStream('fbFeed', topicCfg.fbFeedSources, feedCount, fbMinLikes, excludeUrls, topicCfg, 'FB Trang chủ'))
-      tasks.push(scrapeFacebookViralStream('fbReels', topicCfg.fbReelSources, reelCount, fbMinLikes, excludeUrls, topicCfg, 'FB Thước phim'))
+    const emitBatch = (plat, sourceLabel, posts) => {
+      if (Array.isArray(posts) && posts.length > 0) {
+        broadcastToAdmins({
+          type: 'VIRAL_BATCH_READY',
+          payload: { platform: plat, sourceLabel, topic: options.topic || 'all', topicLabel: topicCfg.label, posts }
+        })
+      }
     }
-    tasks.push(scrapeTikTokViralStream(topicCfg.ttSources, ttTarget, ttMinLikes, excludeUrls, topicCfg))
 
-    const [fbFeedRes, fbReelsRes, ttRes] = await Promise.all(tasks)
+    const fbFeedPromise = (targetPlatform !== 'tiktok' && (fbSourceMode === 'feed' || fbSourceMode === 'both'))
+      ? scrapeFacebookViralStream('fbFeed', topicCfg.fbFeedSources, fbSourceMode === 'feed' ? fbTarget : Math.ceil(fbTarget / 2), fbFeedMinLikes, excludeUrls, topicCfg, 'FB Trang chủ')
+          .then((res) => { emitBatch('facebook', 'FB Trang chủ', res.posts); return res })
+      : Promise.resolve({ ok: true, posts: [], timedOut: false })
+
+    const fbReelPromise = (targetPlatform !== 'tiktok' && (fbSourceMode === 'reels' || fbSourceMode === 'both'))
+      ? scrapeFacebookViralStream('fbReels', topicCfg.fbReelSources, fbSourceMode === 'reels' ? fbTarget : Math.floor(fbTarget / 2), fbReelMinLikes, excludeUrls, topicCfg, 'FB Thước phim')
+          .then((res) => { emitBatch('facebook', 'FB Thước phim', res.posts); return res })
+      : Promise.resolve({ ok: true, posts: [], timedOut: false })
+
+    const ttPromise = (targetPlatform !== 'facebook')
+      ? scrapeTikTokViralStream(topicCfg.ttSources, ttTarget, ttMinLikes, excludeUrls, topicCfg)
+          .then((res) => { emitBatch('tiktok', 'TikTok', res.posts); return res })
+      : Promise.resolve({ ok: true, posts: [], timedOut: false })
+
+    const [fbFeedRes, fbReelsRes, ttRes] = await Promise.all([fbFeedPromise, fbReelPromise, ttPromise])
     const facebookPosts = [...(fbFeedRes?.posts || []), ...(fbReelsRes?.posts || [])]
     const tiktokPosts = ttRes?.posts || []
     const combined = [...facebookPosts, ...tiktokPosts]
 
     pushLog({
-      platform: 'system',
-      step: 'scrape_done',
-      level: combined.length > 0 ? 'success' : 'warn',
-      message: `✅ Cào xong → FB Trang chủ: ${(fbFeedRes?.posts || []).length} • FB Reels: ${(fbReelsRes?.posts || []).length} • TikTok: ${tiktokPosts.length}`
+      platform: 'system', step: 'scrape_done', level: combined.length > 0 ? 'success' : 'warn',
+      message: `✅ Hoàn tất cào Viral → FB Bài viết: ${(fbFeedRes?.posts || []).length} • FB Reels: ${(fbReelsRes?.posts || []).length} • TikTok: ${tiktokPosts.length}`
     })
-    return {
-      ok: true,
-      facebookPosts,
-      tiktokPosts,
-      posts: combined,
-      timedOut: {
-        facebook: Boolean(fbFeedRes?.timedOut || fbReelsRes?.timedOut),
-        tiktok: Boolean(ttRes?.timedOut)
-      }
-    }
+    return { ok: true, facebookPosts, tiktokPosts, posts: combined, streamed: true }
   } finally {
     activeJobs.delete('scrape_viral')
     ensureKeepAlive()
+
+
+  const platform = String(options.platform || 'tiktok').toLowerCase()
+  const repeatCount = Math.max(1, Math.min(50, Number(options.repeatCount) || 5))
+  const dwellSeconds = Math.max(3, Math.min(120, Number(options.dwellSeconds) || 8))
+  const targetUrl = String(options.url || '').trim() || (platform === 'facebook' ? 'https://www.facebook.com/reel/' : 'https://www.tiktok.com/foryou')
+  const scripts = platform === 'facebook' ? ['vision-engine.js', 'content-media.js', 'content-facebook.js'] : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
+  const tabKey = platform === 'facebook' ? 'fbReels' : 'ttViral'
+
+  pushLog({ platform, step: 'auto_watch', level: 'info', message: `👁️ Bắt đầu xem ${repeatCount} lần (${dwellSeconds}s/lần)...` })
+  let watched = 0
+  for (let i = 1; i <= repeatCount; i++) {
+    const tab = await openOrReuseScraperTab(tabKey, targetUrl, 2200)
+    await sendTabMessageWithRetry(tab.id, { type: platform === 'facebook' ? 'FB_WATCH_ITEM' : 'TT_WATCH_ITEM', options: { dwellSeconds, stepIndex: i, total: repeatCount } }, scripts).catch(() => {})
+    watched++
+    pushLog({ platform, step: 'auto_watch', level: 'info', message: `👁️ Đã xem xong lượt ${watched}/${repeatCount}.` })
   }
+  pushLog({ platform, step: 'done', level: 'success', message: `✅ Hoàn tất xem tự động ${watched}/${repeatCount} lượt!` })
+  return { ok: true, watched, repeatCount, platform }
 }
+
+async function runScrapePostComments(options = {}) {
+  const url = String(options.postUrl || '').trim()
+  if (!url) return { ok: false, error: 'URL_REQUIRED', comments: [] }
+  const isFb = /facebook\.com/i.test(url)
+  const platform = isFb ? 'facebook' : 'tiktok'
+  const maxComments = Math.max(10, Math.min(120, Number(options.maxComments) || 40))
+  const scripts = isFb ? ['vision-engine.js', 'content-media.js', 'content-facebook.js'] : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
+
+  pushLog({ platform, step: 'scrape_comments', level: 'info', message: `💬 Đang mở bài và đọc tối đa ${maxComments} bình luận...` })
+  const tab = await openOrReuseScraperTab(isFb ? 'fbFeed' : 'ttViral', url, 3200)
+  const res = await sendTabMessageWithRetry(tab.id, { type: isFb ? 'FB_SCRAPE_COMMENTS' : 'TT_SCRAPE_COMMENTS', options: { maxComments } }, scripts)
+  pushLog({ platform, step: 'done', level: 'success', message: `✅ Đã đọc ${(res?.comments || []).length} bình luận.` })
+  return { ok: true, platform, postTitle: res?.postTitle || '', comments: res?.comments || [] }
+}
+
+async function runScrapeChannelProfiles(options = {}) {
+  const urls = (Array.isArray(options.channelUrls) ? options.channelUrls : []).map((u) => String(u || '').trim()).filter(Boolean).slice(0, 15)
+  if (!urls.length) return { ok: false, error: 'CHANNEL_URLS_REQUIRED', channels: [] }
+
+  const results = []
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i]
+    const isFb = /facebook\.com/i.test(url)
+    const platform = isFb ? 'facebook' : 'tiktok'
+    const scripts = isFb ? ['vision-engine.js', 'content-media.js', 'content-facebook.js'] : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
+    pushLog({ platform, step: 'scan_channel', level: 'info', message: `🕵️ Đang soi kênh ${i + 1}/${urls.length}: ${url.slice(0, 55)}...` })
+    try {
+      const tab = await openOrReuseScraperTab(isFb ? 'fbFeed' : 'ttViral', url, 3000)
+      const res = await sendTabMessageWithRetry(tab.id, { type: isFb ? 'FB_SCRAPE_CHANNEL' : 'TT_SCRAPE_CHANNEL', options: { channelUrl: url } }, scripts)
+      if (res?.channel) results.push(res.channel)
+    } catch (_) {}
+  }
+  pushLog({ platform: 'system', step: 'done', level: 'success', message: `✅ Đã quét xong ${results.length}/${urls.length} kênh/trang cá nhân.` })
+  return { ok: true, channels: results }
+}
+
+async function runSurfAndCollect(options = {}) {
+  const platform = String(options.platform || 'tiktok').toLowerCase()
+  const durationMinutes = Math.max(1, Math.min(30, Number(options.durationMinutes) || 2))
+  const targetTopic = String(options.topic || '').trim()
+  const isFb = platform === 'facebook'
+  const scripts = isFb ? ['vision-engine.js', 'content-media.js', 'content-facebook.js'] : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
+  const startUrl = isFb
+    ? (options.fbMode === 'reels' ? 'https://www.facebook.com/reel/' : 'https://www.facebook.com/')
+    : 'https://www.tiktok.com/explore'
+
+  pushLog({ platform, step: 'surf', level: 'info', message: `🧭 Đang lướt ${platform.toUpperCase()} trong ${durationMinutes} phút để lọc bài đứng top...` })
+  const tab = await openOrReuseScraperTab(isFb ? 'fbFeed' : 'ttViral', startUrl, 2800)
+  const res = await sendTabMessageWithRetry(
+    tab.id,
+    {
+      type: isFb ? 'FB_SCRAPE_VIRAL' : 'TIKTOK_SCRAPE_VIRAL',
+      options: {
+        targetCount: 40,
+        minLikes: isFb ? 500 : 10000,
+        maxRoundsOnPage: Math.min(90, durationMinutes * 18),
+        idleTimeoutMs: durationMinutes * 60 * 1000,
+        hardDurationMs: durationMinutes * 60 * 1000,
+        topicLabel: targetTopic,
+        sourceKind: options.fbMode === 'reels' ? 'reels' : 'feed',
+        excludeUrls: []
+      }
+    },
+    scripts
+  )
+  pushLog({ platform, step: 'done', level: 'success', message: `✅ Lướt xong ${durationMinutes} phút — thu thập ${(res?.posts || []).length} bài.` })
+  return { ok: true, platform, durationMinutes, posts: res?.posts || [] }
+}
+
+
 
 async function scrapeFacebookGroupsJob(options = {}) {
   if (activeJobs.has('scrape_groups')) return { ok: false, error: 'GROUP_SCRAPE_ALREADY_RUNNING', groups: [] }
@@ -1003,6 +1089,10 @@ async function dispatchCommand(message, sender = {}) {
     }
     case 'OPEN_SINGLE_TAB':
       return await openUrlInSingleViewerTab(message.url)
+    case 'AUTO_WATCH_TASK': return await runAutoWatchTask(message)
+    case 'SCRAPE_POST_COMMENTS': return await runScrapePostComments(message)
+    case 'SCRAPE_CHANNEL_PROFILES': return await runScrapeChannelProfiles(message)
+    case 'SURF_AND_COLLECT': return await runSurfAndCollect(message)
     case 'PING': {
       const [vision, pending] = await Promise.all([getVisionConfig(), getPendingVerifications()])
       return { ok: true, installed: true, version: getExtensionVersion(), visionEnabled: true, pacingMode: vision.pacingMode, pendingVerificationsCount: pending.length }

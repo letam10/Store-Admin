@@ -50,6 +50,18 @@
         .catch((err) => sendResponse({ ok: false, error: err.message || String(err), groups: [] }))
       return true
     }
+    if (message.type === 'FB_WATCH_ITEM') {
+      watchFacebookItem(message.options || {}).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e.message }))
+      return true
+    }
+    if (message.type === 'FB_SCRAPE_COMMENTS') {
+      scrapeFacebookPostComments(message.options || {}).then(sendResponse).catch((e) => sendResponse({ ok: false, comments: [] }))
+      return true
+    }
+    if (message.type === 'FB_SCRAPE_CHANNEL') {
+      scrapeFacebookChannelInfo(message.options || {}).then(sendResponse).catch((e) => sendResponse({ ok: false }))
+      return true
+    }
     return false
   }
 
@@ -800,61 +812,79 @@
   // CÀO BÀI VIRAL FACEBOOK: TÁCH RÕ TRANG CHỦ (FEED) VÀ THƯỚC PHIM (REELS)
   // =========================================================================
 
+  // Đọc chuẩn thanh dưới bài viết Facebook 2026: [👍 13,5K] [💬 57] [↗ 198]
   async function extractFeedPostMetrics2026(article) {
     let likes = 0, comments = 0, shares = 0
+
+    // 1. Đọc từ aria-label chuẩn (Thích: 13,5K / 13.500 người...)
     for (const el of article.querySelectorAll('[aria-label^="Thích:"], [aria-label^="Like:"], [aria-label*="cảm xúc"], [aria-label*="reaction"]')) {
       const aria = V().normalizeText(el.getAttribute('aria-label') || '')
       if (/lượt xem|views?/i.test(aria)) continue
       likes = Math.max(likes, V().parseHumanCount(aria), V().parseHumanCount(el.innerText || el.textContent))
     }
 
-    for (const btn of article.querySelectorAll('[role="button"], button')) {
-      const aria = V().normalizeText(btn.getAttribute('aria-label') || '')
-      const txt = V().normalizeText(btn.innerText || btn.textContent || '')
-      const siblingTxt = V().normalizeText(btn.nextElementSibling?.innerText || '')
-      const parentTxt = V().normalizeText(btn.parentElement?.innerText || '')
+    // 2. Đọc trực tiếp thanh hành động dưới bài (Ảnh 1 & 2: 3 số đứng ngang hàng ở nửa dưới article!)
+    const aRect = article.getBoundingClientRect()
+    const bottomNumbers = []
+    for (const el of article.querySelectorAll('[role="button"], button, span')) {
+      const r = el.getBoundingClientRect()
+      if (r.width === 0 || r.height === 0) continue
+      if (r.top < aRect.top + aRect.height * 0.55) continue
+      const aria = V().normalizeText(el.getAttribute('aria-label') || '')
+      const txt = V().normalizeText(el.innerText || el.textContent || '')
 
       if (/^(thích|like|bỏ thích|unlike|bày tỏ cảm xúc|react)$/i.test(aria) || /tất cả cảm xúc|người đã thích|thích:|like:|reactions?/i.test(aria)) {
-        for (const c of [aria, txt, siblingTxt, parentTxt.length <= 24 ? parentTxt : '']) {
-          if (!/lượt xem|views?/i.test(c)) likes = Math.max(likes, V().parseHumanCount(c))
-        }
+        const near = V().normalizeText(`${aria} ${txt} ${el.nextElementSibling?.innerText || ''} ${el.parentElement?.innerText?.slice(0, 28) || ''}`)
+        if (!/lượt xem|views?/i.test(near)) likes = Math.max(likes, V().parseHumanCount(near))
         continue
       }
       if (/bình luận|viết bình luận|leave a comment|comment/i.test(aria)) {
-        comments = Math.max(comments, V().parseHumanCount(txt || siblingTxt || aria))
+        const near = V().normalizeText(`${txt} ${el.nextElementSibling?.innerText || ''} ${aria}`)
+        comments = Math.max(comments, V().parseHumanCount(near))
         continue
       }
       if (/chia sẻ|share|gửi/i.test(aria)) {
-        shares = Math.max(shares, V().parseHumanCount(txt || siblingTxt || aria))
+        const near = V().normalizeText(`${txt} ${el.nextElementSibling?.innerText || ''} ${aria}`)
+        shares = Math.max(shares, V().parseHumanCount(near))
         continue
       }
-      if (/^\d+(?:[.,]\d+)?\s*(k|n|nghìn|m|tr|triệu)$/i.test(txt)) {
-        const aRect = article.getBoundingClientRect()
-        const bRect = btn.getBoundingClientRect()
-        if (bRect.top > aRect.top + aRect.height * 0.45 && bRect.left < aRect.left + aRect.width * 0.42) {
-          likes = Math.max(likes, V().parseHumanCount(txt))
+      if (/^\d+(?:[.,]\d+)?\s*(k|n|nghìn|m|tr|triệu)?$/i.test(txt) && !el.children.length) {
+        const val = V().parseHumanCount(txt)
+        if (val > 0 && r.left < aRect.left + aRect.width * 0.72) {
+          bottomNumbers.push({ val, x: r.left })
         }
       }
     }
 
-    if (likes === 0) {
-      const reactCluster = article.querySelector('[role="toolbar"] [role="button"], [aria-label*="cảm xúc"], [aria-label*="reaction"]')
-      if (reactCluster) {
-        try {
-          reactCluster.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))
-          reactCluster.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
-          await V().sleep(200)
-          const tooltipText = Array.from(document.querySelectorAll('[role="tooltip"]'))
-            .map((t) => V().normalizeText(t.innerText || t.textContent)).join(' ')
-          if (tooltipText) likes = Math.max(likes, V().parseHumanCount(tooltipText))
-        } catch (_) {}
+    // Nếu nút không gắn aria-label số -> 3 số trái-sang-phải ở thanh dưới chính là [Like, Comment, Share]!
+    if (bottomNumbers.length > 0) {
+      bottomNumbers.sort((a, b) => a.x - b.x)
+      const uniqueByX = []
+      for (const n of bottomNumbers) {
+        if (!uniqueByX.length || Math.abs(n.x - uniqueByX[uniqueByX.length - 1].x) > 18) uniqueByX.push(n)
       }
+      if (likes === 0 && uniqueByX[0]) likes = uniqueByX[0].val
+      if (comments === 0 && uniqueByX[1]) comments = uniqueByX[1].val
+      if (shares === 0 && uniqueByX[2]) shares = uniqueByX[2].val
     }
 
-    const fullText = V().normalizeText(article.innerText || '')
-    const allReact = fullText.match(/(?:tất cả cảm xúc|all reactions)\s*:?\s*(\d+(?:[.,]\d+)?\s*(?:k|n|nghìn|m|tr|triệu)?)/i)
-    if (allReact) likes = Math.max(likes, V().parseHumanCount(allReact[1]))
     return { likes, comments, shares }
+  }
+
+  function extractArticleMediaAndAuthor(article) {
+    const authorLink = article.querySelector('h2 a[href], h3 a[href], h4 a[href], strong a[href]')
+    const authorName = V().normalizeText(authorLink?.innerText || '')
+    const authorUrl = authorLink?.href ? cleanFacebookUrl(authorLink.href) : ''
+    let thumbnailUrl = ''
+    const videoEl = article.querySelector('video[poster]')
+    if (videoEl?.getAttribute('poster')) thumbnailUrl = videoEl.getAttribute('poster')
+    if (!thumbnailUrl) {
+      const imgs = Array.from(article.querySelectorAll('img[src]'))
+        .filter((img) => img.naturalWidth >= 100 && img.naturalHeight >= 100 && !/emoji|static\.xx/i.test(img.src))
+        .sort((a, b) => (b.naturalWidth * b.naturalHeight) - (a.naturalWidth * a.naturalHeight))
+      thumbnailUrl = imgs[0]?.src || article.querySelector('svg image')?.getAttribute('xlink:href') || ''
+    }
+    return { authorName, authorUrl, thumbnailUrl }
   }
 
   function extractActiveReelPost2026() {
@@ -891,7 +921,21 @@
       .filter((t) => t.length >= 6 && t.length <= 260 && !/^(theo dõi|đang theo dõi|follow|following|âm thanh gốc|xem thêm|see more)$/i.test(t))
 
     const bestCaption = bottomTexts.sort((a, b) => b.length - a.length)[0] || ''
-    return { postUrl, likes, comments, shares, caption: bestCaption || `Thước phim Facebook #${extractFacebookPostId(postUrl) || Date.now()}` }
+    if (likes === 0) {
+      const rightNumbers = Array.from(document.querySelectorAll('span, div'))
+        .filter((el) => {
+          if (!V().isReallyVisible(el)) return false
+          const r = el.getBoundingClientRect()
+          return r.left > window.innerWidth * 0.88 && /^\d+(?:[.,]\d+)?\s*(?:k|n|nghìn|m|tr|triệu)?$/i.test(V().normalizeText(el.innerText || ''))
+        })
+        .map((el) => ({ val: V().parseHumanCount(el.innerText), top: el.getBoundingClientRect().top }))
+        .sort((a, b) => a.top - b.top)
+      if (rightNumbers[0]) likes = rightNumbers[0].val
+      if (rightNumbers[1]) comments = rightNumbers[1].val
+      if (rightNumbers[2]) shares = rightNumbers[2].val
+    }
+    const videoPoster = document.querySelector('video[poster]')?.getAttribute('poster') || document.querySelector('div[role="main"] img')?.src || ''
+    return { postUrl, likes, comments, shares, caption: bestCaption || `Thước phim Facebook #${extractFacebookPostId(postUrl) || Date.now()}`, thumbnailUrl: videoPoster }
   }
 
   async function advanceToNextFacebookReel(prevUrl) {
@@ -954,6 +998,7 @@
               viralityScore: Math.min(99, 86 + Math.min(13, Math.floor(Math.log10(reel.likes) * 3))),
               likesCount: reel.likes, sharesCount: reel.shares, commentsCount: reel.comments,
               trendingTopic: `Thước phim (Reels) • ${(reel.likes / 1000).toFixed(1)}K+ cảm xúc`,
+              thumbnailUrl: reel.thumbnailUrl || '',
               createdAt: new Date().toISOString()
             })
             V().reportStep('facebook', 'scrape_viral', `FB Thước phim: ${totalAlreadyFound + collected.length} bài (${reel.likes.toLocaleString('vi-VN')})`)
@@ -994,7 +1039,10 @@
           const author = V().normalizeText(article.querySelector('h2 a, h3 a, h4 a, strong a')?.innerText || '')
           const isVideoOrReel = Boolean(article.querySelector('video')) || /\/(reel|videos|watch)\//i.test(postUrl)
           const actualKindTag = isVideoOrReel ? 'Thước phim (Reels)' : 'Trang chủ'
-          if (sourceKind === 'feed' && /\/reel\//i.test(postUrl)) continue
+          const mediaAndAuthor = extractArticleMediaAndAuthor(article)
+          const actualAuthorName = mediaAndAuthor.authorName || author
+          const actualAuthorUrl = mediaAndAuthor.authorUrl
+          const actualThumbnailUrl = mediaAndAuthor.thumbnailUrl
 
           const summaryText = rawText || `[${actualKindTag}] ${author || 'Bài Viral Facebook'} đạt ${metrics.likes.toLocaleString('vi-VN')} cảm xúc.`
           const fp = `${V().stripToMatchKey(summaryText).slice(0, 44)}|${metrics.likes}`
@@ -1005,14 +1053,17 @@
           lastFoundAt = Date.now()
           collected.push({
             id: `fb-${sourceKind}-${Date.now()}-${collected.length}`,
-            title: V().truncateClean(rawText || `[${actualKindTag}] ${author || 'Bài Viral Facebook'}`, 105),
+            title: V().truncateClean(rawText || `[${actualKindTag}] ${actualAuthorName || 'Bài Viral Facebook'}`, 105),
             platform: 'facebook',
             category: topicLabel || actualKindTag,
             postUrl,
-            summary: V().truncateClean(`${author ? `[${author}] ` : ''}${summaryText}`, 250),
+            summary: V().truncateClean(`${actualAuthorName ? `[${actualAuthorName}] ` : ''}${summaryText}`, 250),
             viralityScore: Math.min(99, 85 + Math.min(14, Math.floor(Math.log10(metrics.likes) * 3))),
             likesCount: metrics.likes, sharesCount: metrics.shares, commentsCount: metrics.comments,
             trendingTopic: `${actualKindTag} • ${(metrics.likes / 1000).toFixed(1)}K+ cảm xúc`,
+            thumbnailUrl: actualThumbnailUrl || '',
+            authorName: actualAuthorName || '',
+            authorUrl: actualAuthorUrl || '',
             createdAt: new Date().toISOString()
           })
           V().reportStep('facebook', 'scrape_viral', `FB ${sourceTag}: ${totalAlreadyFound + collected.length} bài (${metrics.likes.toLocaleString('vi-VN')})`)
@@ -1101,4 +1152,71 @@
     V().clearHud(2500)
     return { ok: true, groups }
   }
+  async function watchFacebookItem(options = {}) {
+    const dwellMs = Math.max(3000, (Number(options.dwellSeconds) || 8) * 1000)
+    await V().sleep(dwellMs)
+    if (/\/reel\//i.test(location.pathname)) {
+      await advanceToNextFacebookReel(cleanFacebookUrl(location.href))
+    } else {
+      await V().scrollPageDownForFeed(900)
+    }
+    return { ok: true }
+  }
+
+  async function scrapeFacebookPostComments(options = {}) {
+    const maxComments = Number(options.maxComments) || 40
+    const comments = []
+    const seen = new Set()
+    const postTitle = V().truncateClean(document.querySelector('h1, div[data-ad-preview="message"]')?.innerText || document.title, 120)
+
+    for (let round = 0; round < 10 && comments.length < maxComments; round++) {
+      for (const node of document.querySelectorAll('[role="article"][aria-label*="Bình luận"], [role="article"][aria-label*="Comment"], ul li div[dir="auto"]')) {
+        if (comments.length >= maxComments) break
+        const card = node.closest('[role="article"]') || node.parentElement
+        if (!card) continue
+        const textEl = card.querySelector('div[dir="auto"][style], span[dir="auto"]') || node
+        const text = V().normalizeText(textEl.innerText || textEl.textContent)
+        if (!text || text.length < 2 || text.length > 400 || seen.has(text)) continue
+        seen.add(text)
+        const author = V().normalizeText(card.querySelector('a[role="link"] span, strong')?.innerText || 'Người dùng FB')
+        const likeMatch = V().normalizeText(card.innerText || '').match(/\b(\d+(?:[.,]\d+)?\s*(?:k|m|tr)?)\b/i)
+        const likes = likeMatch ? V().parseHumanCount(likeMatch[1]) : 0
+        comments.push({ author, text, likes })
+      }
+      const moreBtn = Array.from(document.querySelectorAll('[role="button"], span')).find((b) =>
+        V().isReallyVisible(b) && /xem thêm bình luận|view more comments/i.test(V().normalizeText(b.innerText))
+      )
+      if (moreBtn) await V().humanClick(moreBtn)
+      else await V().scrollPageDownForFeed(700)
+      await V().sleep(1200)
+    }
+    return { ok: true, postTitle, comments }
+  }
+
+  async function scrapeFacebookChannelInfo(options = {}) {
+    const channelName = V().normalizeText(document.querySelector('h1')?.innerText || document.title)
+    const bio = V().normalizeText(document.body?.innerText || '').slice(0, 600)
+    const followersMatch = bio.match(/(\d+(?:[.,]\d+)?\s*(?:k|n|nghìn|m|tr|triệu)?)\s*(?:người theo dõi|followers?)/i)
+    const followersCount = followersMatch ? V().parseHumanCount(followersMatch[1]) : 0
+    const sampleTitles = Array.from(document.querySelectorAll('div[role="article"] div[dir="auto"]'))
+      .map((el) => V().normalizeText(el.innerText))
+      .filter((t) => t.length >= 12 && t.length <= 160)
+      .slice(0, 10)
+    const avatarUrl = document.querySelector('svg image')?.getAttribute('xlink:href') || ''
+    return {
+      ok: true,
+      channel: {
+        platform: 'facebook',
+        channelUrl: options.channelUrl || location.href,
+        channelName,
+        handle: location.pathname.replace(/^\/+|\/+$/g, ''),
+        bio: bio.slice(0, 260),
+        avatarUrl,
+        followersCount,
+        totalLikesCount: 0,
+        sampleTitles
+      }
+    }
+  }
+
 })()

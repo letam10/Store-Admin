@@ -1,8 +1,6 @@
 /*
   FILE NOTE
-  - Mục đích: Khai báo các mô hình dữ liệu (Models & DTOs) cho Tự động hóa đăng bài MXH đa tài khoản, mở rộng từ khóa AI và phân loại bài Viral.
-  - Liên kết trực tiếp: Store-Admin/server-dotnet/Services/SocialCopywriterService.cs, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs
-  - Vùng ảnh hưởng khi sửa: Toàn bộ API đăng bài, mở rộng từ khóa và phân loại bài viral.
+  - Mục đích: Toàn bộ Models & DTOs cho Tự động hóa MXH v3.5 (Viral có ảnh/tác giả, Vision AI tự học, Ý tưởng bán hàng, Nhận diện ảnh sản phẩm, Phân tích bình luận, Lọc kênh theo chủ đề, Lướt feed theo thời gian).
 */
 
 namespace StoreApi.Models;
@@ -41,7 +39,7 @@ public sealed class SocialAutoPost
     public string Title { get; set; } = "";
     public string Content { get; set; } = "";
     public string Hashtags { get; set; } = "";
-    public string Status { get; set; } = "internal_draft"; // internal_draft | ready_for_publish | pending_review | published | pending_approval | unverified | failed
+    public string Status { get; set; } = "internal_draft";
     public string? ErrorMessage { get; set; }
     public string? PostUrl { get; set; }
     public string? TargetGroup { get; set; }
@@ -82,6 +80,9 @@ public sealed class SocialViralPost
     public int SharesCount { get; set; }
     public int CommentsCount { get; set; }
     public string TrendingTopic { get; set; } = "";
+    public string? ThumbnailUrl { get; set; }
+    public string? AuthorName { get; set; }
+    public string? AuthorUrl { get; set; }
     public string CreatedAt { get; set; } = "";
 }
 
@@ -111,6 +112,7 @@ public sealed class GeneratePostRequest
     public string? Platform { get; set; }
     public string? ToneStyle { get; set; }
     public string? CustomTopic { get; set; }
+    public string? SelectionMode { get; set; } // random | smart | custom
 }
 
 public sealed class CreateCustomPostRequest
@@ -139,29 +141,9 @@ public sealed class AddGroupRequest
     public string? Notes { get; set; }
 }
 
-public sealed class ToggleGroupRequest
-{
-    public bool IsAutoShare { get; set; }
-}
-
-public sealed class ImportRealGroupsRequest
-{
-    public List<SocialGroupTarget>? Groups { get; set; }
-}
-
-public sealed class AddViralPostRequest
-{
-    public string Title { get; set; } = "";
-    public string Platform { get; set; } = "facebook";
-    public string Category { get; set; } = "Đời sống & Tiện ích";
-    public string PostUrl { get; set; } = "";
-    public string Summary { get; set; } = "";
-    public int ViralityScore { get; set; } = 96;
-    public int LikesCount { get; set; }
-    public int SharesCount { get; set; }
-    public int CommentsCount { get; set; }
-    public string TrendingTopic { get; set; } = "Xu hướng thực tế";
-}
+public sealed class ToggleGroupRequest { public bool IsAutoShare { get; set; } }
+public sealed class ImportRealGroupsRequest { public List<SocialGroupTarget>? Groups { get; set; } }
+public sealed class ImportRealViralRequest { public List<SocialViralPost>? Posts { get; set; } }
 
 public sealed class PublishRealPostRequest
 {
@@ -190,11 +172,6 @@ public sealed class PublishFailureRequest
     public string? RealPostId { get; set; }
 }
 
-public sealed class ImportRealViralRequest
-{
-    public List<SocialViralPost>? Posts { get; set; }
-}
-
 public sealed class ExpandViralTopicRequest
 {
     public string? TopicKey { get; set; }
@@ -207,6 +184,7 @@ public sealed class ClassifyViralPostsRequest
     public string? RequestedTopicLabel { get; set; }
     public List<SocialViralPost>? Posts { get; set; }
 }
+
 public sealed class ExtensionVisionElement
 {
     public int Id { get; set; }
@@ -218,6 +196,7 @@ public sealed class ExtensionVisionElement
     public string DataE2e { get; set; } = "";
     public string StableSelector { get; set; } = "";
     public bool InDialog { get; set; }
+    public bool InPortal { get; set; }
     public bool Disabled { get; set; }
     public string PrimaryColor { get; set; } = "neutral";
     public int X { get; set; }
@@ -243,4 +222,59 @@ public sealed class ExtensionVisionAssistRequest
 public sealed class ExtensionKnowledgeSaveRequest
 {
     public Dictionary<string, object?>? Knowledge { get; set; }
+}
+
+public sealed class ViralSalesIdeasRequest
+{
+    public string? TopicFilter { get; set; }
+    public int Count { get; set; } = 4;
+}
+
+public sealed class ProductFromImageRequest
+{
+    public string? ImageBase64 { get; set; }
+    public string? Hint { get; set; }
+    public long? SuggestedPrice { get; set; }
+}
+
+public sealed class ScrapedCommentItem
+{
+    public string Author { get; set; } = "";
+    public string Text { get; set; } = "";
+    public int Likes { get; set; }
+}
+
+public sealed class AnalyzeCommentsRequest
+{
+    public string? Platform { get; set; }
+    public string? PostUrl { get; set; }
+    public string? PostTitle { get; set; }
+    public List<ScrapedCommentItem>? Comments { get; set; }
+}
+
+public sealed class ScrapedChannelProfile
+{
+    public string Platform { get; set; } = "tiktok";
+    public string ChannelUrl { get; set; } = "";
+    public string ChannelName { get; set; } = "";
+    public string Handle { get; set; } = "";
+    public string Bio { get; set; } = "";
+    public string AvatarUrl { get; set; } = "";
+    public long FollowersCount { get; set; }
+    public long TotalLikesCount { get; set; }
+    public List<string>? SampleTitles { get; set; }
+}
+
+public sealed class ClassifyChannelsRequest
+{
+    public string? TargetTopic { get; set; }
+    public List<ScrapedChannelProfile>? Channels { get; set; }
+}
+
+public sealed class AnalyzeSurfFeedRequest
+{
+    public string? Platform { get; set; }
+    public string? TargetTopic { get; set; }
+    public int DurationMinutes { get; set; }
+    public List<SocialViralPost>? Posts { get; set; }
 }

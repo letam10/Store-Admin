@@ -49,6 +49,18 @@
         .catch((err) => sendResponse({ ok: false, error: err.message || String(err), posts: [] }))
       return true
     }
+    if (message.type === 'TT_WATCH_ITEM') {
+      watchTikTokItem(message.options || {}).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e.message }))
+      return true
+    }
+    if (message.type === 'TT_SCRAPE_COMMENTS') {
+      scrapeTikTokComments(message.options || {}).then(sendResponse).catch((e) => sendResponse({ ok: false, comments: [] }))
+      return true
+    }
+    if (message.type === 'TT_SCRAPE_CHANNEL') {
+      scrapeTikTokChannelProfile(message.options || {}).then(sendResponse).catch((e) => sendResponse({ ok: false }))
+      return true
+    }
     return false
   }
 
@@ -273,16 +285,20 @@
   function findPrivacyControl() {
     const label = V().findLabelElement(PRIVACY_LABEL_RE, { minLeft: 180, maxLength: 90 })
     if (label) {
-      const nearby = V().findControlNearLabel(label, 'button, [role="combobox"], [role="button"], select, div[class*="select"], div[class*="Select"]', { direction: 'below', maxVertical: 110, maxHorizontal: 280 })
-      if (nearby) return nearby
+      // Ưu tiên tìm đúng <button> hoặc [role="combobox"] trước tiên!
+      const exactBtn = V().findControlNearLabel(label, 'button, [role="combobox"], select', { direction: 'below', maxVertical: 110, maxHorizontal: 280 })
+      if (exactBtn) return exactBtn
+      const nearby = V().findControlNearLabel(label, '[role="button"], div[class*="Select"], div[class*="select"]', { direction: 'below', maxVertical: 110, maxHorizontal: 280 })
+      if (nearby) return nearby.querySelector('button, [role="combobox"], select') || nearby
     }
-    return V().queryAllDeep(document, 'select, button, [role="combobox"], [role="button"], div[class*="select"], div[class*="Select"]').find((el) => {
+    const found = V().queryAllDeep(document, 'select, button, [role="combobox"], [role="button"], div[class*="Select"], div[class*="select"]').find((el) => {
       if (!V().isReallyVisible(el, { minWidth: 80, minHeight: 24 })) return false
       const r = el.getBoundingClientRect()
       if (r.left < 180 || r.top < 140) return false
       const txt = V().normalizeText(`${el.innerText || el.textContent || ''} ${el.getAttribute('aria-label') || ''}`)
       return txt.length <= 45 && /^(mọi người|công khai|bạn bè|chỉ mình bạn|chỉ mình tôi|chỉ bạn|everyone|friends|only you|only me|private)$/i.test(txt)
-    }) || null
+    })
+    return found ? (found.querySelector?.('button, [role="combobox"], select') || found) : null
   }
 
   function parsePrivacyValue(text) {
@@ -591,6 +607,15 @@
       for (let attempt = 1; attempt <= 3; attempt++) {
         const curControl = findPrivacyControl() || control
         await V().humanClick(curControl, { skipScroll: true })
+        if (!findBestDropdownOption()) {
+          try {
+            curControl.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'mouse', isPrimary: true, bubbles: true }))
+            curControl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+            curControl.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'mouse', isPrimary: true, bubbles: true }))
+            curControl.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+            curControl.click()
+          } catch (_) {}
+        }
         await V().sleep(520)
 
         let opt = (attempt === 1 && learnedOptRule) ? V().findByLearnedRule(learnedOptRule) : null
@@ -601,6 +626,13 @@
         }
 
         if (opt) {
+          try {
+            opt.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'mouse', isPrimary: true, bubbles: true }))
+            opt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+            opt.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'mouse', isPrimary: true, bubbles: true }))
+            opt.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+            opt.click()
+          } catch (_) {}
           await V().humanClick(opt, { skipScroll: true })
           await V().sleep(600)
           if (readCurrent() === requestedPrivacy) return { ok: true, actual: requestedPrivacy }
@@ -910,6 +942,11 @@
           const author = V().normalizeText(card.querySelector('[data-e2e="explore-card-user-unique-id"], [data-e2e="search-card-user-unique-id"], [data-e2e="video-author-uniqueid"]')?.textContent || '') || (authorMatch ? authorMatch[1] : '@creator')
           const bestCaption = (imgAlt.length > descTxt.length && !/avatar/i.test(imgAlt)) ? imgAlt : (descTxt || `Video TikTok Viral của ${author}`)
 
+          const cardImgs = Array.from(card.querySelectorAll('img[src]')).filter((i) => !/avatar/i.test(i.alt || '') && i.naturalWidth >= 80)
+          const thumbnailUrl = cardImgs[0]?.src || card.querySelector('img[src]')?.src || ''
+          const authorHandleClean = author.startsWith('@') ? author : `@${author.replace(/^@+/, '')}`
+          const authorUrl = `https://www.tiktok.com/${authorHandleClean}`
+
           seenUrls.add(urlKey)
           lastFoundAt = Date.now()
           collected.push({
@@ -918,10 +955,13 @@
             platform: 'tiktok',
             category: topicLabel || (postUrl.includes('/photo/') ? 'Ảnh TikTok' : 'Video TikTok'),
             postUrl,
-            summary: V().truncateClean(`[${author}] ${bestCaption} • ${metrics.likes.toLocaleString('vi-VN')} tim`, 250),
+            summary: V().truncateClean(`[${authorHandleClean}] ${bestCaption} • ${metrics.likes.toLocaleString('vi-VN')} tim`, 250),
             viralityScore: Math.min(99, 90 + Math.min(9, Math.floor(Math.log10(metrics.likes) * 1.5))),
             likesCount: metrics.likes, sharesCount: metrics.shares, commentsCount: metrics.comments,
             trendingTopic: `${postUrl.includes('/photo/') ? 'Ảnh TikTok' : 'Video TikTok'} • ${(metrics.likes / 1000).toFixed(0)}K+ tim`,
+            thumbnailUrl,
+            authorName: authorHandleClean,
+            authorUrl,
             createdAt: new Date().toISOString()
           })
           V().reportStep('tiktok', 'scrape_viral', `TikTok Viral: ${totalAlreadyFound + collected.length} bài (${metrics.likes.toLocaleString('vi-VN')} tim)`)
@@ -970,4 +1010,78 @@
     V().clearHud(2500)
     return { ok: true, posts: collected, timedOut: false, lastFoundAt }
   }
+  async function watchTikTokItem(options = {}) {
+    const dwellMs = Math.max(3000, (Number(options.dwellSeconds) || 8) * 1000)
+    await V().sleep(dwellMs)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, bubbles: true }))
+    await V().scrollPageDownForFeed(850)
+    return { ok: true }
+  }
+
+  // Đọc bình luận TikTok chuẩn DOM 2026 (như Ảnh 8: tên, nội dung, số tim 37.6K!)
+  async function scrapeTikTokComments(options = {}) {
+    const maxComments = Number(options.maxComments) || 40
+    const comments = []
+    const seen = new Set()
+    const postTitle = V().truncateClean(document.querySelector('[data-e2e="browse-video-desc"], [data-e2e="video-desc"], h1')?.innerText || document.title, 140)
+
+    const commentTab = V().queryAllDeep(document, 'button, [role="tab"], div').find((el) =>
+      V().isReallyVisible(el) && /^bình luận|comments/i.test(V().normalizeText(el.innerText))
+    )
+    if (commentTab) { await V().humanClick(commentTab, { skipScroll: true }); await V().sleep(700) }
+
+    for (let round = 0; round < 10 && comments.length < maxComments; round++) {
+      const items = document.querySelectorAll('[data-e2e="comment-level-1"], [class*="DivCommentItemContainer"], [class*="CommentObjectWrapper"]')
+      for (const item of items) {
+        if (comments.length >= maxComments) break
+        const card = item.closest('[class*="DivCommentItemContainer"], [class*="CommentItem"]') || item.parentElement
+        const text = V().normalizeText(item.innerText || item.textContent)
+        if (!text || text.length < 2 || seen.has(text)) continue
+        seen.add(text)
+        const author = V().normalizeText(card?.querySelector('[data-e2e="comment-username-1"], a[href*="/@"]')?.innerText || '@user')
+        const likeEl = card?.querySelector('[data-e2e="comment-like-count"], [class*="SpanCount"]')
+        const likes = likeEl ? V().parseHumanCount(likeEl.innerText || likeEl.textContent) : 0
+        comments.push({ author, text, likes })
+      }
+      const listContainer = document.querySelector('[class*="DivCommentListContainer"], [data-e2e="search-comment-container"]')
+      if (listContainer) {
+        listContainer.scrollTop += 700
+        listContainer.dispatchEvent(new Event('scroll', { bubbles: true }))
+      } else {
+        await V().scrollPageDownForFeed(700)
+      }
+      await V().sleep(1100)
+    }
+    return { ok: true, postTitle, comments }
+  }
+
+  // Quét hồ sơ kênh TikTok chuẩn Ảnh 12 (tên, handle, bio, follower, tổng thích, 12 tiêu đề video gần nhất!)
+  async function scrapeTikTokChannelProfile(options = {}) {
+    await V().sleep(900)
+    const channelName = V().normalizeText(document.querySelector('[data-e2e="user-subtitle"], h2[data-e2e="user-subtitle"], h1')?.innerText || '')
+    const handle = V().normalizeText(document.querySelector('[data-e2e="user-title"], h1[data-e2e="user-title"]')?.innerText || detectCurrentTikTokHandle() || '')
+    const bio = V().normalizeText(document.querySelector('[data-e2e="user-bio"]')?.innerText || '')
+    const followersCount = V().parseHumanCount(document.querySelector('[data-e2e="followers-count"]')?.innerText || '0')
+    const totalLikesCount = V().parseHumanCount(document.querySelector('[data-e2e="likes-count"]')?.innerText || '0')
+    const avatarUrl = document.querySelector('[data-e2e="user-avatar"] img')?.src || ''
+    const sampleTitles = Array.from(document.querySelectorAll('[data-e2e="user-post-item"] img[alt], [data-e2e="user-post-item"] a[title]'))
+      .map((el) => V().normalizeText(el.getAttribute('alt') || el.getAttribute('title') || ''))
+      .filter((t) => t.length >= 4)
+      .slice(0, 12)
+    return {
+      ok: true,
+      channel: {
+        platform: 'tiktok',
+        channelUrl: options.channelUrl || location.href,
+        channelName: channelName || handle,
+        handle: handle.startsWith('@') ? handle : `@${handle}`,
+        bio,
+        avatarUrl,
+        followersCount,
+        totalLikesCount,
+        sampleTitles
+      }
+    }
+  }
+
 })()

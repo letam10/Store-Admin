@@ -1,15 +1,15 @@
 /*
   FILE NOTE
-  - Mục đích: Lõi nhận thức thị giác & mô phỏng hành vi người thật chạy ngầm 24/7 (OmniVision Engine v3.4.0).
+  - Mục đích: Lõi nhận thức thị giác & mô phỏng hành vi người thật chạy ngầm 24/7 (OmniVision Engine v3.5.0).
   - Liên kết trực tiếp: background.js, content-facebook.js, content-tiktok.js
   - Vùng ảnh hưởng khi sửa: Toàn bộ thao tác DOM, cuộn và click của Extension trên Facebook và TikTok.
 */
 
 ;(() => {
-  if (globalThis.__OMNICART_VISION_VERSION__ === '3.4.0' && globalThis.OmniVision) {
+  if (globalThis.__OMNICART_VISION_VERSION__ === '3.5.0' && globalThis.OmniVision) {
     return
   }
-  globalThis.__OMNICART_VISION_VERSION__ = '3.4.0'
+  globalThis.__OMNICART_VISION_VERSION__ = '3.5.0'
 
   const HUD_HOST_ID = 'omnicart-vision-hud-host'
 
@@ -823,13 +823,13 @@
     return parts.join(' ')
   }
 
-  function buildRichInteractiveMap(root = document, maxItems = 65) {
+  function buildRichInteractiveMap(root = document, maxItems = 140) {
     currentMarkLookup = new Map()
-    const selector = 'button,[role="button"],[role="tab"],[role="combobox"],[role="option"],[role="menuitem"],[role="radio"],[role="textbox"],[contenteditable="true"],input:not([type="hidden"]):not([type="file"]),textarea,select,a[href]'
-    const items = []
-    let id = 1
-    for (const el of queryAllDeep(root, selector)) {
-      if (id > maxItems) break
+    const selector = 'button,[role="button"],[role="tab"],[role="combobox"],[role="option"],[role="menuitem"],[role="radio"],[role="textbox"],[contenteditable="true"],input:not([type="hidden"]):not([type="file"]),textarea,select,a[href],div[class*="Select"],div[class*="Option"],div[class*="option"]'
+    const allNodes = queryAllDeep(root, selector)
+    const scoredNodes = []
+
+    for (const el of allNodes) {
       if (el.closest?.(`#${HUD_HOST_ID}`)) continue
       if (!isReallyVisible(el, { minWidth: 16, minHeight: 14 })) continue
       const rect = el.getBoundingClientRect()
@@ -837,27 +837,51 @@
       const ariaLabel = normalizeText(el.getAttribute('aria-label')).slice(0, 80)
       const dataE2e = el.getAttribute('data-e2e') || ''
       const tag = el.tagName.toLowerCase()
+      const role = el.getAttribute('role') || tag
       const isEditable = el.isContentEditable || tag === 'input' || tag === 'textarea'
       if (!text && !ariaLabel && !dataE2e && !isEditable) continue
-      const color = getElementColorInfo(el)
+
+      const inDialog = Boolean(el.closest('[role="dialog"], [aria-modal="true"]'))
+      const inPortal = Boolean(
+        el.closest('[role="listbox"], [role="menu"], [data-floating-ui-portal], [class*="Popover"], [class*="SelectList"], [class*="Dropdown"]') ||
+        ['option', 'menuitem', 'radio'].includes(role)
+      )
+      const inView = isInViewport(rect)
+      // Ưu tiên số 1: Portal/Dropdown đang mở -> Dialog -> Vùng đang hiển thị trên màn hình -> Phần tử có chữ quyền riêng tư/đăng bài
+      let priority = 0
+      if (inPortal) priority += 100
+      if (inDialog) priority += 70
+      if (inView) priority += 50
+      if (/mọi người|chỉ mình|bạn bè|công khai|đối tượng|quyền riêng tư|đăng|post|everyone|only|private/i.test(`${text} ${ariaLabel}`)) priority += 90
+      if (el.querySelectorAll('*').length > 10) priority -= 30
+
+      scoredNodes.push({ el, rect, text, ariaLabel, dataE2e, tag, role, inDialog, inPortal, priority })
+    }
+
+    scoredNodes.sort((a, b) => b.priority - a.priority)
+    const items = []
+    let id = 1
+    for (const n of scoredNodes.slice(0, maxItems)) {
+      const color = getElementColorInfo(n.el)
       const markId = id++
-      currentMarkLookup.set(markId, el)
+      currentMarkLookup.set(markId, n.el)
       items.push({
         id: markId,
-        tag,
-        role: el.getAttribute('role') || tag,
-        label: (ariaLabel || text).slice(0, 80),
-        text,
-        ariaLabel,
-        dataE2e,
-        stableSelector: buildStableSelector(el),
-        inDialog: Boolean(el.closest('[role="dialog"], [aria-modal="true"]')),
-        disabled: isElementDisabled(el),
+        tag: n.tag,
+        role: n.role,
+        label: (n.ariaLabel || n.text).slice(0, 80),
+        text: n.text,
+        ariaLabel: n.ariaLabel,
+        dataE2e: n.dataE2e,
+        stableSelector: buildStableSelector(n.el),
+        inDialog: n.inDialog,
+        inPortal: n.inPortal,
+        disabled: isElementDisabled(n.el),
         primaryColor: color.isRedPink ? 'red' : color.isBlue ? 'blue' : 'neutral',
-        x: Math.round(rect.left),
-        y: Math.round(rect.top),
-        w: Math.round(rect.width),
-        h: Math.round(rect.height)
+        x: Math.round(n.rect.left),
+        y: Math.round(n.rect.top),
+        w: Math.round(n.rect.width),
+        h: Math.round(n.rect.height)
       })
     }
     return items
@@ -966,7 +990,7 @@
   }
 
   globalThis.OmniVision = {
-    version: '3.4.0',
+    version: '3.5.0',
     sleep, humanDelay, humanMicroPause, humanReadPause, humanReviewPause, smoothScrollToTop,
     normalizeText, stripToMatchKey, formatPostText, truncateClean, formatHashtags, composeBodyAndHashtags, parseHumanCount,
     getDeepActiveElement, queryAllDeep, isReallyVisible, isElementDisabled, isInViewport,

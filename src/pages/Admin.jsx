@@ -18,6 +18,7 @@ import { listenAdminNotifications } from '../services/adminNotifications'
 import { installVietnameseValidation } from '../services/formValidation'
 import { normalizeSearch } from '../services/storefrontState'
 import { DEFAULT_THEME, THEME_MODES, normalizeTheme, themeVariables } from '../../shared/theme.js'
+import AiMarkdown from '../components/ui/AiMarkdown'
 import DropdownMenu from '../components/ui/DropdownMenu'
 import OperationalExportButton from '../components/ui/OperationalExportButton'
 import './Admin.css'
@@ -70,6 +71,32 @@ export default function Admin() {
   const [messages, setMessages] = useState([])
   const [conversationId, setConversationId] = useState('')
   const [draft, setDraft] = useState('')
+  const [copiedMsgId, setCopiedMsgId] = useState('')
+  const adminQuickPrompts = [
+    'Sản phẩm trong các đơn hàng gần nhất là gì?',
+    'Top sản phẩm được mua nhiều nhất?',
+    'Sản phẩm nào sắp hết tồn kho?',
+    'Tóm tắt doanh thu tháng này và hôm nay'
+  ]
+
+  function startNewAdminChat() {
+    gateRef.current.cancel()
+    if (session?.username) sessionStorage.removeItem(adminConversationKey(session.username))
+    setMessages([])
+    setConversationId('')
+    setCompactStatus('not_needed')
+    setBusy(false)
+    setActivity('')
+    chatInputRef.current?.focus()
+  }
+
+  async function copyChatReply(msg) {
+    try {
+      await navigator.clipboard.writeText(hideSourceDisclosure(msg.content))
+      setCopiedMsgId(msg.id)
+      setTimeout(() => setCopiedMsgId(''), 2000)
+    } catch (_) {}
+  }
   const [busy, setBusy] = useState(false)
   const [activity, setActivity] = useState('')
   const [compactStatus, setCompactStatus] = useState('not_needed')
@@ -516,20 +543,69 @@ export default function Admin() {
                   {report ? <dl className="admin-stats"><div><dt>Doanh thu gộp</dt><dd>{formatMoney(report.grossRevenue)}</dd></div><div><dt>Hoàn tiền đã trừ</dt><dd>{formatMoney(report.refunds)}</dd></div><div><dt>Doanh thu ròng</dt><dd>{formatMoney(report.netRevenue)}</dd></div><div><dt>Đơn được tính</dt><dd>{report.includedOrders}</dd></div></dl> : <p className="admin-muted">Chọn khoảng thời gian để lấy số liệu máy chủ.</p>}
                   {report && <p className="admin-source">Dữ liệu cửa hàng · {report.from} → {report.to} · dữ liệu: {{ real: 'thực tế', none: 'chưa có giao dịch' }[report.dataMode] || 'chưa xác định'}</p>}
                 </section>
-                <section className="admin-panel admin-chat"><div className="admin-panel__heading"><div><p className="admin-eyebrow">AI NHẬN XÉT</p><h2>Trò chuyện quản trị</h2></div><span>Suy luận: {thinkingEnabled ? thinkingLabel(thinkingMode) : 'Tắt'}</span></div>
-                  <div ref={logRef} className="admin-chat__log" role="log" aria-live="polite">
-                    {messages.length === 0 && <p className="admin-muted">Số liệu và nội dung nghiệp vụ được máy chủ kiểm soát; chưa có phân tích tự do đã xác minh.</p>}
-                    {messages.map((message) => <div key={message.id} className={'admin-chat__message admin-chat__message--' + message.role}>
-                      <small>{message.role === 'user' ? 'Quản trị' : 'AI cục bộ'}</small>
-                      <p>{hideSourceDisclosure(message.content) || (busy && message.role === 'assistant' ? '…' : '')}</p>
-                      {message.verified?.text && <p>{message.verified.text}</p>}
-                      {message.report && <p>Báo cáo: {message.report.from} → {message.report.to} · Doanh thu ròng: {formatMoney(message.report.netRevenue)}</p>}
-                      {['incomplete', 'error', 'stopped', 'pending'].includes(message.status) && <small>Chưa hoàn tất. {message.error}</small>}
-                      {['incomplete', 'error', 'stopped'].includes(message.status) && message.requestId && <button type="button" disabled={busy} onClick={(event) => sendMessage(event, message)}>Thử lại</button>}
-                    </div>)}
-                    {busy && <p className="admin-thinking">{activity || 'Đang phân tích'}</p>}
+                <section className="admin-panel admin-chat">
+                  <div className="admin-panel__heading">
+                    <div><p className="admin-eyebrow">AI NHẬN XÉT</p><h2>Trò chuyện quản trị</h2></div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <span>Suy luận: {thinkingEnabled ? thinkingLabel(thinkingMode) : 'Tắt'}</span>
+                      <button type="button" className="table-action" onClick={startNewAdminChat} disabled={busy}>+ Chat mới</button>
+                    </div>
                   </div>
-                  <form className="admin-chat__form" onSubmit={sendMessage}><textarea ref={chatInputRef} maxLength={2000} rows="3" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Ví dụ: Phân tích doanh thu tháng này…" aria-busy={busy} />{busy ? <button type="button" onClick={stopStream}>Dừng</button> : <button type="submit" disabled={!draft.trim()}>Gửi</button>}</form>
+                  <div className="admin-chat__quick-prompts">
+                    {adminQuickPrompts.map((promptText) => (
+                      <button
+                        key={promptText}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => { setDraft(promptText); chatInputRef.current?.focus() }}
+                      >
+                        ✦ {promptText}
+                      </button>
+                    ))}
+                  </div>
+                  <div ref={logRef} className="admin-chat__log" role="log" aria-live="polite">
+                    {messages.length === 0 && <p className="admin-muted">AI Cục Bộ kết nối trực tiếp SQL Server StoreDb. Bấm gợi ý phía trên hoặc nhập câu hỏi (Enter để gửi, Shift+Enter để xuống dòng).</p>}
+                    {messages.map((message) => (
+                      <div key={message.id} className={'admin-chat__message admin-chat__message--' + message.role}>
+                        <div className="admin-chat__meta-row">
+                          <small>{message.role === 'user' ? 'Quản trị' : 'AI cục bộ (qwen3.5:4b)'}</small>
+                          {message.role === 'assistant' && message.content && (
+                            <button type="button" className="admin-chat__copy-btn" onClick={() => copyChatReply(message)}>
+                              {copiedMsgId === message.id ? '✓ Đã chép' : '📋 Chép'}
+                            </button>
+                          )}
+                        </div>
+                        <div className="admin-chat__bubble">
+                          {message.role === 'assistant'
+                            ? <AiMarkdown text={hideSourceDisclosure(message.content) || (busy ? 'Đang suy nghĩ…' : '')} />
+                            : <p>{message.content}</p>}
+                        </div>
+                        {message.verified?.text && <p>{message.verified.text}</p>}
+                        {message.report && <p className="admin-chat__report-chip">📊 Báo cáo: {message.report.from} → {message.report.to} · Doanh thu ròng: <strong>{formatMoney(message.report.netRevenue)}</strong></p>}
+                        {['incomplete', 'error', 'stopped', 'pending'].includes(message.status) && <small>Chưa hoàn tất. {message.error}</small>}
+                        {['incomplete', 'error', 'stopped'].includes(message.status) && message.requestId && <button type="button" disabled={busy} onClick={(event) => sendMessage(event, message)}>Thử lại</button>}
+                      </div>
+                    ))}
+                    {busy && <p className="admin-thinking">{activity || 'Đang phân tích dữ liệu SQL Server...'}</p>}
+                  </div>
+                  <form className="admin-chat__form" onSubmit={sendMessage}>
+                    <textarea
+                      ref={chatInputRef}
+                      maxLength={2000}
+                      rows="3"
+                      value={draft}
+                      onChange={(event) => setDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                          event.preventDefault()
+                          if (draft.trim() && !busy) sendMessage(event)
+                        }
+                      }}
+                      placeholder="Nhập câu hỏi quản trị... (Enter để gửi, Shift+Enter xuống dòng)"
+                      aria-busy={busy}
+                    />
+                    {busy ? <button type="button" onClick={stopStream}>Dừng</button> : <button type="submit" disabled={!draft.trim()}>Gửi ↵</button>}
+                  </form>
                 </section>
               </div>
             </div>
