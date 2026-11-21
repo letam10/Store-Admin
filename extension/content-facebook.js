@@ -477,74 +477,150 @@
     const existingPermalinks = new Set(existingPermalinksList)
     stepLog('navigated', 'Đã ở Trang cá nhân, chuẩn bị mở khung tạo bài...', 'info', { checkpointStep: 'navigated', existingPermalinks: existingPermalinksList.slice(0, 25) })
 
-    // Bước 1: Mở hộp thoại Tạo bài viết (không báo trang lệch oan khi đang ở đúng profile!)
+    // Bước 1: CHỈ bấm khung "Bạn đang nghĩ gì?" để mở trực tiếp hộp thoại "Tạo bài viết" (KHÔNG bấm Ảnh/video ngoài trang cá nhân!)
     let dialog = findComposerDialog()
     if (!dialog) {
-      const triggerReady = await M().waitFor(() => Boolean(findComposerTrigger() || findProfilePhotoShortcut()), 15000)
-      if (!triggerReady) {
-        // Chỉ cuộn xuống 450px tìm thử (phòng trường hợp cover photo quá cao)
-        window.scrollTo({ top: 450, behavior: 'auto' })
-        await V().sleep(500)
-      }
-
+      const learnedTriggerRule = await V().getLearnedRule('facebook:composer_trigger')
       for (let openTry = 1; openTry <= 3 && !dialog; openTry++) {
-        const trigger = openTry <= 2 ? (findComposerTrigger() || findProfilePhotoShortcut()) : (findProfilePhotoShortcut() || findComposerTrigger())
-        if (!trigger) { await V().sleep(700); continue }
+        let trigger = (openTry === 1 && learnedTriggerRule) ? V().findByLearnedRule(learnedTriggerRule) : null
+        let usedLearned = Boolean(trigger)
+        if (!trigger) trigger = findComposerTrigger()
 
-        stepLog('open_composer', openTry <= 2 ? `Đang bấm "Bạn đang nghĩ gì?" (lần ${openTry}/3)...` : 'Đang thử mở qua nút "Ảnh/video"...')
-        await V().humanClick(trigger)
-        // Nếu bấm lần 2 chưa mở, gửi thêm phím Enter sau focus
-        if (openTry === 2) {
-          try {
-            trigger.focus({ preventScroll: true })
-            trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }))
-          } catch (_) {}
+        if (!trigger && openTry === 2) {
+          window.scrollTo({ top: 480, behavior: 'auto' })
+          await V().sleep(400)
+          trigger = findComposerTrigger()
         }
-        const opened = await M().waitFor(() => Boolean(findComposerDialog()), 7500)
-        if (opened) dialog = findComposerDialog()
+
+        if (trigger) {
+          stepLog('open_composer', `Đang bấm vào khung "Bạn đang nghĩ gì?" (lần ${openTry}/3)...`)
+          await V().humanClick(trigger)
+          const opened = await M().waitFor(() => Boolean(findComposerDialog()), 7000)
+          if (opened) {
+            dialog = findComposerDialog()
+            break
+          }
+          if (usedLearned) await V().invalidateLearnedRule('facebook:composer_trigger')
+        }
+
+        // Lần 3 vẫn không mở được -> Gọi AI Local qwen3.5:4b nhìn màn hình phán đoán & tự học!
+        if (openTry === 3 && !dialog) {
+          const aiRes = await V().askSelfHealingAI({
+            platform: 'facebook',
+            stepKey: 'facebook:composer_trigger',
+            goal: 'Tìm và bấm vào ô "Bạn đang nghĩ gì?" để mở hộp thoại "Tạo bài viết" trên Facebook (tuyệt đối KHÔNG bấm nút Ảnh/video).',
+            errorReason: 'Không tìm thấy hoặc không mở được hộp thoại Tạo bài viết khi bấm "Bạn đang nghĩ gì?"'
+          })
+          if (aiRes.ok && aiRes.action === 'navigate_target') {
+            return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
+          }
+          if (aiRes.ok && aiRes.action === 'dismiss_popup') {
+            if (aiRes.element) await V().humanClick(aiRes.element, { skipScroll: true })
+            else V().dispatchEscape()
+            await V().sleep(600)
+            const retryTrig = findComposerTrigger()
+            if (retryTrig) {
+              await V().humanClick(retryTrig)
+              if (await M().waitFor(() => Boolean(findComposerDialog()), 7000)) dialog = findComposerDialog()
+            }
+          } else if (aiRes.ok && aiRes.element) {
+            await V().humanClick(aiRes.element, { skipScroll: aiRes.clickMode === 'skip_scroll' })
+            if (await M().waitFor(() => Boolean(findComposerDialog()), 8000)) {
+              dialog = findComposerDialog()
+              // Thành công thật -> Ghi nhớ kiến thức vĩnh viễn cho lần sau!
+              await V().saveLearnedRule('facebook:composer_trigger', aiRes.element, aiRes.learnedRule || {})
+            }
+          }
+        }
       }
     }
 
     if (!dialog) {
-      // Nếu trang bị văng sang nơi khác trong lúc bấm thì mới xin điều hướng
       if (isNonProfilePage()) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
       return { ok: false, error: 'FACEBOOK_COMPOSER_NOT_OPENED', visionTrace: trace }
     }
 
     const authorName = detectLoggedInAccountName(dialog)
-    stepLog('open_composer', 'Đã mở khung "Tạo bài viết".', 'info', { checkpointStep: 'composer_opened' })
+    stepLog('open_composer', 'Đã mở hộp thoại "Tạo bài viết".', 'info', { checkpointStep: 'composer_opened' })
     await V().humanReadPause()
 
-    // Bước 2: Đổi quyền riêng tư
-    const actualPrivacy = await applyAudiencePrivacy(findComposerDialog() || dialog, requestedPrivacy, stepLog)
+    // Bước 2: Đổi quyền riêng tư (nếu DOM đổi -> tự nhờ AI Local học & lưu lại!)
+    let actualPrivacy = await applyAudiencePrivacy(findComposerDialog() || dialog, requestedPrivacy, stepLog)
+    if (actualPrivacy !== requestedPrivacy) {
+      const targetName = requestedPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Công khai'
+      const aiPriv = await V().askSelfHealingAI({
+        platform: 'facebook',
+        stepKey: `facebook:privacy_${requestedPrivacy}`,
+        goal: `Mở nút chọn đối tượng bài viết (hiện đang là Công khai hoặc Bạn bè dưới tên người dùng) và chọn "${targetName}" rồi xác nhận Xong/Lưu.`,
+        root: findComposerDialog() || document,
+        errorReason: `Chưa xác nhận được quyền riêng tư "${targetName}"`
+      })
+      if (aiPriv.ok && aiPriv.element) {
+        await V().humanClick(aiPriv.element, { skipScroll: true })
+        await V().sleep(700)
+        actualPrivacy = await applyAudiencePrivacy(findComposerDialog() || dialog, requestedPrivacy, stepLog)
+        if (actualPrivacy === requestedPrivacy) {
+          await V().saveLearnedRule(`facebook:privacy_${requestedPrivacy}`, aiPriv.element, aiPriv.learnedRule || {})
+        }
+      }
+    }
     if (actualPrivacy !== requestedPrivacy) {
       return { ok: false, error: requestedPrivacy === 'only_me' ? 'FACEBOOK_ONLY_ME_NOT_CONFIRMED' : 'FACEBOOK_PUBLIC_NOT_CONFIRMED', actualPrivacy, visionTrace: trace }
     }
     stepLog('privacy', `Đã xác nhận đối tượng: ${actualPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Công khai'}.`, 'info', { checkpointStep: 'privacy_set' })
-    await V().humanDelay(450, 850)
+    await V().humanDelay(400, 750)
 
-    // Bước 3: Nạp ảnh sản phẩm (bỏ qua nếu đã có ảnh sẵn trong khung khi phục hồi)
+    // Bước 3: Nạp ảnh NGAY TRONG HỘP THOẠI "Tạo bài viết" (Ưu tiên Input ẩn -> Paste/Drop ảnh trực tiếp -> KHÔNG mở OS File Picker!)
     dialog = findComposerDialog() || dialog
     if (!hasExistingMediaInDialog(dialog)) {
-      stepLog('upload_image', 'Đang tải ảnh sản phẩm lên...')
+      stepLog('upload_image', 'Đang nạp ảnh vào khung "Tạo bài viết"...')
       const imageSnapshot = V().captureVisualImageSnapshot(dialog)
       const imageFile = await M().createProductImageFile(payload.imageDataUrl, 'omnicart-fb-product.png')
-      let imageInput = await M().findImageInput(dialog, 1800, false)
-      if (!imageInput) {
-        const photoBtn = findPhotoToolbarButtonInDialog(dialog)
-        if (photoBtn) { await V().humanClick(photoBtn, { skipScroll: true }); await V().humanDelay(650, 1100) }
-        imageInput = await M().findImageInput(dialog, 6000, false) || await M().findImageInput(document, 3000, false)
-      }
-      if (!imageInput || !M().attachFile(imageInput, imageFile)) return { ok: false, error: 'FACEBOOK_IMAGE_NOT_ATTACHED', visionTrace: trace }
-      const previewOk = await M().waitFor(() => {
-        const d = findComposerDialog() || dialog
-        return Boolean(V().findNewlyRenderedMedia(imageSnapshot, { root: d, minTop: 80, minWidth: 70, minHeight: 70 }) || hasExistingMediaInDialog(d))
-      }, 24000, 350)
-      if (!previewOk) return { ok: false, error: 'FACEBOOK_IMAGE_PREVIEW_NOT_CONFIRMED', visionTrace: trace }
-      stepLog('upload_image', 'Đã tải ảnh lên thành công.', 'info', { checkpointStep: 'image_uploaded' })
-      await V().humanDelay(1200, 2000)
-    }
+      let previewOk = false
 
+      // Cách 1: Gắn thẳng vào input[type="file"] đã có sẵn trong hộp thoại (không cần bấm nút nào!)
+      const existingInput = await M().findImageInput(dialog, 1200, false)
+      if (existingInput && M().attachFile(existingInput, imageFile)) {
+        previewOk = await M().waitFor(() => {
+          const d = findComposerDialog() || dialog
+          return Boolean(V().findNewlyRenderedMedia(imageSnapshot, { root: d, minTop: 80, minWidth: 70, minHeight: 70 }) || hasExistingMediaInDialog(d))
+        }, 12000, 300)
+      }
+
+      // Cách 2: Dán (Paste) & Kéo thả (Drop) thẳng File ảnh vào khung "Tạo bài viết" (không cần bấm nút Ảnh/video!)
+      if (!previewOk) {
+        const dropTarget = findComposerEditor(dialog) || dialog
+        try {
+          const dt = new DataTransfer()
+          dt.items.add(imageFile)
+          dropTarget.focus?.({ preventScroll: true })
+          dropTarget.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, composed: true, clipboardData: dt }))
+        } catch (_) {}
+        M().attachViaDrop(dropTarget, imageFile)
+        previewOk = await M().waitFor(() => {
+          const d = findComposerDialog() || dialog
+          return Boolean(V().findNewlyRenderedMedia(imageSnapshot, { root: d, minTop: 80, minWidth: 70, minHeight: 70 }) || hasExistingMediaInDialog(d))
+        }, 12000, 300)
+      }
+
+      // Cách 3 (dự phòng cuối): Tìm input trong toàn trang sau khi bấm icon ảnh bên trong thanh "Thêm vào bài viết của bạn"
+      if (!previewOk) {
+        const photoIcon = findPhotoToolbarButtonInDialog(dialog)
+        if (photoIcon) { await V().humanClick(photoIcon, { skipScroll: true }); await V().sleep(600) }
+        const lateInput = await M().findImageInput(dialog, 4000, false) || await M().findImageInput(document, 2000, false)
+        if (lateInput && M().attachFile(lateInput, imageFile)) {
+          previewOk = await M().waitFor(() => {
+            const d = findComposerDialog() || dialog
+            return Boolean(V().findNewlyRenderedMedia(imageSnapshot, { root: d, minTop: 80, minWidth: 70, minHeight: 70 }) || hasExistingMediaInDialog(d))
+          }, 16000, 350)
+        }
+      }
+
+      if (!previewOk) return { ok: false, error: 'FACEBOOK_IMAGE_PREVIEW_NOT_CONFIRMED', visionTrace: trace }
+      stepLog('upload_image', 'Đã nạp ảnh vào bài viết.', 'info', { checkpointStep: 'image_uploaded' })
+      await V().humanDelay(1000, 1700)
+    }
+    
     // Bước 4: Điền chữ & hashtag (bỏ qua nếu nội dung đã khớp)
     dialog = findComposerDialog()
     if (!dialog) {

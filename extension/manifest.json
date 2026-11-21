@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "OmniCart Social Auto-Poster & OmniVision Bridge",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "Tự động đăng bài có ảnh Facebook & TikTok chạy ngầm 24/7 với Checkpoint phục hồi bước, tích hợp AI Local mở rộng tag & lọc bài Viral (FB Trang chủ/Reels >=5K, TikTok >=200K), mở link gọn trong 1 tab.",
   "permissions": [
     "tabs",
@@ -58,7 +58,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "OmniCart OmniVision Bridge v3.3",
+    "default_title": "OmniCart OmniVision Bridge v3.4",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

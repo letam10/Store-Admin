@@ -505,108 +505,160 @@
 
   // SỬA TRIỆT ĐỂ CHỌN ĐỐI TƯỢNG TIKTOK STUDIO 2026 (KHÔNG CUỘN LÀM ĐÓNG POPOVER + CHỌN ĐÚNG LÁ OPTION + PHÍM DỰ PHÒNG)
   async function setAndVerifyTikTokPrivacy(requestedPrivacy) {
+    const stepKeyTrigger = 'tiktok:privacy_trigger'
+    const stepKeyOption = `tiktok:privacy_option_${requestedPrivacy}`
+    const targetLabel = requestedPrivacy === 'only_me' ? 'Chỉ mình bạn' : 'Mọi người'
+
+    // Tạo khoảng đệm 260px dưới cùng vùng cuộn để menu "Mọi người / Bạn bè / Chỉ mình bạn" KHÔNG BỊ CẮT ĐÁY!
     const label = V().findLabelElement(PRIVACY_LABEL_RE, { minLeft: 180, maxLength: 90 })
-    await V().scrollContainerToBottom(label || findPrivacyControl())
-    await V().sleep(350)
-
-    const control = findPrivacyControl()
-    if (!control) return { ok: false, actual: null }
-
-    const exactTargetRe = requestedPrivacy === 'only_me' ? ONLY_ME_RE : PUBLIC_RE
-    const looseTargetRe = requestedPrivacy === 'only_me' ? ONLY_ME_LOOSE_RE : PUBLIC_LOOSE_RE
-    const oppositeRe = requestedPrivacy === 'only_me' ? PUBLIC_LOOSE_RE : ONLY_ME_LOOSE_RE
-
-    // Nhánh 1: Native <select>
-    if (control.tagName === 'SELECT') {
-      if (parsePrivacyValue(control.options[control.selectedIndex]?.textContent || '') === requestedPrivacy) return { ok: true, actual: requestedPrivacy }
-      const matchOpt = Array.from(control.options).find((o) => looseTargetRe.test(V().normalizeText(o.textContent)))
-      if (!matchOpt) return { ok: false, actual: null }
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
-      if (setter) setter.call(control, matchOpt.value); else control.value = matchOpt.value
-      control.dispatchEvent(new Event('input', { bubbles: true }))
-      control.dispatchEvent(new Event('change', { bubbles: true }))
-      return { ok: control.value === matchOpt.value, actual: requestedPrivacy }
+    const scroller = V().getScrollableAncestor(label || document.body)
+    const prevPaddingBottom = scroller?.style?.paddingBottom || ''
+    if (scroller && scroller !== document.documentElement) {
+      scroller.style.paddingBottom = '260px'
+    } else {
+      document.body.style.paddingBottom = '260px'
     }
 
-    const readCurrent = () => {
-      const c = findPrivacyControl() || control
-      return parsePrivacyValue(V().normalizeText(c.innerText || c.textContent || c.getAttribute('aria-label') || ''))
-    }
-    if (readCurrent() === requestedPrivacy) return { ok: true, actual: requestedPrivacy }
+    try {
+      await V().scrollContainerToBottom(label || findPrivacyControl())
+      await V().sleep(350)
 
-    // Tìm chính xác option lá bên trong dropdown đang mở (KHÔNG chọn thẻ cha chứa cả 3 mục!)
-    const findBestDropdownOption = () => {
-      const cRect = (findPrivacyControl() || control).getBoundingClientRect()
-      const candidates = []
-      for (const el of V().queryAllDeep(document, '[role="option"], [role="menuitem"], [role="radio"], li, button, div[class*="Option"], div[class*="option"], span, div')) {
-        if (el === control || el.contains(control) || control.contains(el)) continue
-        if (!V().isReallyVisible(el, { minWidth: 36, minHeight: 16 })) continue
-        const txt = V().normalizeText(el.innerText || el.textContent)
-        if (!txt || txt.length > 55) continue
-        if (!looseTargetRe.test(txt)) continue
-        if (oppositeRe.test(txt) || /bạn bè|friends/i.test(txt)) continue // loại bỏ listbox cha!
-
-        const r = el.getBoundingClientRect()
-        // Option phải nằm gần trục X của dropdown trigger
-        if (Math.abs(r.left - cRect.left) > 260) continue
-
-        let score = 0
-        if (exactTargetRe.test(txt)) score += 60
-        if (['option', 'menuitem', 'radio'].includes(el.getAttribute('role'))) score += 50
-        if (/option|item|select/i.test(String(el.className || ''))) score += 25
-        // Ưu tiên phần tử sâu hơn (ít con hơn)
-        const childCount = el.querySelectorAll('*').length
-        score -= childCount * 8
-        candidates.push({ el, score })
-      }
-      if (!candidates.length) return null
-      candidates.sort((a, b) => b.score - a.score)
-      const best = candidates[0].el
-      return best.closest('[role="option"], [role="menuitem"], li, [class*="Option"], [class*="option"]') || best
-    }
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      const curControl = findPrivacyControl() || control
-      // Mở dropdown bằng click KHÔNG cuộn cửa sổ
-      await V().humanClick(curControl, { skipScroll: true })
-      await V().sleep(500)
-
-      const appeared = await M().waitFor(() => Boolean(findBestDropdownOption()), 4000, 180)
-      if (appeared) {
-        const opt = findBestDropdownOption()
-        if (opt) {
-          // QUAN TRỌNG: skipScroll: true để không làm Floating UI tự đóng menu!
-          await V().humanClick(opt, { skipScroll: true })
-          await V().sleep(550)
-          if (readCurrent() === requestedPrivacy) return { ok: true, actual: requestedPrivacy }
+      // Tầng 1: Kiến thức đã học -> Tầng 2: Bộ tìm mặc định
+      const learnedTriggerRule = await V().getLearnedRule(stepKeyTrigger)
+      let control = (learnedTriggerRule ? V().findByLearnedRule(learnedTriggerRule) : null) || findPrivacyControl()
+      if (!control) {
+        const aiTrig = await V().askSelfHealingAI({
+          platform: 'tiktok',
+          stepKey: stepKeyTrigger,
+          goal: 'Tìm nút dropdown chọn quyền riêng tư bên dưới nhãn "Người có thể nhìn thấy bài đăng này" (hiện chữ Mọi người / Bạn bè / Chỉ mình bạn).',
+          errorReason: 'Không tìm thấy nút dropdown chọn quyền riêng tư TikTok'
+        })
+        if (aiTrig.ok && aiTrig.element) {
+          control = aiTrig.element
+          await V().saveLearnedRule(stepKeyTrigger, control, aiTrig.learnedRule || {})
         }
       }
+      if (!control) return { ok: false, actual: null }
 
-      // Phương án dự phòng bằng bàn phím (ArrowDown/ArrowUp + Enter)
-      if (attempt >= 2) {
-        try {
-          curControl.focus({ preventScroll: true })
-          if (!findBestDropdownOption()) {
-            curControl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }))
-            await V().sleep(350)
-          }
-          const steps = requestedPrivacy === 'only_me' ? 3 : 1
-          const navKey = requestedPrivacy === 'only_me' ? 'ArrowDown' : 'ArrowUp'
-          for (let k = 0; k < steps; k++) {
-            curControl.dispatchEvent(new KeyboardEvent('keydown', { key: navKey, code: navKey, bubbles: true }))
-            await V().sleep(180)
-          }
-          curControl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }))
-          await V().sleep(550)
-          if (readCurrent() === requestedPrivacy) return { ok: true, actual: requestedPrivacy }
-        } catch (_) {}
+      const exactTargetRe = requestedPrivacy === 'only_me' ? ONLY_ME_RE : PUBLIC_RE
+      const looseTargetRe = requestedPrivacy === 'only_me' ? ONLY_ME_LOOSE_RE : PUBLIC_LOOSE_RE
+      const oppositeRe = requestedPrivacy === 'only_me' ? PUBLIC_LOOSE_RE : ONLY_ME_LOOSE_RE
+
+      if (control.tagName === 'SELECT') {
+        if (parsePrivacyValue(control.options[control.selectedIndex]?.textContent || '') === requestedPrivacy) return { ok: true, actual: requestedPrivacy }
+        const matchOpt = Array.from(control.options).find((o) => looseTargetRe.test(V().normalizeText(o.textContent)))
+        if (!matchOpt) return { ok: false, actual: null }
+        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
+        if (setter) setter.call(control, matchOpt.value); else control.value = matchOpt.value
+        control.dispatchEvent(new Event('input', { bubbles: true }))
+        control.dispatchEvent(new Event('change', { bubbles: true }))
+        return { ok: control.value === matchOpt.value, actual: requestedPrivacy }
       }
 
-      V().dispatchEscape()
-      await V().sleep(350)
-    }
+      const readCurrent = () => {
+        const c = findPrivacyControl() || control
+        return parsePrivacyValue(V().normalizeText(c.innerText || c.textContent || c.getAttribute('aria-label') || ''))
+      }
+      if (readCurrent() === requestedPrivacy) return { ok: true, actual: requestedPrivacy }
 
-    return { ok: readCurrent() === requestedPrivacy, actual: readCurrent() }
+      const findBestDropdownOption = () => {
+        const cRect = (findPrivacyControl() || control).getBoundingClientRect()
+        const candidates = []
+        for (const el of V().queryAllDeep(document, '[role="option"], [role="menuitem"], [role="radio"], li, button, div[class*="Option"], div[class*="option"], span, div')) {
+          if (el === control || el.contains(control) || control.contains(el)) continue
+          if (!V().isReallyVisible(el, { minWidth: 36, minHeight: 16 })) continue
+          const txt = V().normalizeText(el.innerText || el.textContent)
+          if (!txt || txt.length > 55) continue
+          if (!looseTargetRe.test(txt)) continue
+          if (oppositeRe.test(txt) || /bạn bè|friends/i.test(txt)) continue
+          const r = el.getBoundingClientRect()
+          if (Math.abs(r.left - cRect.left) > 260) continue
+          let score = 0
+          if (exactTargetRe.test(txt)) score += 60
+          if (['option', 'menuitem', 'radio'].includes(el.getAttribute('role'))) score += 50
+          if (/option|item|select/i.test(String(el.className || ''))) score += 25
+          score -= el.querySelectorAll('*').length * 8
+          candidates.push({ el, score })
+        }
+        if (!candidates.length) return null
+        candidates.sort((a, b) => b.score - a.score)
+        const best = candidates[0].el
+        return best.closest('[role="option"], [role="menuitem"], li, [class*="Option"], [class*="option"]') || best
+      }
+
+      const learnedOptRule = await V().getLearnedRule(stepKeyOption)
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const curControl = findPrivacyControl() || control
+        await V().humanClick(curControl, { skipScroll: true })
+        await V().sleep(520)
+
+        let opt = (attempt === 1 && learnedOptRule) ? V().findByLearnedRule(learnedOptRule) : null
+        const usedLearnedOpt = Boolean(opt)
+        if (!opt) {
+          await M().waitFor(() => Boolean(findBestDropdownOption()), 3800, 180)
+          opt = findBestDropdownOption()
+        }
+
+        if (opt) {
+          await V().humanClick(opt, { skipScroll: true })
+          await V().sleep(600)
+          if (readCurrent() === requestedPrivacy) return { ok: true, actual: requestedPrivacy }
+          if (usedLearnedOpt) await V().invalidateLearnedRule(stepKeyOption)
+        }
+
+        // Lần 2: Phím mũi tên + Enter
+        if (attempt === 2) {
+          try {
+            curControl.focus({ preventScroll: true })
+            if (!findBestDropdownOption()) {
+              curControl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }))
+              await V().sleep(350)
+            }
+            const steps = requestedPrivacy === 'only_me' ? 3 : 1
+            const navKey = requestedPrivacy === 'only_me' ? 'ArrowDown' : 'ArrowUp'
+            for (let k = 0; k < steps; k++) {
+              curControl.dispatchEvent(new KeyboardEvent('keydown', { key: navKey, code: navKey, bubbles: true }))
+              await V().sleep(180)
+            }
+            curControl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }))
+            await V().sleep(600)
+            if (readCurrent() === requestedPrivacy) return { ok: true, actual: requestedPrivacy }
+          } catch (_) {}
+        }
+
+        // Lần 3: Tự nhờ AI Local qwen3.5:4b nhìn dropdown đang mở, bấm đúng nút & lưu kiến thức mới!
+        if (attempt === 3) {
+          if (!findBestDropdownOption()) {
+            await V().humanClick(curControl, { skipScroll: true })
+            await V().sleep(500)
+          }
+          const aiOpt = await V().askSelfHealingAI({
+            platform: 'tiktok',
+            stepKey: stepKeyOption,
+            goal: `Trong danh sách thả xuống quyền riêng tư đang mở của TikTok Studio, chọn mục "${targetLabel}" (không chọn Bạn bè hay mục khác).`,
+            errorReason: `Không chọn được "${targetLabel}" trên TikTok Studio (có thể giao diện mới hoặc bị popup che)`
+          })
+          if (aiOpt.ok && aiOpt.element) {
+            await V().humanClick(aiOpt.element, { skipScroll: true })
+            await V().sleep(650)
+            if (readCurrent() === requestedPrivacy) {
+              // Ghi nhớ vĩnh viễn quy tắc mới để những lần sau KHÔNG cần hỏi AI nữa!
+              await V().saveLearnedRule(stepKeyOption, aiOpt.element, { ...(aiOpt.learnedRule || {}), clickMode: 'skip_scroll' })
+              return { ok: true, actual: requestedPrivacy }
+            }
+          }
+        }
+
+        V().dispatchEscape()
+        await V().sleep(320)
+      }
+
+      return { ok: readCurrent() === requestedPrivacy, actual: readCurrent() }
+    } finally {
+      if (scroller && scroller !== document.documentElement) scroller.style.paddingBottom = prevPaddingBottom
+      else document.body.style.paddingBottom = ''
+    }
   }
 
   function cleanTikTokPostUrl(raw) {

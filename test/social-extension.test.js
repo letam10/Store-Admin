@@ -1,3 +1,10 @@
+/*
+  FILE NOTE
+  - Mục đích: Kiểm thử tự động tính toàn vẹn và phiên bản của Chrome Extension (manifest, content scripts, quyền riêng tư).
+  - Liên kết trực tiếp: Store-Admin/extension/manifest.json, Store-Admin/extension/background.js, Store-Admin/extension/content-facebook.js, Store-Admin/extension/content-tiktok.js
+  - Vùng ảnh hưởng khi sửa: Toàn bộ bộ test CI/CD kiểm thử extension của Admin.
+*/
+
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync, existsSync } from 'node:fs'
@@ -6,7 +13,7 @@ import { resolve } from 'node:path'
 test('Chrome Extension v3.2: ẩn khung thao tác, có cuộn chọn Chỉ mình tôi, Reels 2026 & chủ đề Viral TikTok >=200K', () => {
   const manifest = JSON.parse(readFileSync(resolve('extension/manifest.json'), 'utf-8'))
   assert.strictEqual(manifest.manifest_version, 3)
-  assert.ok(['3.2.0', '3.3.0'].includes(manifest.version), `Expected version 3.2.0 or 3.3.0, got ${manifest.version}`)
+  assert.ok(['3.2.0', '3.3.0', '3.4.0'].includes(manifest.version), `Expected version 3.2.0, 3.3.0 or 3.4.0, got ${manifest.version}`)
 
   const files = [
     'extension/background.js', 'extension/content-facebook.js', 'extension/content-tiktok.js',

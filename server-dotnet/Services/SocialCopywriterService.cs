@@ -583,4 +583,139 @@ public sealed class SocialCopywriterService(IConfiguration configuration)
         }
     }
 
+    public async Task<ExtensionVisionDecision> DiagnoseExtensionUiAsync(ExtensionVisionAssistRequest req)
+    {
+        var elements = (req.Elements ?? []).Take(65).ToList();
+        if (elements.Count == 0)
+            return new(false, "Trang chưa có phần tử tương tác nào.", "wait_and_retry", null, "normal", null, "Rules");
+
+        var compactMap = elements.Select(e => new
+        {
+            id = e.Id,
+            tag = e.Tag,
+            role = e.Role,
+            text = e.Text.Length > 60 ? e.Text[..60] : e.Text,
+            aria = e.AriaLabel.Length > 60 ? e.AriaLabel[..60] : e.AriaLabel,
+            e2e = e.DataE2e,
+            dlg = e.InDialog,
+            dis = e.Disabled,
+            color = e.PrimaryColor,
+            box = new[] { e.X, e.Y, e.W, e.H },
+            sel = e.StableSelector
+        });
+
+        var prompt =
+            $"Bạn là bộ não thị giác AI điều khiển Chrome Extension tự động đăng bài trên {req.Platform.ToUpperInvariant()}.\n" +
+            $"Mục tiêu bước hiện tại ({req.StepKey}): {req.Goal}\n" +
+            $"URL hiện tại: {req.Url} | Khung hình: {req.ViewportWidth}x{req.ViewportHeight} | ScrollY: {req.ScrollY}\n" +
+            $"Lý do cần AI hỗ trợ: {req.ErrorReason}\n" +
+            "Dựa vào ảnh chụp (nếu có) và bản đồ phần tử tương tác (mỗi phần tử có id, text, aria, dlg=nằm trong hộp thoại, box=[x,y,w,h], sel=selector), hãy chọn hành động chính xác nhất.\n" +
+            "Các action hợp lệ:\n" +
+            "- \"click_mark\": bấm vào phần tử có targetMarkId.\n" +
+            "- \"dismiss_popup\": nhấn Escape hoặc bấm targetMarkId để đóng popup/gợi ý đang che màn hình.\n" +
+            "- \"scroll_down\" hoặc \"scroll_up\": cuộn trang để lộ nút.\n" +
+            "- \"navigate_target\": trang thực sự bị văng sang nơi khác, cần điều hướng lại.\n" +
+            "- \"wait_and_retry\": trang đang tải dở, chờ thêm.\n" +
+            "clickMode hợp lệ: \"skip_scroll\" (dùng cho nút trong dropdown/popover để không làm đóng menu) hoặc \"normal\".\n" +
+            "CHỈ TRẢ VỀ DUY NHẤT JSON HỢP LỆ (không giải thích ngoài JSON):\n" +
+            "{\"diagnosis\":\"nguyên nhân ngắn gọn tiếng Việt\",\"action\":\"click_mark\",\"targetMarkId\":12,\"clickMode\":\"skip_scroll\",\"learnedRule\":{\"selector\":\"...\",\"role\":\"...\",\"textPattern\":\"...\",\"ariaPattern\":\"...\",\"inDialog\":true,\"clickMode\":\"skip_scroll\"}}\n" +
+            "BẢN ĐỒ PHẦN TỬ:\n" + JsonSerializer.Serialize(compactMap);
+
+        try
+        {
+            var userMessage = string.IsNullOrWhiteSpace(req.ScreenshotBase64)
+                ? (object)new { role = "user", content = prompt }
+                : new { role = "user", content = prompt, images = new[] { StripDataUrlPrefix(req.ScreenshotBase64) } };
+
+            var payload = new
+            {
+                model = ModelName,
+                messages = new[] { userMessage },
+                stream = false,
+                think = false,
+                options = new { temperature = 0.15, num_predict = 450 }
+            };
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+            using var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            using var response = await _httpClient.PostAsync(OllamaHost + "/api/chat", content, cts.Token);
+            if (response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(cts.Token);
+                using var respDoc = JsonDocument.Parse(body);
+                var rawText = respDoc.RootElement.TryGetProperty("message", out var msgObj) && msgObj.TryGetProperty("content", out var cObj)
+                    ? cObj.GetString() : null;
+                var jsonText = ExtractJsonObject(rawText);
+                if (jsonText is not null)
+                {
+                    using var decisionDoc = JsonDocument.Parse(jsonText);
+                    var r = decisionDoc.RootElement;
+                    var diagnosis = r.TryGetProperty("diagnosis", out var dProp) ? (dProp.GetString() ?? "AI đã phân tích giao diện.") : "AI đã phân tích giao diện.";
+                    var action = r.TryGetProperty("action", out var aProp) ? (aProp.GetString() ?? "wait_and_retry") : "wait_and_retry";
+                    int? markId = r.TryGetProperty("targetMarkId", out var mProp) && mProp.TryGetInt32(out var mid) ? mid : null;
+                    var clickMode = r.TryGetProperty("clickMode", out var cmProp) ? (cmProp.GetString() ?? "normal") : "normal";
+
+                    ExtensionLearnedRule? learned = null;
+                    if (r.TryGetProperty("learnedRule", out var lr) && lr.ValueKind == JsonValueKind.Object)
+                    {
+                        learned = new ExtensionLearnedRule(
+                            lr.TryGetProperty("selector", out var sP) ? sP.GetString() : null,
+                            lr.TryGetProperty("role", out var rP) ? rP.GetString() : null,
+                            lr.TryGetProperty("textPattern", out var tP) ? tP.GetString() : null,
+                            lr.TryGetProperty("ariaPattern", out var arP) ? arP.GetString() : null,
+                            lr.TryGetProperty("inDialog", out var dP) && dP.ValueKind == JsonValueKind.True,
+                            lr.TryGetProperty("clickMode", out var lcmP) ? (lcmP.GetString() ?? clickMode) : clickMode
+                        );
+                    }
+
+                    // Tự làm giàu learnedRule từ chính phần tử markId nếu AI để trống selector
+                    if (markId.HasValue)
+                    {
+                        var matchedEl = elements.FirstOrDefault(e => e.Id == markId.Value);
+                        if (matchedEl is not null)
+                        {
+                            learned = new ExtensionLearnedRule(
+                                string.IsNullOrWhiteSpace(learned?.Selector) ? matchedEl.StableSelector : learned.Selector,
+                                string.IsNullOrWhiteSpace(learned?.Role) ? matchedEl.Role : learned.Role,
+                                string.IsNullOrWhiteSpace(learned?.TextPattern) ? matchedEl.Text : learned.TextPattern,
+                                string.IsNullOrWhiteSpace(learned?.AriaPattern) ? matchedEl.AriaLabel : learned.AriaPattern,
+                                learned?.InDialog ?? matchedEl.InDialog,
+                                learned?.ClickMode ?? clickMode);
+                        }
+                    }
+
+                    return new(true, diagnosis, action, markId, clickMode, learned, $"Local Qwen ({ModelName})");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SocialCopywriter] AI Vision Assist lỗi ({ex.Message})");
+        }
+
+        return new(false, "AI Local tạm thời chưa phản hồi phán đoán giao diện.", "wait_and_retry", null, "normal", null, "Fallback");
+    }
+
+    private static string StripDataUrlPrefix(string raw)
+    {
+        var comma = raw.IndexOf(',');
+        return comma >= 0 ? raw[(comma + 1)..] : raw;
+    }
 }
+
+    public sealed record ExtensionLearnedRule(
+        string? Selector,
+        string? Role,
+        string? TextPattern,
+        string? AriaPattern,
+        bool InDialog,
+        string ClickMode);
+
+    public sealed record ExtensionVisionDecision(
+        bool Ok,
+        string Diagnosis,
+        string Action,
+        int? TargetMarkId,
+        string ClickMode,
+        ExtensionLearnedRule? LearnedRule,
+        string GeneratedBy);

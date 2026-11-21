@@ -18,6 +18,9 @@ const STORAGE_PENDING_KEY = 'omnicartPendingVerifications'
 const STORAGE_RESOLVED_KEY = 'omnicartResolvedVerifications'
 const STORAGE_SCRAPE_CURSOR_KEY = 'omnicartScrapeCursors'
 const STORAGE_CHECKPOINTS_KEY = 'omnicartJobCheckpoints'
+const STORAGE_KNOWLEDGE_KEY = 'omnicartLearnedSelectors'
+const pendingBridgeFetches = new Map()
+let knowledgeSyncedFromServer = false
 
 const DEFAULT_VISION_CONFIG = {
   showHud: true,
@@ -399,6 +402,11 @@ chrome.runtime.onConnect.addListener(async (port) => {
   } catch (_) {}
 
   port.onMessage.addListener(async (msg) => {
+    if (msg.type === 'BRIDGE_API_FETCH_RESULT' && msg.fetchId) {
+      const pending = pendingBridgeFetches.get(msg.fetchId)
+      if (pending) { pendingBridgeFetches.delete(msg.fetchId); pending.resolve(msg) }
+      return
+    }
     if (!msg) return
     if (msg.type === 'HEARTBEAT') { port.postMessage({ type: 'HEARTBEAT_ACK', ts: Date.now(), version: getExtensionVersion() }); return }
     if (msg.type === 'ACK_RESOLVED_VERIFICATION' && msg.postId) {
@@ -977,6 +985,17 @@ async function scrapeFacebookGroupsJob(options = {}) {
 async function dispatchCommand(message, sender = {}) {
   const type = message?.type
   switch (type) {
+    case 'GET_LEARNED_KNOWLEDGE': {
+      const all = await getAllLearnedKnowledge()
+      return { ok: true, rule: all[message.stepKey] || null }
+    }
+    case 'SAVE_LEARNED_KNOWLEDGE':
+      return { ok: true, rule: await saveLearnedKnowledgeEntry(message.stepKey, message.rule) }
+    case 'INVALIDATE_LEARNED_KNOWLEDGE':
+      await invalidateLearnedKnowledgeEntry(message.stepKey)
+      return { ok: true }
+    case 'AI_SELF_HEAL':
+      return await handleAiSelfHeal(message.payload || {}, sender?.tab)
     case 'SW_SLEEP': {
       const ms = Math.min(15000, Math.max(0, Number(message.ms) || 0))
       await new Promise((resolve) => setTimeout(resolve, ms))
@@ -1051,3 +1070,67 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   dispatchCommand(message, sender).then(sendResponse).catch((err) => sendResponse({ ok: false, error: err.message || String(err) }))
   return true
 })
+async function callAdminBackendViaBridge(path, method = 'POST', body = undefined) {
+  const activePort = Array.from(adminPorts)[0]
+  if (!activePort) return { ok: false, error: 'NO_ADMIN_BRIDGE' }
+  const fetchId = `bf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  return await new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingBridgeFetches.delete(fetchId)
+      resolve({ ok: false, error: 'BRIDGE_API_TIMEOUT' })
+    }, 30000)
+    pendingBridgeFetches.set(fetchId, {
+      resolve: (res) => { clearTimeout(timer); resolve(res) }
+    })
+    try { activePort.postMessage({ type: 'BRIDGE_API_FETCH', fetchId, path, method, body }) }
+    catch (err) { clearTimeout(timer); pendingBridgeFetches.delete(fetchId); resolve({ ok: false, error: err.message }) }
+  })
+}
+
+async function getAllLearnedKnowledge() {
+  const local = (await chrome.storage.local.get(STORAGE_KNOWLEDGE_KEY))?.[STORAGE_KNOWLEDGE_KEY] || {}
+  if (!knowledgeSyncedFromServer && adminPorts.size > 0) {
+    knowledgeSyncedFromServer = true
+    const remote = await callAdminBackendViaBridge('/api/admin/social/ai/knowledge', 'GET')
+    if (remote?.ok && remote.data?.knowledge && typeof remote.data.knowledge === 'object') {
+      const merged = { ...remote.data.knowledge, ...local }
+      await chrome.storage.local.set({ [STORAGE_KNOWLEDGE_KEY]: merged })
+      return merged
+    }
+  }
+  return local
+}
+
+async function saveLearnedKnowledgeEntry(stepKey, rule) {
+  const all = await getAllLearnedKnowledge()
+  all[stepKey] = { ...(all[stepKey] || {}), ...rule, hitCount: (all[stepKey]?.hitCount || 0) + 1 }
+  await chrome.storage.local.set({ [STORAGE_KNOWLEDGE_KEY]: all })
+  callAdminBackendViaBridge('/api/admin/social/ai/knowledge', 'POST', { knowledge: all }).catch(() => {})
+  pushLog({ platform: stepKey.split(':')[0] || 'ai', step: 'ai_learned', level: 'success', message: `🧠 AI đã ghi nhớ quy tắc mới cho "${stepKey}" (lần sau tự chạy, không hỏi lại!).` })
+  return all[stepKey]
+}
+
+async function invalidateLearnedKnowledgeEntry(stepKey) {
+  const all = await getAllLearnedKnowledge()
+  if (all[stepKey]) {
+    delete all[stepKey]
+    await chrome.storage.local.set({ [STORAGE_KNOWLEDGE_KEY]: all })
+    callAdminBackendViaBridge('/api/admin/social/ai/knowledge', 'POST', { knowledge: all }).catch(() => {})
+  }
+}
+
+async function handleAiSelfHeal(payload, senderTab) {
+  let screenshotBase64 = null
+  // Nếu tab đang hiển thị thì chụp thêm ảnh màn hình thật cho Vision qwen3.5:4b nhìn trực tiếp
+  if (senderTab?.active && senderTab.windowId) {
+    try {
+      screenshotBase64 = await chrome.tabs.captureVisibleTab(senderTab.windowId, { format: 'jpeg', quality: 60 })
+    } catch (_) {}
+  }
+  const res = await callAdminBackendViaBridge('/api/admin/social/ai/vision-assist', 'POST', {
+    ...payload,
+    screenshotBase64
+  })
+  if (res?.ok && res.data?.ok) return res.data
+  return { ok: false, error: res?.error || 'AI_VISION_UNAVAILABLE' }
+}

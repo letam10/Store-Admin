@@ -207,3 +207,40 @@ public sealed class ClassifyViralPostsRequest
     public string? RequestedTopicLabel { get; set; }
     public List<SocialViralPost>? Posts { get; set; }
 }
+public sealed class ExtensionVisionElement
+{
+    public int Id { get; set; }
+    public string Tag { get; set; } = "";
+    public string Role { get; set; } = "";
+    public string Label { get; set; } = "";
+    public string Text { get; set; } = "";
+    public string AriaLabel { get; set; } = "";
+    public string DataE2e { get; set; } = "";
+    public string StableSelector { get; set; } = "";
+    public bool InDialog { get; set; }
+    public bool Disabled { get; set; }
+    public string PrimaryColor { get; set; } = "neutral";
+    public int X { get; set; }
+    public int Y { get; set; }
+    public int W { get; set; }
+    public int H { get; set; }
+}
+
+public sealed class ExtensionVisionAssistRequest
+{
+    public string Platform { get; set; } = "facebook";
+    public string StepKey { get; set; } = "";
+    public string Goal { get; set; } = "";
+    public string Url { get; set; } = "";
+    public string ErrorReason { get; set; } = "";
+    public int ViewportWidth { get; set; }
+    public int ViewportHeight { get; set; }
+    public int ScrollY { get; set; }
+    public string? ScreenshotBase64 { get; set; }
+    public List<ExtensionVisionElement>? Elements { get; set; }
+}
+
+public sealed class ExtensionKnowledgeSaveRequest
+{
+    public Dictionary<string, object?>? Knowledge { get; set; }
+}

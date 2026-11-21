@@ -531,6 +531,47 @@ public sealed class AdminSocialController(
             generatedBy = result.GeneratedBy
         });
     }
+    [HttpPost("ai/vision-assist")]
+    public async Task<IActionResult> VisionAssist([FromBody] ExtensionVisionAssistRequest request)
+    {
+        if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+        var decision = await copywriter.DiagnoseExtensionUiAsync(request);
+        return Ok(new
+        {
+            ok = decision.Ok,
+            diagnosis = decision.Diagnosis,
+            action = decision.Action,
+            targetMarkId = decision.TargetMarkId,
+            clickMode = decision.ClickMode,
+            learnedRule = decision.LearnedRule,
+            generatedBy = decision.GeneratedBy
+        });
+    }
+
+    [HttpGet("ai/knowledge")]
+    public IActionResult GetExtensionKnowledge()
+    {
+        var raw = db.GetSetting("social.extension.knowledge");
+        if (string.IsNullOrWhiteSpace(raw)) return Ok(new { ok = true, knowledge = new Dictionary<string, object?>() });
+        try
+        {
+            var parsed = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object?>>(raw) ?? [];
+            return Ok(new { ok = true, knowledge = parsed });
+        }
+        catch
+        {
+            return Ok(new { ok = true, knowledge = new Dictionary<string, object?>() });
+        }
+    }
+
+    [HttpPost("ai/knowledge")]
+    public IActionResult SaveExtensionKnowledge([FromBody] ExtensionKnowledgeSaveRequest request)
+    {
+        if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+        var json = System.Text.Json.JsonSerializer.Serialize(request.Knowledge ?? []);
+        db.SetSetting("social.extension.knowledge", json);
+        return Ok(new { ok = true });
+    }
 
     private static bool IsAnyLoggedInRealPermalink(string platform, string postUrl)
 

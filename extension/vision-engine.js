@@ -1,15 +1,15 @@
 /*
   FILE NOTE
-  - Mục đích: Lõi nhận thức thị giác & mô phỏng hành vi người thật chạy ngầm 24/7 (OmniVision Engine v3.3.0).
+  - Mục đích: Lõi nhận thức thị giác & mô phỏng hành vi người thật chạy ngầm 24/7 (OmniVision Engine v3.4.0).
   - Liên kết trực tiếp: background.js, content-facebook.js, content-tiktok.js
   - Vùng ảnh hưởng khi sửa: Toàn bộ thao tác DOM, cuộn và click của Extension trên Facebook và TikTok.
 */
 
 ;(() => {
-  if (globalThis.__OMNICART_VISION_VERSION__ === '3.3.0' && globalThis.OmniVision) {
+  if (globalThis.__OMNICART_VISION_VERSION__ === '3.4.0' && globalThis.OmniVision) {
     return
   }
-  globalThis.__OMNICART_VISION_VERSION__ = '3.3.0'
+  globalThis.__OMNICART_VISION_VERSION__ = '3.4.0'
 
   const HUD_HOST_ID = 'omnicart-vision-hud-host'
 
@@ -797,9 +797,176 @@
   try {
     chrome.storage?.local?.get('visionConfig', (res) => { if (res?.visionConfig) applyConfig(res.visionConfig) })
   } catch (_) {}
+  // Tạo CSS selector bền vững (bỏ các class ngẫu nhiên như x1i10hfl của FB hay css-1abc của TikTok)
+  function buildStableSelector(el) {
+    if (!el || !el.tagName) return ''
+    const tag = el.tagName.toLowerCase()
+    const parts = []
+    if (el.closest('[role="dialog"]')) parts.push('div[role="dialog"]')
+    else if (el.closest('[role="listbox"]')) parts.push('[role="listbox"]')
+    else if (el.closest('[role="main"]')) parts.push('[role="main"]')
+
+    let nodeSel = tag
+    const e2e = el.getAttribute('data-e2e')
+    const role = el.getAttribute('role')
+    const aria = el.getAttribute('aria-label')
+    const hasPopup = el.getAttribute('aria-haspopup')
+    const editable = el.getAttribute('contenteditable')
+    if (e2e) nodeSel += `[data-e2e="${CSS.escape(e2e)}"]`
+    else {
+      if (role) nodeSel += `[role="${CSS.escape(role)}"]`
+      if (hasPopup) nodeSel += `[aria-haspopup="${CSS.escape(hasPopup)}"]`
+      if (editable === 'true') nodeSel += '[contenteditable="true"]'
+      if (aria && aria.length <= 40) nodeSel += `[aria-label*="${CSS.escape(aria.slice(0, 22))}"]`
+    }
+    parts.push(nodeSel)
+    return parts.join(' ')
+  }
+
+  function buildRichInteractiveMap(root = document, maxItems = 65) {
+    currentMarkLookup = new Map()
+    const selector = 'button,[role="button"],[role="tab"],[role="combobox"],[role="option"],[role="menuitem"],[role="radio"],[role="textbox"],[contenteditable="true"],input:not([type="hidden"]):not([type="file"]),textarea,select,a[href]'
+    const items = []
+    let id = 1
+    for (const el of queryAllDeep(root, selector)) {
+      if (id > maxItems) break
+      if (el.closest?.(`#${HUD_HOST_ID}`)) continue
+      if (!isReallyVisible(el, { minWidth: 16, minHeight: 14 })) continue
+      const rect = el.getBoundingClientRect()
+      const text = normalizeText(el.innerText || el.textContent).slice(0, 80)
+      const ariaLabel = normalizeText(el.getAttribute('aria-label')).slice(0, 80)
+      const dataE2e = el.getAttribute('data-e2e') || ''
+      const tag = el.tagName.toLowerCase()
+      const isEditable = el.isContentEditable || tag === 'input' || tag === 'textarea'
+      if (!text && !ariaLabel && !dataE2e && !isEditable) continue
+      const color = getElementColorInfo(el)
+      const markId = id++
+      currentMarkLookup.set(markId, el)
+      items.push({
+        id: markId,
+        tag,
+        role: el.getAttribute('role') || tag,
+        label: (ariaLabel || text).slice(0, 80),
+        text,
+        ariaLabel,
+        dataE2e,
+        stableSelector: buildStableSelector(el),
+        inDialog: Boolean(el.closest('[role="dialog"], [aria-modal="true"]')),
+        disabled: isElementDisabled(el),
+        primaryColor: color.isRedPink ? 'red' : color.isBlue ? 'blue' : 'neutral',
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        w: Math.round(rect.width),
+        h: Math.round(rect.height)
+      })
+    }
+    return items
+  }
+
+  // Đọc quy tắc đã học trước đó từ kho kiến thức (0ms, không gọi AI)
+  async function getLearnedRule(stepKey) {
+    try {
+      const res = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_LEARNED_KNOWLEDGE', stepKey }, (r) => {
+          void chrome.runtime.lastError
+          resolve(r || null)
+        })
+      })
+      return res?.rule || null
+    } catch (_) { return null }
+  }
+
+  async function saveLearnedRule(stepKey, el, extra = {}) {
+    if (!stepKey) return
+    const rule = {
+      selector: extra.selector || (el ? buildStableSelector(el) : ''),
+      role: extra.role || el?.getAttribute?.('role') || el?.tagName?.toLowerCase() || '',
+      textPattern: extra.textPattern || (el ? normalizeText(el.innerText || el.textContent).slice(0, 45) : ''),
+      ariaPattern: extra.ariaPattern || (el ? normalizeText(el.getAttribute?.('aria-label')).slice(0, 45) : ''),
+      inDialog: typeof extra.inDialog === 'boolean' ? extra.inDialog : Boolean(el?.closest?.('[role="dialog"], [aria-modal="true"]')),
+      clickMode: extra.clickMode || 'normal',
+      learnedAt: new Date().toISOString()
+    }
+    try {
+      chrome.runtime.sendMessage({ type: 'SAVE_LEARNED_KNOWLEDGE', stepKey, rule }, () => { void chrome.runtime.lastError })
+    } catch (_) {}
+  }
+
+  async function invalidateLearnedRule(stepKey) {
+    if (!stepKey) return
+    try {
+      chrome.runtime.sendMessage({ type: 'INVALIDATE_LEARNED_KNOWLEDGE', stepKey }, () => { void chrome.runtime.lastError })
+    } catch (_) {}
+  }
+
+  // Tìm phần tử theo quy tắc kiến thức đã học từ AI Local
+  function findByLearnedRule(rule, root = document) {
+    if (!rule) return null
+    const scope = rule.inDialog ? (document.querySelector('div[role="dialog"], div[aria-modal="true"]') || root) : root
+    const textRe = rule.textPattern ? new RegExp(rule.textPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').split('|').join('|'), 'i') : null
+    const ariaRe = rule.ariaPattern ? new RegExp(rule.ariaPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null
+
+    const candidates = []
+    if (rule.selector) {
+      try {
+        for (const el of queryAllDeep(scope, rule.selector)) {
+          if (isReallyVisible(el, { minWidth: 16, minHeight: 14 })) candidates.push(el)
+        }
+      } catch (_) {}
+    }
+    if (!candidates.length && rule.role) {
+      for (const el of queryAllDeep(scope, `[role="${rule.role}"], ${rule.role}`)) {
+        if (isReallyVisible(el, { minWidth: 16, minHeight: 14 })) candidates.push(el)
+      }
+    }
+
+    for (const el of candidates) {
+      const txt = normalizeText(el.innerText || el.textContent)
+      const aria = normalizeText(el.getAttribute('aria-label'))
+      if (textRe && txt && textRe.test(txt) && txt.length <= 120) return el
+      if (ariaRe && aria && ariaRe.test(aria)) return el
+    }
+    return candidates.length === 1 ? candidates[0] : null
+  }
+
+  // Chỉ gọi AI Local qwen3.5:4b khi cả kiến thức cũ lẫn bộ tìm mặc định đều gặp lỗi/giao diện mới!
+  async function askSelfHealingAI({ platform, stepKey, goal, root = document, errorReason = '' }) {
+    reportStep(platform, 'ai_heal', `🧠 Đang nhờ AI Local (qwen3.5:4b) phân tích giao diện "${stepKey}"...`, 'warn')
+    const elements = buildRichInteractiveMap(root, 65)
+    try {
+      const res = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          type: 'AI_SELF_HEAL',
+          payload: {
+            platform,
+            stepKey,
+            goal,
+            url: location.href,
+            errorReason,
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+            scrollY: Math.round(window.scrollY),
+            elements
+          }
+        }, (reply) => {
+          void chrome.runtime.lastError
+          resolve(reply || { ok: false })
+        })
+      })
+
+      if (res?.ok) {
+        const element = res.targetMarkId ? getElementByMarkId(res.targetMarkId) : null
+        reportStep(platform, 'ai_heal', `🧠 AI phán đoán: ${res.diagnosis || res.action}`, 'info')
+        return { ...res, element }
+      }
+      return { ok: false, action: 'wait_and_retry', element: null }
+    } catch (err) {
+      return { ok: false, error: err.message, element: null }
+    }
+  }
 
   globalThis.OmniVision = {
-    version: '3.3.0',
+    version: '3.4.0',
     sleep, humanDelay, humanMicroPause, humanReadPause, humanReviewPause, smoothScrollToTop,
     normalizeText, stripToMatchKey, formatPostText, truncateClean, formatHashtags, composeBodyAndHashtags, parseHumanCount,
     getDeepActiveElement, queryAllDeep, isReallyVisible, isElementDisabled, isInViewport,
@@ -808,6 +975,7 @@
     findLabelElement, findControlNearLabel, humanClick, readEditorValue, isTextMatched, smartTypeText, dispatchEscape,
     captureVisualImageSnapshot, findNewlyRenderedMedia, buildInteractiveMap,
     showVisualMarks, clearVisualMarks, getElementByMarkId,
-    reportStep, showHudStatus, highlightTarget, clearHud, applyConfig
+    reportStep, showHudStatus, highlightTarget, clearHud, applyConfig,
+    buildStableSelector, buildRichInteractiveMap, getLearnedRule, saveLearnedRule, invalidateLearnedRule, findByLearnedRule, askSelfHealingAI
   }
 })()
