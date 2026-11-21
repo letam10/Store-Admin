@@ -7,11 +7,12 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
+import './AdminCommerce.css'
 
 const emptyAccount = { username: '', displayName: '', email: '', password: '', active: true }
 const errors = {
   ACCOUNT_EXISTS: 'Tên đăng nhập đã được sử dụng.',
-  INVALID_ACCOUNT: 'Kiểm tra tên đăng nhập, họ tên và thư điện tử.',
+  INVALID_ACCOUNT: 'Kiểm tra tên đăng nhập, họ tên và email.',
   INVALID_PASSWORD: 'Mật khẩu cần từ 8 đến 128 ký tự.',
   FORBIDDEN: 'Chỉ quản trị viên được quản lý tài khoản nhân viên.',
 }
@@ -66,7 +67,7 @@ export default function AdminStaff({ csrfToken }) {
     {editing && <form className="admin-commerce-form admin-staff-form" onSubmit={save}>
       <label>Tên đăng nhập<input required minLength="3" maxLength="100" value={editing.username} onChange={event => setEditing({ ...editing, username: event.target.value })} /></label>
       <label>Họ tên<input required maxLength="255" value={editing.displayName} onChange={event => setEditing({ ...editing, displayName: event.target.value })} /></label>
-      <label>Thư điện tử<input required type="email" maxLength="255" value={editing.email} onChange={event => setEditing({ ...editing, email: event.target.value })} /></label>
+      <label>Email<input required type="email" maxLength="255" value={editing.email} onChange={event => setEditing({ ...editing, email: event.target.value })} /></label>
       <label>{editing.id ? 'Mật khẩu mới (để trống để giữ nguyên)' : 'Mật khẩu'}<input type="password" autoComplete="new-password" required={!editing.id} minLength="8" maxLength="128" value={editing.password} onChange={event => setEditing({ ...editing, password: event.target.value })} /></label>
       <div className="admin-staff-form__footer">
         <label className="admin-confirm-check admin-staff-active-toggle">
@@ -80,7 +81,7 @@ export default function AdminStaff({ csrfToken }) {
       </div>
     </form>}
     <div className="admin-table-wrap"><table>
-      <thead><tr><th>Họ tên</th><th>Tài khoản</th><th>Thư điện tử</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+      <thead><tr><th>Họ tên</th><th>Tài khoản</th><th>Email</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
       <tbody>{accounts.map(account => <tr key={account.id}>
         <td><strong>{account.displayName}</strong></td>
         <td>{account.username}</td>

@@ -700,7 +700,79 @@
 .admin-dashboard-chart__tools .admin-dropdown-menu,
 .statistics-head-actions .admin-dropdown-menu {
   width: auto !important;
-  min-width: 140px !important;
+  min-width: 135px !important;
+}
+
+/* ==========================================================================
+   STATISTICS TOOLBAR ACTIONS (In / lưu PDF, Xuất Excel, Đổi kiểu biểu đồ)
+   ========================================================================== */
+.statistics-head-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+}
+
+.statistics-head-actions button,
+.statistics-head-actions .statistics-action-btn {
+  height: 38px !important;
+  min-height: 38px !important;
+  max-height: 38px !important;
+  padding: 0 18px !important;
+  border-radius: 999px !important;
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
+  font-family: inherit !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 7px !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+  box-sizing: border-box !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* Nút In / lưu PDF (Action phụ) - Giao diện sáng */
+.statistics-head-actions button.button-secondary,
+.statistics-head-actions .statistics-action-btn--print {
+  background: #f1f7f3 !important;
+  border: 1.5px solid #c2dbcc !important;
+  color: #1b5635 !important;
+  box-shadow: 0 2px 6px rgba(27, 86, 53, 0.06) !important;
+}
+
+.statistics-head-actions button.button-secondary:hover:not(:disabled),
+.statistics-head-actions .statistics-action-btn--print:hover:not(:disabled) {
+  background: #e6f3eb !important;
+  border-color: #2b7a4c !important;
+  color: #123d24 !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 12px rgba(27, 86, 53, 0.14) !important;
+}
+
+/* Nút Xuất Excel (Action chính) - Giao diện sáng */
+.statistics-head-actions button:not(.button-secondary),
+.statistics-head-actions .statistics-action-btn--excel {
+  background: linear-gradient(135deg, #1d6a40 0%, #298a54 100%) !important;
+  border: 1.5px solid #165633 !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(29, 106, 64, 0.25) !important;
+}
+
+.statistics-head-actions button:not(.button-secondary):hover:not(:disabled),
+.statistics-head-actions .statistics-action-btn--excel:hover:not(:disabled) {
+  background: linear-gradient(135deg, #175734 0%, #227346 100%) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 14px rgba(29, 106, 64, 0.35) !important;
+}
+
+.statistics-head-actions button:disabled,
+.statistics-head-actions .statistics-action-btn:disabled {
+  opacity: 0.55 !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+  box-shadow: none !important;
 }
 
 .admin-dashboard-chart__tools .admin-dropdown-menu__trigger,
@@ -708,29 +780,31 @@
   height: 38px !important;
   min-height: 38px !important;
   max-height: 38px !important;
-  padding: 0 14px !important;
+  padding: 0 16px !important;
   border-radius: 999px !important;
-  background: linear-gradient(135deg, #1b5e39 0%, #2b8454 100%) !important;
-  border: 1px solid #1a5634 !important;
-  color: #ffffff !important;
+  background: #ffffff !important;
+  border: 1.5px solid #c2dbcc !important;
+  color: #1b5635 !important;
   font-size: 12.5px !important;
   font-weight: 700 !important;
-  box-shadow: 0 2px 8px rgba(27, 94, 57, 0.22) !important;
+  box-shadow: 0 2px 6px rgba(27, 86, 53, 0.06) !important;
   width: auto !important;
-  min-width: 140px !important;
+  min-width: 135px !important;
   box-sizing: border-box !important;
 }
 
 .admin-dashboard-chart__tools .admin-dropdown-menu__trigger:hover,
 .statistics-head-actions .admin-dropdown-menu__trigger:hover {
-  background: linear-gradient(135deg, #164f30 0%, #247549 100%) !important;
-  box-shadow: 0 4px 14px rgba(27, 94, 57, 0.3) !important;
+  background: #f7faf8 !important;
+  border-color: #2b7a4c !important;
+  color: #123d24 !important;
+  box-shadow: 0 4px 12px rgba(27, 86, 53, 0.12) !important;
   transform: translateY(-1px) !important;
 }
 
 .admin-dashboard-chart__tools .admin-dropdown-menu__caret,
 .statistics-head-actions .admin-dropdown-menu__caret {
-  color: #a7f3d0 !important;
+  color: #2b7a4c !important;
 }
 
 .admin-dashboard-chart__tools .admin-dropdown-menu__panel,
@@ -1891,4 +1965,201 @@ html[data-admin-theme="dark"] button.admin-link-button:hover {
   color: #bbf7d0 !important;
   text-decoration: underline !important;
 }
+
+/* ==========================================================================
+   STATISTICS TOOLBAR ACTIONS - DARK THEME
+   ========================================================================== */
+html[data-admin-theme="dark"] .statistics-head-actions button.button-secondary,
+html[data-admin-theme="dark"] .statistics-head-actions .statistics-action-btn--print {
+  background: rgba(20, 50, 35, 0.85) !important;
+  border: 1.5px solid rgba(74, 222, 128, 0.3) !important;
+  color: #d1fae5 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+}
+
+html[data-admin-theme="dark"] .statistics-head-actions button.button-secondary:hover:not(:disabled),
+html[data-admin-theme="dark"] .statistics-head-actions .statistics-action-btn--print:hover:not(:disabled) {
+  background: rgba(30, 75, 52, 0.95) !important;
+  border-color: #4ade80 !important;
+  color: #ffffff !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 16px rgba(74, 222, 128, 0.25) !important;
+}
+
+html[data-admin-theme="dark"] .statistics-head-actions button:not(.button-secondary),
+html[data-admin-theme="dark"] .statistics-head-actions .statistics-action-btn--excel {
+  background: linear-gradient(135deg, #1f6b42 0%, #2e8b56 100%) !important;
+  border: 1.5px solid rgba(74, 222, 128, 0.45) !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35) !important;
+}
+
+html[data-admin-theme="dark"] .statistics-head-actions button:not(.button-secondary):hover:not(:disabled),
+html[data-admin-theme="dark"] .statistics-head-actions .statistics-action-btn--excel:hover:not(:disabled) {
+  background: linear-gradient(135deg, #257e4e 0%, #35aa68 100%) !important;
+  border-color: #86efac !important;
+  color: #ffffff !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 16px rgba(45, 148, 90, 0.35) !important;
+}
+
+html[data-admin-theme="dark"] .statistics-head-actions .admin-dropdown-menu__trigger {
+  background: rgba(20, 50, 35, 0.85) !important;
+  border: 1.5px solid rgba(74, 222, 128, 0.3) !important;
+  color: #d1fae5 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+}
+
+html[data-admin-theme="dark"] .statistics-head-actions .admin-dropdown-menu__trigger:hover {
+  background: rgba(30, 75, 52, 0.95) !important;
+  border-color: #4ade80 !important;
+  color: #ffffff !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 16px rgba(74, 222, 128, 0.25) !important;
+}
+
+html[data-admin-theme="dark"] .statistics-head-actions .admin-dropdown-menu__caret {
+  color: #86efac !important;
+}
+
+/* ==========================================================================
+   STAFF TAB POLISH (Checkbox alignment & Edit button)
+   ========================================================================== */
+.admin-staff-form {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 14px !important;
+  margin-bottom: 20px !important;
+  padding: 18px 20px !important;
+  border: 1px solid #d5e4d9 !important;
+  border-radius: 16px !important;
+  background: #f6fbf8 !important;
+}
+.admin-staff-form label:not(.admin-staff-active-toggle) {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  min-width: 180px !important;
+  flex: 1 1 200px !important;
+  font-size: 11.5px !important;
+  font-weight: 700 !important;
+  color: #436450 !important;
+}
+.admin-staff-form__footer {
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  flex-wrap: wrap !important;
+  padding-top: 14px !important;
+  margin-top: 6px !important;
+  border-top: 1px solid #e1ede4 !important;
+}
+.admin-staff-active-toggle {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 8px 14px !important;
+  border-radius: 10px !important;
+  border: 1.5px solid #cfe0d4 !important;
+  background: #ffffff !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  transition: all 0.2s ease !important;
+  min-width: auto !important;
+  flex: 0 0 auto !important;
+  margin: 0 !important;
+}
+.admin-staff-active-toggle:hover {
+  background: #f3f8f5 !important;
+  border-color: #2b7a4c !important;
+}
+.admin-staff-active-toggle input[type="checkbox"] {
+  display: inline-block !important;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  max-width: 18px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  accent-color: #256b47 !important;
+  cursor: pointer !important;
+  vertical-align: middle !important;
+  flex: 0 0 18px !important;
+}
+.admin-staff-active-toggle span {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #163d27 !important;
+  line-height: 1 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+.admin-staff-edit-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  padding: 7px 14px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  border-radius: 9px !important;
+  border: 1px solid #b8dac6 !important;
+  background: #f0f8f3 !important;
+  color: #1b5e39 !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+  box-shadow: 0 1px 3px rgba(27, 94, 57, 0.08) !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+.admin-staff-edit-btn:hover {
+  background: linear-gradient(135deg, #1b5e39 0%, #287d4f 100%) !important;
+  border-color: #1b5e39 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(27, 94, 57, 0.25) !important;
+  transform: translateY(-1px) !important;
+}
+.admin-staff-edit-btn:active {
+  transform: translateY(0) !important;
+}
+html[data-admin-theme="dark"] .admin-staff-form {
+  background: #0e2118 !important;
+  border-color: #264c36 !important;
+}
+html[data-admin-theme="dark"] .admin-staff-form label:not(.admin-staff-active-toggle) {
+  color: #9ec5ad !important;
+}
+html[data-admin-theme="dark"] .admin-staff-form__footer {
+  border-top-color: #1f422e !important;
+}
+html[data-admin-theme="dark"] .admin-staff-active-toggle {
+  background: #12281c !important;
+  border-color: #254a34 !important;
+}
+html[data-admin-theme="dark"] .admin-staff-active-toggle:hover {
+  background: #173324 !important;
+  border-color: #4ade80 !important;
+}
+html[data-admin-theme="dark"] .admin-staff-active-toggle input[type="checkbox"] {
+  accent-color: #4ade80 !important;
+}
+html[data-admin-theme="dark"] .admin-staff-active-toggle span {
+  color: #d1fae5 !important;
+}
+html[data-admin-theme="dark"] .admin-staff-edit-btn {
+  background: rgba(34, 197, 94, 0.1) !important;
+  border: 1px solid rgba(74, 222, 128, 0.3) !important;
+  color: #86efac !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25) !important;
+}
+html[data-admin-theme="dark"] .admin-staff-edit-btn:hover {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%) !important;
+  border-color: #4ade80 !important;
+  color: #052312 !important;
+  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.35) !important;
+  transform: translateY(-1px) !important;
+}
+
 

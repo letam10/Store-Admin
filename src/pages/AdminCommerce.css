@@ -248,59 +248,143 @@ html[data-admin-theme="dark"] details summary {
 
 /* Căn chỉnh form Nhân viên, checkbox "Cho phép đăng nhập" và nút "Sửa thông tin / mật khẩu" */
 .admin-staff-form {
-  margin-bottom: 18px;
-  padding: 16px 18px;
-  border: 1px solid #d5e4d9;
-  border-radius: 14px;
-  background: #f6fbf8;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 14px !important;
+  margin-bottom: 20px !important;
+  padding: 18px 20px !important;
+  border: 1px solid #d5e4d9 !important;
+  border-radius: 16px !important;
+  background: #f6fbf8 !important;
+}
+.admin-staff-form label:not(.admin-staff-active-toggle) {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  min-width: 180px !important;
+  flex: 1 1 200px !important;
+  font-size: 11.5px !important;
+  font-weight: 700 !important;
+  color: #436450 !important;
 }
 .admin-staff-form__footer {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  flex-wrap: wrap;
-  padding-top: 6px;
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  flex-wrap: wrap !important;
+  padding-top: 14px !important;
+  margin-top: 6px !important;
+  border-top: 1px solid #e1ede4 !important;
 }
 .admin-staff-active-toggle {
   display: inline-flex !important;
   flex-direction: row !important;
   align-items: center !important;
-  gap: 9px !important;
-  flex: 0 0 auto !important;
+  gap: 10px !important;
+  padding: 8px 14px !important;
+  border-radius: 10px !important;
+  border: 1.5px solid #cfe0d4 !important;
+  background: #ffffff !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  transition: all 0.2s ease !important;
   min-width: auto !important;
+  flex: 0 0 auto !important;
   margin: 0 !important;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
-  color: #173b28;
-  user-select: none;
+}
+.admin-staff-active-toggle:hover {
+  background: #f3f8f5 !important;
+  border-color: #2b7a4c !important;
 }
 .admin-staff-active-toggle input[type="checkbox"] {
+  display: inline-block !important;
   width: 18px !important;
   height: 18px !important;
+  min-width: 18px !important;
+  max-width: 18px !important;
   margin: 0 !important;
   padding: 0 !important;
-  accent-color: #256b47;
-  cursor: pointer;
-  flex: 0 0 18px;
+  accent-color: #256b47 !important;
+  cursor: pointer !important;
+  vertical-align: middle !important;
+  flex: 0 0 18px !important;
+}
+.admin-staff-active-toggle span {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #163d27 !important;
+  line-height: 1 !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 .admin-staff-edit-btn {
-  white-space: nowrap;
-  padding: 7px 13px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  padding: 7px 14px !important;
   font-size: 12px !important;
+  font-weight: 700 !important;
   border-radius: 9px !important;
+  border: 1px solid #b8dac6 !important;
+  background: #f0f8f3 !important;
+  color: #1b5e39 !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+  box-shadow: 0 1px 3px rgba(27, 94, 57, 0.08) !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+.admin-staff-edit-btn:hover {
+  background: linear-gradient(135deg, #1b5e39 0%, #287d4f 100%) !important;
+  border-color: #1b5e39 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(27, 94, 57, 0.25) !important;
+  transform: translateY(-1px) !important;
+}
+.admin-staff-edit-btn:active {
+  transform: translateY(0) !important;
 }
 .admin-review-reply-btn {
   color: #ffffff !important;
 }
 html[data-admin-theme="dark"] .admin-staff-form {
-  background: #0e2118;
-  border-color: #264c36;
+  background: #0e2118 !important;
+  border-color: #264c36 !important;
+}
+html[data-admin-theme="dark"] .admin-staff-form label:not(.admin-staff-active-toggle) {
+  color: #9ec5ad !important;
+}
+html[data-admin-theme="dark"] .admin-staff-form__footer {
+  border-top-color: #1f422e !important;
 }
 html[data-admin-theme="dark"] .admin-staff-active-toggle {
-  color: #dff4e5;
+  background: #12281c !important;
+  border-color: #254a34 !important;
+}
+html[data-admin-theme="dark"] .admin-staff-active-toggle:hover {
+  background: #173324 !important;
+  border-color: #4ade80 !important;
+}
+html[data-admin-theme="dark"] .admin-staff-active-toggle input[type="checkbox"] {
+  accent-color: #4ade80 !important;
+}
+html[data-admin-theme="dark"] .admin-staff-active-toggle span {
+  color: #d1fae5 !important;
+}
+html[data-admin-theme="dark"] .admin-staff-edit-btn {
+  background: rgba(34, 197, 94, 0.1) !important;
+  border: 1px solid rgba(74, 222, 128, 0.3) !important;
+  color: #86efac !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25) !important;
+}
+html[data-admin-theme="dark"] .admin-staff-edit-btn:hover {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%) !important;
+  border-color: #4ade80 !important;
+  color: #052312 !important;
+  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.35) !important;
+  transform: translateY(-1px) !important;
 }
 html[data-admin-theme="dark"] .admin-staff-form .button-secondary {
   background: #142b1f !important;
@@ -310,4 +394,5 @@ html[data-admin-theme="dark"] .admin-staff-form .button-secondary {
 html[data-admin-theme="dark"] .admin-staff-form .button-secondary:hover {
   background: #1d3d2c !important;
   border-color: #4ade80 !important;
+  color: #ffffff !important;
 }

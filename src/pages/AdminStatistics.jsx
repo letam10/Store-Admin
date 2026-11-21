@@ -128,13 +128,29 @@ export default function AdminStatistics({ Chart }) {
           </p>
         </div>
         <div className="statistics-head-actions">
-          <button type="button" className="button-secondary" disabled={!ready} onClick={() => exportReport('html')}>
+          <button
+            type="button"
+            className="button-secondary statistics-action-btn statistics-action-btn--print"
+            disabled={!ready}
+            onClick={() => exportReport('html')}
+          >
             In / lưu PDF
           </button>
-          <button type="button" disabled={!ready} onClick={() => exportReport('xlsx')}>
+          <button
+            type="button"
+            className="statistics-action-btn statistics-action-btn--excel"
+            disabled={!ready}
+            onClick={() => exportReport('xlsx')}
+          >
             Xuất Excel
           </button>
-          <DropdownMenu value={chartType} options={chartOptions} onChange={setChartType} ariaLabel="Kiểu biểu đồ thống kê" />
+          <DropdownMenu
+            value={chartType}
+            options={chartOptions}
+            onChange={setChartType}
+            ariaLabel="Kiểu biểu đồ thống kê"
+            className="statistics-chart-dropdown"
+          />
         </div>
       </div>
 
