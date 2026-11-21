@@ -1,14 +1,9 @@
 /*
-
   FILE NOTE
-
-  - Mục đích: Cầu nối bền vững 24/7 giữa Store-Admin và Service Worker v3.1.0.
-
-  - Tự phát nhịp PROGRESS_EVENT để tác vụ cào trượt 5 phút không bị timeout sớm trên Admin, đồng thời chuyển tiếp tức thì kết quả duyệt bài TikTok (OMNICART_POST_VERIFIED).
-
+  - Mục đích: Cầu nối bền vững 24/7 giữa Store-Admin và Service Worker v3.3.0.
+  - Liên kết trực tiếp: background.js, Store-Admin/src/pages/AdminSocialAutomation.jsx
+  - Vùng ảnh hưởng khi sửa: Toàn bộ giao tiếp giữa trang Quản trị và Extension Chrome.
 */
-
-
 
 ;(() => {
 
@@ -40,7 +35,7 @@
 
   function getExtensionVersion() {
 
-    try { return chrome.runtime.getManifest().version } catch (_) { return '3.1.0' }
+    try { return chrome.runtime.getManifest().version } catch (_) { return '3.3.0' }
 
   }
 

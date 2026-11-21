@@ -1,9 +1,10 @@
 /*
   FILE NOTE
-  - Mục đích: Lớp truy cập Microsoft SQL Server bằng Microsoft.Data.SqlClient cho API C#.
-  - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/AppDbContext.cs, Store-Admin/server-dotnet/Controllers/*.cs, Store-Admin/sync-db.ps1, Services/AiStoreContext.cs
-  - Vùng ảnh hưởng khi sửa: Toàn bộ truy vấn SQL, khởi tạo bảng, migration và xử lý dữ liệu cửa hàng, dữ liệu sản phẩm mẫu.
+  - Mục đích: Lớp truy cập cơ sở dữ liệu chính (StoreDb), quản lý kết nối, giao dịch và các hàm nghiệp vụ bán hàng, đánh giá.
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Controllers/AdminController.cs, Store-Admin/server-dotnet/Data/StoreDb.AiFacts.cs
+  - Vùng ảnh hưởng khi sửa: Toàn bộ tầng truy vấn dữ liệu SQL Server của hệ thống.
 */
+
 using System.Diagnostics;
 using System.Data;
 using System.Text.Json;
@@ -2280,6 +2281,16 @@ public sealed partial class StoreDb
         cmd.Parameters.AddWithValue("@id", id);
         return cmd.ExecuteNonQuery() > 0;
     }
+
+    public bool DeleteAdminReview(long id)
+    {
+        using var db = Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "DELETE FROM product_reviews WHERE id = @id";
+        cmd.Parameters.AddWithValue("@id", id);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
 
     public IReadOnlyList<object> ListProductReviews(string productId)
     {

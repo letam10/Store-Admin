@@ -1,9 +1,10 @@
 /*
   FILE NOTE
-  - Mục đích: Bộ điều khiển API quản trị hệ thống (đăng nhập, khách hàng, đơn hàng, cấu hình, chat admin).
-  - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.cs, Store-Admin/server-dotnet/Models/ApiModels.cs, Store-Admin/server-dotnet/Security/Tokens.cs
-  - Vùng ảnh hưởng khi sửa: Các chức năng quản trị đơn hàng, quản lý và xóa khách hàng, cập nhật thông tin khách hàng.
+  - Mục đích: Controller API quản trị chung (đơn hàng, khách hàng, cấu hình hệ thống, đánh giá sản phẩm).
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Data/StoreDb.cs, Store-Admin/src/pages/AdminCommerce.jsx
+  - Vùng ảnh hưởng khi sửa: Các API dành riêng cho quản trị viên bao gồm xóa/trả lời đánh giá.
 */
+
 /*
  * @codex-vn-doc
  * Tệp: server-dotnet/Controllers/AdminController.cs

@@ -1,6 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Khai báo các mô hình dữ liệu (Models & DTOs) cho Tự động hóa đăng bài MXH đa tài khoản, hỗ trợ theo dõi duyệt bài 3-5 phút (pending_review), nhập hội nhóm & bài viral thật.
+  - Mục đích: Khai báo các mô hình dữ liệu (Models & DTOs) cho Tự động hóa đăng bài MXH đa tài khoản, mở rộng từ khóa AI và phân loại bài Viral.
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Services/SocialCopywriterService.cs, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs
+  - Vùng ảnh hưởng khi sửa: Toàn bộ API đăng bài, mở rộng từ khóa và phân loại bài viral.
 */
 
 namespace StoreApi.Models;
@@ -190,5 +192,18 @@ public sealed class PublishFailureRequest
 
 public sealed class ImportRealViralRequest
 {
+    public List<SocialViralPost>? Posts { get; set; }
+}
+
+public sealed class ExpandViralTopicRequest
+{
+    public string? TopicKey { get; set; }
+    public string? CustomTopic { get; set; }
+}
+
+public sealed class ClassifyViralPostsRequest
+{
+    public string? RequestedTopic { get; set; }
+    public string? RequestedTopicLabel { get; set; }
     public List<SocialViralPost>? Posts { get; set; }
 }

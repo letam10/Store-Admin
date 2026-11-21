@@ -1,16 +1,15 @@
 /*
   FILE NOTE
-  - Mục đích: Lõi nhận thức thị giác & mô phỏng hành vi người thật 24/7 (OmniVision Engine v3.2.0).
-  - Nâng cấp v3.2.0:
-    1. Giữ nguyên thanh thông báo trạng thái con mắt (👁️) ở góc phải dưới màn hình.
-    2. Ẩn hoàn toàn mọi khung viền/nhãn thao tác đè lên giao diện FB/TikTok (highlightTarget & showVisualMarks chạy ngầm không hiển thị khung che màn hình).
+  - Mục đích: Lõi nhận thức thị giác & mô phỏng hành vi người thật chạy ngầm 24/7 (OmniVision Engine v3.3.0).
+  - Liên kết trực tiếp: background.js, content-facebook.js, content-tiktok.js
+  - Vùng ảnh hưởng khi sửa: Toàn bộ thao tác DOM, cuộn và click của Extension trên Facebook và TikTok.
 */
 
 ;(() => {
-  if (globalThis.__OMNICART_VISION_VERSION__ === '3.2.0' && globalThis.OmniVision) {
+  if (globalThis.__OMNICART_VISION_VERSION__ === '3.3.0' && globalThis.OmniVision) {
     return
   }
-  globalThis.__OMNICART_VISION_VERSION__ = '3.2.0'
+  globalThis.__OMNICART_VISION_VERSION__ = '3.3.0'
 
   const HUD_HOST_ID = 'omnicart-vision-hud-host'
 
@@ -18,14 +17,34 @@
   let pacingMode = 'normal'
   let currentMarkLookup = new Map()
 
+  // Đua giữa setTimeout cục bộ và bộ đếm SW_SLEEP từ Service Worker (Service Worker không bị bóp 1 phút trên tab nền!)
   function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)))
+    const duration = Math.max(0, Math.round(Number(ms) || 0))
+    if (duration <= 0) return Promise.resolve()
+    return new Promise((resolve) => {
+      let done = false
+      const finish = () => {
+        if (done) return
+        done = true
+        clearTimeout(localTimer)
+        resolve()
+      }
+      const localTimer = setTimeout(finish, duration)
+      if (duration >= 150 && typeof chrome !== 'undefined' && chrome.runtime?.id) {
+        try {
+          chrome.runtime.sendMessage({ type: 'SW_SLEEP', ms: Math.min(duration, 15000) }, () => {
+            void chrome.runtime.lastError
+            finish()
+          })
+        } catch (_) {}
+      }
+    })
   }
 
   function getPacingMultiplier() {
-    if (pacingMode === 'careful') return 1.55
+    if (pacingMode === 'careful') return 1.45
     if (pacingMode === 'fast') return 0.45
-    return 1.0
+    return 0.9
   }
 
   function randomGaussianBetween(minMs, maxMs) {
@@ -35,27 +54,27 @@
     return Math.round(low + u * (high - low))
   }
 
-  async function humanDelay(minMs = 600, maxMs = 1400) {
+  async function humanDelay(minMs = 500, maxMs = 1150) {
     const ms = Math.max(80, Math.round(randomGaussianBetween(minMs, maxMs) * getPacingMultiplier()))
     await sleep(ms)
     return ms
   }
 
-  async function humanMicroPause() { return humanDelay(180, 420) }
-  async function humanReadPause() { return humanDelay(1050, 2100) }
-  async function humanReviewPause() { return humanDelay(1500, 2700) }
+  async function humanMicroPause() { return humanDelay(160, 360) }
+  async function humanReadPause() { return humanDelay(850, 1650) }
+  async function humanReviewPause() { return humanDelay(1200, 2100) }
 
+  // Cuộn tức thời lên đầu trang (không chờ smooth animation bị treo trong tab nền)
   async function smoothScrollToTop() {
-    if (window.scrollY <= 60) return
+    if (window.scrollY <= 40) return
     try {
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-      const deadline = Date.now() + 2600
-      while (window.scrollY > 60 && Date.now() < deadline) await sleep(160)
-      if (window.scrollY > 60) window.scrollTo(0, 0)
+      window.scrollTo({ top: 0, behavior: 'auto' })
+      if (document.scrollingElement) document.scrollingElement.scrollTop = 0
+      window.dispatchEvent(new Event('scroll'))
     } catch (_) {
       try { window.scrollTo(0, 0) } catch (_) {}
     }
-    await humanDelay(450, 850)
+    await humanDelay(300, 550)
   }
 
   function normalizeText(value) {
@@ -70,6 +89,9 @@
   function stripToMatchKey(value) {
     return normalizeText(value)
       .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
       .replace(/[^\p{L}\p{N}\s]/gu, ' ')
       .replace(/\s+/g, ' ')
       .trim()
@@ -303,7 +325,7 @@
           if (onStatus) onStatus('network', msg, 'warn')
           else reportStep(platform, 'network', msg, 'warn')
         }
-        await sleep(2000)
+        await sleep(1800)
         continue
       }
       if (health.isPageError) return { ok: false, reason: 'PAGE_ERROR_STATE', health }
@@ -314,7 +336,7 @@
           if (onStatus) onStatus('loading', msg, 'info')
           else reportStep(platform, 'loading', msg, 'info')
         }
-        await sleep(800)
+        await sleep(750)
         continue
       }
       return { ok: true, reason: 'STABLE', health }
@@ -328,20 +350,21 @@
     let cur = el?.parentElement
     while (cur && cur !== document.body && cur !== document.documentElement) {
       const style = window.getComputedStyle(cur)
-      if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && cur.scrollHeight > cur.clientHeight + 20) return cur
+      if ((style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflowY === 'overlay') && cur.scrollHeight > cur.clientHeight + 20) return cur
       cur = cur.parentElement
     }
     return document.scrollingElement || document.documentElement
   }
 
+  // Cuộn tức thời an toàn cho cả tab nền lẫn tab đang mở
   async function scrollIntoViewSafely(el, block = 'center') {
     if (!el) return
     try {
-      el.scrollIntoView({ behavior: 'smooth', block, inline: 'nearest' })
-      await humanDelay(280, 540)
+      el.scrollIntoView({ behavior: 'auto', block, inline: 'nearest' })
+      await sleep(180)
     } catch (_) {
       try { el.scrollIntoView({ block }) } catch (_) {}
-      await sleep(220)
+      await sleep(180)
     }
   }
 
@@ -349,21 +372,49 @@
     const scroller = referenceEl ? getScrollableAncestor(referenceEl) : (document.scrollingElement || document.documentElement)
     try {
       const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
-      const current = scroller.scrollTop || 0
-      const remaining = maxTop - current
-      if (remaining > 60) {
-        const steps = Math.min(5, Math.max(2, Math.ceil(remaining / 380)))
-        for (let i = 1; i <= steps; i++) {
-          const nextTop = current + (remaining * i) / steps
-          scroller.scrollTo ? scroller.scrollTo({ top: nextTop, behavior: 'smooth' }) : (scroller.scrollTop = nextTop)
-          await humanDelay(240, 460)
-        }
+      if (maxTop > 0) {
+        scroller.scrollTop = maxTop
+        scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
       }
-      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
+      const docMax = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)
+      window.scrollTo({ top: docMax, behavior: 'auto' })
+      window.dispatchEvent(new Event('scroll'))
     } catch (_) {
       try { window.scrollTo(0, document.body.scrollHeight) } catch (_) {}
     }
-    await humanDelay(400, 720)
+    await humanDelay(320, 560)
+  }
+
+  // Cuộn mạnh cho Infinite Scroll trên TikTok Search & Facebook Feed kể cả trong tab chạy ngầm
+  async function scrollPageDownForFeed(deltaY = 1200, containerHint = null) {
+    const candidates = []
+    if (containerHint) candidates.push(getScrollableAncestor(containerHint))
+    candidates.push(document.scrollingElement || document.documentElement)
+    candidates.push(document.documentElement)
+    candidates.push(document.body)
+
+    // Tìm thêm container cuộn chính của SPA (TikTok / FB) nếu trang không cuộn bằng window
+    for (const el of document.querySelectorAll('main, [role="main"], [id*="main-content"], [class*="DivBodyContainer"], [class*="SearchMain"]')) {
+      if (el.scrollHeight > el.clientHeight + 80) candidates.push(el)
+    }
+
+    const visited = new Set()
+    for (const scroller of candidates) {
+      if (!scroller || visited.has(scroller)) continue
+      visited.add(scroller)
+      try {
+        const before = scroller.scrollTop
+        scroller.scrollTop = before + deltaY
+        scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
+        scroller.dispatchEvent(new WheelEvent('wheel', { deltaY, deltaMode: 0, bubbles: true, cancelable: true }))
+      } catch (_) {}
+    }
+    try {
+      window.scrollBy({ top: deltaY, behavior: 'auto' })
+      window.dispatchEvent(new Event('scroll'))
+      window.dispatchEvent(new WheelEvent('wheel', { deltaY, deltaMode: 0, bubbles: true, cancelable: true }))
+    } catch (_) {}
+    await sleep(220)
   }
 
   function findLabelElement(pattern, options = {}) {
@@ -404,26 +455,26 @@
     return best
   }
 
-  // Click ngầm mô phỏng hành vi người thật (KHÔNG vẽ khung xanh che màn hình!)
-  async function humanClick(el) {
+  async function humanClick(el, options = {}) {
     if (!el) return false
-    await scrollIntoViewSafely(el, 'center')
+    const { skipScroll = false } = options
+    if (!skipScroll) await scrollIntoViewSafely(el, 'center')
 
     const rect = el.getBoundingClientRect()
-    const cx = Math.round(rect.left + rect.width * (0.3 + Math.random() * 0.4))
-    const cy = Math.round(rect.top + rect.height * (0.3 + Math.random() * 0.4))
+    const cx = Math.round(rect.left + rect.width * (0.35 + Math.random() * 0.3))
+    const cy = Math.round(rect.top + rect.height * (0.35 + Math.random() * 0.3))
     const common = { bubbles: true, cancelable: true, composed: true, view: window, clientX: cx, clientY: cy, button: 0, buttons: 1 }
 
     try { el.dispatchEvent(new PointerEvent('pointermove', { ...common, buttons: 0 })) } catch (_) {}
     try { el.dispatchEvent(new PointerEvent('pointerover', { ...common, buttons: 0 })) } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mousemove', { ...common, buttons: 0 })) } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mouseover', { ...common, buttons: 0 })) } catch (_) {}
-    await humanDelay(110, 240)
+    await sleep(randomGaussianBetween(80, 170))
 
     try { el.dispatchEvent(new PointerEvent('pointerdown', common)) } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mousedown', common)) } catch (_) {}
     try { el.focus({ preventScroll: true }) } catch (_) {}
-    await sleep(randomGaussianBetween(65, 145))
+    await sleep(randomGaussianBetween(55, 120))
 
     try { el.dispatchEvent(new PointerEvent('pointerup', { ...common, buttons: 0 })) } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mouseup', { ...common, buttons: 0 })) } catch (_) {}
@@ -431,7 +482,7 @@
       try { el.dispatchEvent(new MouseEvent('click', { ...common, buttons: 0 })) } catch (_) {}
     }
 
-    await humanDelay(240, 480)
+    await humanDelay(200, 420)
     return true
   }
 
@@ -499,14 +550,14 @@
     const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
     let built = '', idx = 0
     while (idx < targetText.length) {
-      const step = Math.min(targetText.length - idx, randomGaussianBetween(2, 6))
+      const step = Math.min(targetText.length - idx, randomGaussianBetween(3, 8))
       const chunk = targetText.slice(idx, idx + step)
       built += chunk
       idx += step
       if (setter) setter.call(el, built)
       else el.value = built
       el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: chunk }))
-      await sleep(Math.round(randomGaussianBetween(35, 90) * getPacingMultiplier()))
+      await sleep(Math.round(randomGaussianBetween(28, 70) * getPacingMultiplier()))
     }
     el.dispatchEvent(new Event('change', { bubbles: true }))
   }
@@ -538,7 +589,7 @@
         el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: targetText }))
         el.dispatchEvent(new Event('change', { bubbles: true }))
       }
-      await humanDelay(320, 620)
+      await humanDelay(280, 520)
       const res = verifySuccess(el)
       return { ok: res.ok, method: humanBurst ? 'human-native-burst' : 'native-setter', actual: res.actual }
     }
@@ -550,13 +601,13 @@
     await humanClick(editableEl)
     if (clearFirst) await clearEditable(editableEl)
     placeCaretAtEnd(editableEl)
-    await humanDelay(450, 900)
+    await humanDelay(380, 720)
 
     try {
       const dt = new DataTransfer()
       dt.setData('text/plain', targetText)
       editableEl.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, composed: true, clipboardData: dt }))
-      await humanDelay(550, 880)
+      await humanDelay(480, 780)
       const c1 = verifySuccess(editableEl)
       if (c1.ok) { if (dismissPopover) dispatchEscape(editableEl); return { ok: true, method: 'synthetic-paste', actual: c1.actual } }
     } catch (_) {}
@@ -567,7 +618,7 @@
       const dt = new DataTransfer()
       dt.setData('text/plain', targetText)
       editableEl.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, composed: true, inputType: 'insertFromPaste', data: targetText, dataTransfer: dt }))
-      await humanDelay(500, 820)
+      await humanDelay(450, 740)
       const c2 = verifySuccess(editableEl)
       if (c2.ok) { if (dismissPopover) dispatchEscape(editableEl); return { ok: true, method: 'beforeinput-paste', actual: c2.actual } }
     } catch (_) {}
@@ -583,9 +634,9 @@
           editableEl.dispatchEvent(textEvent)
         }
         if (i < lines.length - 1) document.execCommand('insertLineBreak', false, null)
-        await sleep(Math.round(randomGaussianBetween(65, 150) * getPacingMultiplier()))
+        await sleep(Math.round(randomGaussianBetween(50, 120) * getPacingMultiplier()))
       }
-      await humanDelay(520, 850)
+      await humanDelay(460, 760)
       const c3 = verifySuccess(editableEl)
       if (c3.ok) { if (dismissPopover) dispatchEscape(editableEl); return { ok: true, method: 'chromium-textInput', actual: c3.actual } }
     } catch (_) {}
@@ -597,10 +648,10 @@
       for (let i = 0; i < lines.length; i++) {
         if (lines[i]) document.execCommand('insertText', false, lines[i])
         if (i < lines.length - 1) document.execCommand('insertLineBreak', false, null)
-        await sleep(Math.round(randomGaussianBetween(55, 130) * getPacingMultiplier()))
+        await sleep(Math.round(randomGaussianBetween(45, 110) * getPacingMultiplier()))
       }
       editableEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: targetText }))
-      await humanDelay(500, 820)
+      await humanDelay(450, 740)
       const c4 = verifySuccess(editableEl)
       if (c4.ok) { if (dismissPopover) dispatchEscape(editableEl); return { ok: true, method: 'execCommand-lines', actual: c4.actual } }
     } catch (_) {}
@@ -611,7 +662,7 @@
         placeCaretAtEnd(editableEl)
         await navigator.clipboard.writeText(targetText)
         document.execCommand('paste')
-        await humanDelay(500, 800)
+        await humanDelay(450, 720)
         const c5 = verifySuccess(editableEl)
         if (c5.ok) { if (dismissPopover) dispatchEscape(editableEl); return { ok: true, method: 'clipboard-api', actual: c5.actual } }
       } catch (_) {}
@@ -695,26 +746,6 @@
 
   function getElementByMarkId(markId) { return currentMarkLookup.get(Number(markId)) || null }
 
-  // Chạy ngầm không vẽ ô đỏ lên màn hình
-  async function askVisionAI(goal, context = {}) {
-    try {
-      const somMap = buildInteractiveMap(context.root || document)
-      if (!somMap.items.length) return { ok: false, reason: 'NO_INTERACTIVE_ELEMENTS' }
-      const response = await new Promise((resolve) => {
-        try {
-          chrome.runtime.sendMessage({ type: 'VISION_AI_ANALYZE', goal, platform: context.platform || 'unknown', step: context.step || '', somMap }, (res) => {
-            if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message })
-            else resolve(res || { ok: false, error: 'NO_VISION_RESPONSE' })
-          })
-        } catch (err) { resolve({ ok: false, error: err.message }) }
-      })
-      if (response?.ok && response.targetMarkId) return { ...response, element: getElementByMarkId(response.targetMarkId) }
-      return response
-    } catch (err) {
-      return { ok: false, error: err.message }
-    }
-  }
-
   function reportStep(platform, step, message, level = 'info', extra = {}) {
     try {
       showHudStatus(`[${platform.toUpperCase()}] ${message}`, level)
@@ -722,7 +753,6 @@
     } catch (_) {}
   }
 
-  // CHỈ HIỆN DÒNG THÔNG BÁO CON MẮT NHỎ Ở GÓC PHẢI DƯỚI MÀN HÌNH
   function ensureHudHost() {
     let host = document.getElementById(HUD_HOST_ID)
     if (host) return host
@@ -752,7 +782,6 @@
     setTimeout(() => { try { document.getElementById(HUD_HOST_ID)?.remove() } catch (_) {} }, delayMs)
   }
 
-  // Ẩn hoàn toàn khung highlight đè lên trang web!
   function highlightTarget() {}
   function showVisualMarks() {}
   function clearVisualMarks() {}
@@ -770,15 +799,15 @@
   } catch (_) {}
 
   globalThis.OmniVision = {
-    version: '3.2.0',
+    version: '3.3.0',
     sleep, humanDelay, humanMicroPause, humanReadPause, humanReviewPause, smoothScrollToTop,
     normalizeText, stripToMatchKey, formatPostText, truncateClean, formatHashtags, composeBodyAndHashtags, parseHumanCount,
     getDeepActiveElement, queryAllDeep, isReallyVisible, isElementDisabled, isInViewport,
     getAccessibleLabel, getElementColorInfo, inspectPageHealth, waitForPageStable,
-    getScrollableAncestor, scrollIntoViewSafely, scrollContainerToBottom,
+    getScrollableAncestor, scrollIntoViewSafely, scrollContainerToBottom, scrollPageDownForFeed,
     findLabelElement, findControlNearLabel, humanClick, readEditorValue, isTextMatched, smartTypeText, dispatchEscape,
     captureVisualImageSnapshot, findNewlyRenderedMedia, buildInteractiveMap,
-    showVisualMarks, clearVisualMarks, getElementByMarkId, askVisionAI,
+    showVisualMarks, clearVisualMarks, getElementByMarkId,
     reportStep, showHudStatus, highlightTarget, clearHud, applyConfig
   }
 })()

@@ -1,12 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Content Script OmniVision v3.2.2 cho Facebook Desktop 2026 (Đa tài khoản • Ẩn khung thao tác).
-  - Liên kết trực tiếp: extension/manifest.json, extension/vision-engine.js, extension/background.js
-  - Vùng ảnh hưởng khi sửa: Tự động đăng bài Facebook & cào bài viral Facebook
-  - Cập nhật v3.2.2:
-    1. Bắt trực tiếp thanh "Bạn đang nghĩ gì?" (pill bar) và nút "Ảnh/video" trên Trang cá nhân (kể cả khi ảnh bìa cao).
-    2. Tự động cuộn đến thanh đăng bài nếu bị che khuất dưới ảnh bìa và bấm nút "Ảnh/video" dự phòng nếu click thanh chưa mở.
-    3. Giữ nguyên đầy đủ logic cuộn chọn Chỉ mình tôi, Reels 2026 và cào bài Viral Facebook >= 5K.
+  - Mục đích: Content Script OmniVision v3.3.0 cho Facebook Desktop 2026 (Chạy ngầm tab + Checkpoint phục hồi bước + tách cào Viral Trang chủ vs Thước phim).
+  - Liên kết trực tiếp: vision-engine.js, background.js, content-admin-bridge.js
+  - Vùng ảnh hưởng khi sửa: Luồng tự động đăng bài Facebook và cào bài viết/thước phim viral từ Facebook.
 */
 
 ;(() => {
@@ -15,6 +11,7 @@
   }
 
   const COMPOSER_TEXT_RE = /bạn đang nghĩ gì|what's on your mind|viết gì đó|write something|tạo bài viết|create a post/i
+  const EXCLUDE_NOTE_RE = /chia sẻ suy nghĩ|share a thought|ghi chú|note/i
   const PHOTO_BTN_RE = /ảnh\/video|photo\/video|thêm ảnh|add photo/i
   const ONLY_ME_RE = /chỉ mình tôi|only me/i
   const PUBLIC_RE = /công khai|public/i
@@ -36,7 +33,7 @@
       return false
     }
     if (message.type === 'FB_EXECUTE_POST') {
-      executeFacebookPost(message.payload)
+      executeFacebookPost(message.payload, message.checkpoint || {})
         .then(sendResponse)
         .catch((err) => sendResponse({ ok: false, error: err.message || String(err) }))
       return true
@@ -91,9 +88,9 @@
   async function navigateToProfileViaTopRightAvatar(stepLog) {
     const leftLink = findHomeSidebarProfileAvatarLink()
     if (leftLink) {
-      stepLog('nav', 'Đang bấm Avatar góc trên trái để vào Trang cá nhân...')
+      stepLog('nav', 'Đang mở Trang cá nhân...')
       await V().humanClick(leftLink)
-      if (await M().waitFor(() => !isNonProfilePage(), 8000)) { await V().humanDelay(1200, 2000); return true }
+      if (await M().waitFor(() => !isNonProfilePage(), 8000)) { await V().humanDelay(1000, 1600); return true }
     }
 
     const bannerBtns = Array.from(document.querySelectorAll('[role="banner"] [role="button"], [role="banner"] button'))
@@ -104,19 +101,19 @@
     if (!avatarBtn) return false
 
     stepLog('nav', 'Đang bấm Avatar góc trên phải để về Trang cá nhân...')
-    await V().humanClick(avatarBtn)
-    await V().humanDelay(700, 1200)
+    await V().humanClick(avatarBtn, { skipScroll: true })
+    await V().humanDelay(650, 1050)
 
     const profileMenuLink = Array.from(document.querySelectorAll('[role="dialog"] a[href], [role="menu"] a[href], a[href*="/me"]'))
       .find((a) => {
         if (!V().isReallyVisible(a, { minWidth: 90, minHeight: 28 })) return false
         const r = a.getBoundingClientRect()
-        return r.left >= window.innerWidth * 0.55 && r.top >= 50 && r.top <= 240 && /facebook\.com\/(me\/?|profile\.php\?id=\d+)/i.test(a.href || '')
+        return r.left >= window.innerWidth * 0.5 && r.top >= 45 && r.top <= 260 && /facebook\.com\/(me\/?|profile\.php\?id=\d+)/i.test(a.href || '')
       })
 
     if (profileMenuLink) {
-      await V().humanClick(profileMenuLink)
-      if (await M().waitFor(() => !isNonProfilePage(), 9000)) { await V().humanDelay(1300, 2200); return true }
+      await V().humanClick(profileMenuLink, { skipScroll: true })
+      if (await M().waitFor(() => !isNonProfilePage(), 9000)) { await V().humanDelay(1100, 1800); return true }
     } else {
       V().dispatchEscape()
     }
@@ -129,7 +126,7 @@
       for (const el of V().queryAllDeep(dialog, 'strong, span[dir="auto"], a[role="link"] span')) {
         if (!V().isReallyVisible(el)) continue
         const r = el.getBoundingClientRect()
-        if (r.top - dRect.top > 180 || r.top - dRect.top < 40) continue
+        if (r.top - dRect.top > 180 || r.top - dRect.top < 35) continue
         const txt = V().normalizeText(el.innerText || el.textContent)
         if (txt.length >= 2 && txt.length <= 60 && !/tạo bài viết|create post|công khai|chỉ mình tôi|bạn bè|nhãn ai/i.test(txt)) return txt
       }
@@ -143,85 +140,65 @@
     return Boolean(!el || el.closest('[role="banner"], [role="navigation"], header'))
   }
 
+  // Tìm chính xác thanh "Bạn đang nghĩ gì?" (bỏ qua bóng ghi chú "Chia sẻ suy nghĩ..." trên avatar!)
   function findComposerTrigger() {
+    const scope = document.querySelector('[role="main"]') || document.body
     let best = null, bestScore = -Infinity
-    for (const el of document.querySelectorAll('span, div, p, [role="button"], button, [tabindex="0"]')) {
+
+    for (const el of V().queryAllDeep(scope, 'span, div[role="button"], button')) {
+      if (!V().isReallyVisible(el, { minWidth: 60, minHeight: 16 })) continue
       if (isInsideFixedTopBanner(el) || el.closest('[role="dialog"], [role="article"]')) continue
-      if (!V().isReallyVisible(el, { minWidth: 20, minHeight: 12 })) continue
 
-      const raw = V().normalizeText(`${el.innerText || el.textContent || ''} ${el.getAttribute('aria-label') || ''} ${el.getAttribute('placeholder') || ''}`)
-      if (!raw || raw.length > 90 || !COMPOSER_TEXT_RE.test(raw)) continue
+      const label = V().normalizeText(`${el.innerText || el.textContent || ''} ${el.getAttribute('aria-label') || ''}`)
+      if (!label || label.length > 90 || EXCLUDE_NOTE_RE.test(label) || !COMPOSER_TEXT_RE.test(label)) continue
 
-      let clickable = el.closest('[role="button"], button, [tabindex="0"]')
-      if (!clickable || isInsideFixedTopBanner(clickable)) {
-        let cur = el
-        for (let i = 0; i < 4 && cur && cur !== document.body; i++) {
-          const cr = cur.getBoundingClientRect()
-          if (cr.width >= 100 && cr.height >= 20 && cr.height <= 85) { clickable = cur; break }
-          cur = cur.parentElement
-        }
-      }
-      if (!clickable) clickable = el
-
+      // Ưu tiên node lá hoặc nút trực tiếp
+      const clickable = el.closest('[role="button"], button, [tabindex="0"]') || el
+      if (isInsideFixedTopBanner(clickable)) continue
       const cRect = clickable.getBoundingClientRect()
-      if (cRect.width < 70 || cRect.height < 18 || cRect.height > 120) continue
+      if (cRect.width < 120 || cRect.height < 24 || cRect.height > 105) continue
 
-      let score = 50
-      if (cRect.width >= 150) score += 30
-      if (cRect.left > window.innerWidth * 0.15 && cRect.left < window.innerWidth * 0.85) score += 20
-      if (cRect.top > 60) score += 10
-      if (raw.length < 45) score += 15
-
+      const score = 60 +
+        (clickable.getAttribute('role') === 'button' ? 30 : 0) +
+        (cRect.width >= 240 ? 25 : 0) +
+        (cRect.left > window.innerWidth * 0.25 ? 20 : 0) +
+        (label.length < 36 ? 20 : 0)
       if (score > bestScore) { bestScore = score; best = clickable }
     }
-    if (best) return best
-
-    const photoBtn = findProfilePhotoShortcut()
-    if (photoBtn) return photoBtn
-
-    return null
+    return best
   }
 
   function findProfilePhotoShortcut() {
-    for (const el of document.querySelectorAll('span, div, [role="button"], button, [tabindex="0"]')) {
-      if (isInsideFixedTopBanner(el) || el.closest('[role="dialog"], [role="article"]')) continue
-      if (!V().isReallyVisible(el, { minWidth: 20, minHeight: 14 })) continue
-
+    const scope = document.querySelector('[role="main"]') || document.body
+    return V().queryAllDeep(scope, '[role="button"], button').find((el) => {
+      if (!V().isReallyVisible(el, { minWidth: 60, minHeight: 24 })) return false
+      if (isInsideFixedTopBanner(el) || el.closest('[role="dialog"], [role="article"]')) return false
       const label = V().normalizeText(`${el.innerText || el.textContent || ''} ${el.getAttribute('aria-label') || ''}`)
-      if (!label || label.length > 40 || !PHOTO_BTN_RE.test(label)) continue
-
-      const clickable = el.closest('[role="button"], button, [tabindex="0"]') || el
-      const r = clickable.getBoundingClientRect()
-      if (r.width >= 40 && r.height >= 18 && r.height <= 90) return clickable
-    }
-    return null
-  }
-
-  function findComposerDialog() {
-    const dialogs = V().queryAllDeep(document, 'div[role="dialog"]')
-      .filter((d) => V().isReallyVisible(d, { minWidth: 260, minHeight: 160 }))
-    for (let i = dialogs.length - 1; i >= 0; i--) {
-      const dialog = dialogs[i]
-      const text = V().normalizeText(dialog.innerText || dialog.textContent).slice(0, 450)
-      if (/đối tượng của bài viết|post audience|ai có thể xem bài viết/i.test(text)) continue
-
-      const hasEditor = Boolean(findComposerEditor(dialog))
-      const hasSubmit = Boolean(findSubmitOrNextButton(dialog))
-      const hasComposerTitle = /tạo bài viết|create post|bạn đang nghĩ gì|what's on your mind/i.test(text)
-
-      if ((hasComposerTitle && (hasEditor || hasSubmit)) || (hasEditor && hasSubmit) || (hasEditor && hasExistingMediaInDialog(dialog)) || (hasComposerTitle && hasExistingMediaInDialog(dialog))) {
-        return dialog
-      }
-    }
-    return null
+      return label.length <= 35 && PHOTO_BTN_RE.test(label)
+    }) || null
   }
 
   function findAudienceSubDialog() {
     const dialogs = V().queryAllDeep(document, 'div[role="dialog"]')
       .filter((d) => V().isReallyVisible(d, { minWidth: 280, minHeight: 200 }))
     for (let i = dialogs.length - 1; i >= 0; i--) {
-      if (/đối tượng của bài viết|ai có thể xem bài viết|post audience|who can see your post/i.test(V().normalizeText(dialogs[i].innerText || dialogs[i].textContent).slice(0, 300))) {
+      const headText = V().normalizeText(dialogs[i].innerText || dialogs[i].textContent).slice(0, 320)
+      if (/đối tượng của bài viết|ai có thể xem bài viết|post audience|who can see your post/i.test(headText)) {
         return dialogs[i]
+      }
+    }
+    return null
+  }
+
+  function findComposerDialog() {
+    const dialogs = V().queryAllDeep(document, 'div[role="dialog"]')
+      .filter((d) => V().isReallyVisible(d, { minWidth: 320, minHeight: 220 }))
+    for (let i = dialogs.length - 1; i >= 0; i--) {
+      const dialog = dialogs[i]
+      const text = V().normalizeText(dialog.innerText || dialog.textContent).slice(0, 320)
+      if (/đối tượng của bài viết|post audience/i.test(text) && !findComposerEditor(dialog)) continue
+      if (/tạo bài viết|create post/i.test(text) || (findComposerEditor(dialog) && findSubmitOrNextButton(dialog))) {
+        return dialog
       }
     }
     return null
@@ -231,10 +208,10 @@
     if (!dialog) return false
     const dRect = dialog.getBoundingClientRect()
     if (V().queryAllDeep(dialog, '[role="button"], button').some((b) =>
-      V().isReallyVisible(b) && /^(chỉnh sửa|chỉnh sửa tất cả|edit|edit all)$/i.test(V().normalizeText(b.innerText || b.textContent))
+      V().isReallyVisible(b) && /^(chỉnh sửa|chỉnh sửa tất cả|edit|edit all|thêm ảnh\/video|add photos\/videos)$/i.test(V().normalizeText(b.innerText || b.textContent))
     )) return true
     return V().queryAllDeep(dialog, 'img').some((img) =>
-      V().isReallyVisible(img, { minWidth: 85, minHeight: 85 }) && img.getBoundingClientRect().top > dRect.top + 110 && img.complete && img.naturalWidth > 80
+      V().isReallyVisible(img, { minWidth: 85, minHeight: 85 }) && img.getBoundingClientRect().top > dRect.top + 100 && img.complete && img.naturalWidth > 80
     )
   }
 
@@ -276,23 +253,27 @@
     const scope = dialog || document.body
     const dRect = dialog ? dialog.getBoundingClientRect() : { top: 0, bottom: window.innerHeight, left: 0, right: window.innerWidth }
 
-    for (const el of V().queryAllDeep(scope, 'span, div, button, a')) {
+    // Ưu tiên 1: Nút có aria-label quyền riêng tư ngay phần đầu hộp thoại Tạo bài viết
+    for (const btn of V().queryAllDeep(scope, '[role="button"], button, [tabindex="0"]')) {
+      if (btn.closest('[contenteditable="true"], [role="textbox"]')) continue
+      if (!V().isReallyVisible(btn, { minWidth: 28, minHeight: 16, checkAriaHidden: false })) continue
+      const r = btn.getBoundingClientRect()
+      if (dialog && (r.top < dRect.top + 30 || r.top > dRect.top + 280)) continue
+      const aria = V().normalizeText(btn.getAttribute('aria-label'))
+      const vis = V().normalizeText(btn.innerText || btn.textContent)
+      if (/nhãn ai|ai label|^(đóng|close|đăng|post|chỉnh sửa ảnh)/i.test(`${vis} ${aria}`)) continue
+      if (/chỉnh sửa quyền riêng tư|edit privacy|chia sẻ với|sharing with|đối tượng|audience/i.test(aria)) return btn
+    }
+
+    // Ưu tiên 2: Nhãn văn bản chính xác Công khai / Bạn bè / Chỉ mình tôi
+    for (const el of V().queryAllDeep(scope, 'span, div, button')) {
       if (el.closest('[contenteditable="true"], [role="textbox"]')) continue
       if (!V().isReallyVisible(el, { minWidth: 18, minHeight: 10, checkAriaHidden: false })) continue
       const txt = V().normalizeText(el.innerText || el.textContent)
       if (!txt || txt.length > 42 || !AUDIENCE_EXACT_RE.test(txt) || /nhãn ai|ai label/i.test(txt)) continue
       const r = el.getBoundingClientRect()
-      if (dialog && (r.top < dRect.top + 35 || r.top > dRect.top + 420)) continue
-      return el.closest('[role="button"], button, [tabindex="0"], a') || el
-    }
-
-    for (const btn of V().queryAllDeep(scope, '[role="button"], button, [tabindex="0"]')) {
-      if (btn.closest('[contenteditable="true"], [role="textbox"]')) continue
-      if (!V().isReallyVisible(btn, { minWidth: 28, minHeight: 16, checkAriaHidden: false })) continue
-      const aria = V().normalizeText(btn.getAttribute('aria-label'))
-      const vis = V().normalizeText(btn.innerText || btn.textContent)
-      if (/nhãn ai|ai label|^(đóng|close|đăng|post|chỉnh sửa)/i.test(`${vis} ${aria}`)) continue
-      if (/chỉnh sửa quyền riêng tư|edit privacy|chia sẻ với|sharing with|đối tượng|audience|công khai|public|chỉ mình tôi|only me|bạn bè|friends/i.test(aria)) return btn
+      if (dialog && (r.top < dRect.top + 30 || r.top > dRect.top + 300)) continue
+      return el.closest('[role="button"], button, [tabindex="0"]') || el
     }
     return null
   }
@@ -310,7 +291,7 @@
     let best = null, bestDiff = 0
     for (const el of [container, ...Array.from(container.querySelectorAll('div'))]) {
       const diff = (el.scrollHeight || 0) - (el.clientHeight || 0)
-      if (diff > 20 && el.clientHeight > 120 && /(auto|scroll|overlay)/.test(window.getComputedStyle(el).overflowY || '') && diff > bestDiff) {
+      if (diff > 20 && el.clientHeight > 100 && /(auto|scroll|overlay)/.test(window.getComputedStyle(el).overflowY || '') && diff > bestDiff) {
         bestDiff = diff
         best = el
       }
@@ -321,34 +302,57 @@
   async function applyAudiencePrivacy(dialog, requestedPrivacy, stepLog) {
     const targetLabel = requestedPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Công khai'
     const targetPattern = requestedPrivacy === 'only_me' ? ONLY_ME_RE : PUBLIC_RE
+    const oppositePattern = requestedPrivacy === 'only_me' ? PUBLIC_RE : ONLY_ME_RE
 
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      const audienceBtn = findAudienceButton(findComposerDialog() || dialog)
-      if (!audienceBtn) { await V().sleep(500); continue }
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const curDialog = findComposerDialog() || dialog
+      const audienceBtn = findAudienceButton(curDialog)
+      if (!audienceBtn) { await V().sleep(550); continue }
 
       if (parsePrivacyFromText(`${audienceBtn.innerText || ''} ${audienceBtn.getAttribute('aria-label') || ''}`) === requestedPrivacy) {
         return requestedPrivacy
       }
 
-      stepLog('privacy', `Đang mở hộp thoại đối tượng để chọn "${targetLabel}"...`)
-      await V().humanClick(audienceBtn)
-      await M().waitFor(() => Boolean(findAudienceSubDialog()), 6000)
-      await V().humanDelay(550, 950)
+      stepLog('privacy', `Đang chọn đối tượng "${targetLabel}" (lần ${attempt}/3)...`)
+      await V().humanClick(audienceBtn, { skipScroll: true })
+      await M().waitFor(() => Boolean(findAudienceSubDialog()), 6500)
+      await V().humanDelay(450, 800)
 
-      const subDialog = findAudienceSubDialog() || document
+      const subDialog = findAudienceSubDialog()
+      if (!subDialog) continue
+
+      // Nếu có nút "Xem thêm" thì bấm mở rộng danh sách đối tượng trước
+      const seeMoreBtn = V().queryAllDeep(subDialog, '[role="button"], button, span').find((el) =>
+        V().isReallyVisible(el, { minWidth: 30, minHeight: 16 }) && /^(xem thêm|see more)$/i.test(V().normalizeText(el.innerText || el.textContent))
+      )
+      if (seeMoreBtn) {
+        await V().humanClick(seeMoreBtn.closest('[role="button"], button') || seeMoreBtn, { skipScroll: true })
+        await V().humanDelay(450, 750)
+      }
+
       const scroller = findScrollableBoxInside(subDialog)
 
+      // Tìm đúng hàng radio riêng lẻ (KHÔNG chọn thẻ cha chứa cả Công khai lẫn Chỉ mình tôi!)
       const findOptionRow = () => {
-        for (const el of V().queryAllDeep(subDialog, '[role="radio"], [role="menuitem"], [role="option"], [role="listitem"], [role="button"]')) {
+        const candidates = []
+        for (const el of V().queryAllDeep(subDialog, '[role="radio"], [role="listitem"], [role="menuitem"], [role="button"]')) {
           if (el === audienceBtn) continue
           const txt = V().normalizeText(el.innerText || el.textContent)
-          if (txt && txt.length <= 130 && targetPattern.test(txt)) {
-            return el.closest('[role="radio"], [role="menuitem"], [role="button"], [tabindex="0"]') || el
-          }
+          if (!txt || txt.length > 140 || !targetPattern.test(txt)) continue
+          if (oppositePattern.test(txt)) continue // loại bỏ container chứa nhiều option!
+          candidates.push(el)
         }
-        for (const sp of subDialog.querySelectorAll('span, div')) {
+        if (candidates.length > 0) {
+          // Ưu tiên [role="radio"] hoặc phần tử cụ thể nhất (text ngắn nhất)
+          candidates.sort((a, b) => {
+            const rDiff = (b.getAttribute('role') === 'radio' ? 1 : 0) - (a.getAttribute('role') === 'radio' ? 1 : 0)
+            if (rDiff !== 0) return rDiff
+            return V().normalizeText(a.innerText).length - V().normalizeText(b.innerText).length
+          })
+          return candidates[0]
+        }
+        for (const sp of subDialog.querySelectorAll('span')) {
           const txt = V().normalizeText(sp.innerText || sp.textContent)
-          if (!txt || txt.length > 40) continue
           if (requestedPrivacy === 'only_me' ? /^(chỉ mình tôi|only me)$/i.test(txt) : /^(công khai|public)$/i.test(txt)) {
             return sp.closest('[role="radio"], [role="button"], [tabindex="0"]') || sp
           }
@@ -359,39 +363,51 @@
       if (scroller) scroller.scrollTop = 0
       let optionEl = findOptionRow()
 
-      for (let step = 0; step < 6 && (!optionEl || !V().isReallyVisible(optionEl, { minWidth: 30, minHeight: 16 })); step++) {
+      for (let step = 0; step < 8 && (!optionEl || !V().isReallyVisible(optionEl, { minWidth: 30, minHeight: 16 })); step++) {
         if (!scroller) break
-        scroller.scrollTop += 190
-        await V().humanDelay(280, 500)
+        scroller.scrollTop += 220
+        scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
+        await V().sleep(260)
         optionEl = findOptionRow()
       }
 
       if (optionEl) {
-        try { optionEl.scrollIntoView({ behavior: 'smooth', block: 'center' }) } catch (_) {}
-        await V().humanDelay(320, 600)
-        await V().humanClick(optionEl)
-        await V().humanDelay(550, 950)
+        if (scroller) {
+          const sRect = scroller.getBoundingClientRect()
+          const oRect = optionEl.getBoundingClientRect()
+          if (oRect.bottom > sRect.bottom - 10 || oRect.top < sRect.top + 10) {
+            scroller.scrollTop += (oRect.top - sRect.top) - 80
+            await V().sleep(200)
+          }
+        }
+        await V().humanClick(optionEl, { skipScroll: true })
+        await V().humanDelay(450, 800)
 
         const innerRadio = optionEl.querySelector?.('[role="radio"], input[type="radio"]') || optionEl
-        if (innerRadio?.getAttribute?.('aria-checked') === 'false') {
-          await V().humanClick(innerRadio)
-          await V().humanDelay(450, 750)
+        if (innerRadio?.getAttribute?.('aria-checked') === 'false' || innerRadio?.checked === false) {
+          await V().humanClick(innerRadio, { skipScroll: true })
+          await V().humanDelay(400, 700)
         }
 
+        // Bấm nút Xong / Lưu (ưu tiên nút có màu xanh ở cuối hộp thoại)
         const confirmBtn = V().queryAllDeep(subDialog, '[role="button"], button').find((btn) =>
-          V().isReallyVisible(btn, { minWidth: 50, minHeight: 28 }) && !V().isElementDisabled(btn) &&
+          V().isReallyVisible(btn, { minWidth: 48, minHeight: 28 }) && !V().isElementDisabled(btn) &&
           /^(xong|done|lưu|save|cập nhật|update)$/i.test(V().normalizeText(btn.innerText || btn.textContent))
         )
-        if (confirmBtn) { await V().humanClick(confirmBtn); await V().humanDelay(750, 1250) }
+        if (confirmBtn) {
+          await V().humanClick(confirmBtn, { skipScroll: true })
+          await V().humanDelay(650, 1100)
+        }
       } else {
         V().dispatchEscape()
-        await V().humanDelay(500, 900)
+        await V().humanDelay(450, 750)
       }
 
       const confirmed = await M().waitFor(() => {
+        if (findAudienceSubDialog()) return false
         const btn = findAudienceButton(findComposerDialog() || dialog)
         return Boolean(btn && parsePrivacyFromText(`${btn.innerText || ''} ${btn.getAttribute('aria-label') || ''}`) === requestedPrivacy)
-      }, 5500)
+      }, 6500)
 
       if (confirmed) return requestedPrivacy
     }
@@ -416,25 +432,17 @@
     }
   }
 
-  async function executeFacebookPost(payload) {
+  async function executeFacebookPost(payload, checkpoint = {}) {
     const trace = []
-    const stepLog = (step, msg, level = 'info') => {
+    const stepLog = (step, msg, level = 'info', extra = {}) => {
       trace.push({ step, msg, level, ts: Date.now() })
-      V().reportStep('facebook', step, msg, level)
+      V().reportStep('facebook', step, msg, level, extra)
     }
 
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return { ok: false, error: 'FACEBOOK_HOST_INVALID', visionTrace: trace }
     const stable = await V().waitForPageStable('facebook', { maxWaitMs: 25000, onStatus: stepLog })
     if (!stable.ok) return { ok: false, error: `FACEBOOK_${stable.reason}`, visionTrace: trace }
     if (isLoginOrCheckpointScreen()) return { ok: false, error: 'FACEBOOK_LOGIN_REQUIRED', visionTrace: trace }
-
-    if (isNonProfilePage()) {
-      const moved = await navigateToProfileViaTopRightAvatar(stepLog)
-      if (!moved && isNonProfilePage()) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
-    }
-
-    if (window.scrollY > 80) await V().smoothScrollToTop()
-    if (!payload?.imageDataUrl) return { ok: false, error: 'PRODUCT_IMAGE_REQUIRED', visionTrace: trace }
 
     const requestedPrivacy = String(payload.privacy || 'only_me').toLowerCase()
     const rawTitle = V().formatPostText(payload.title || '', 260)
@@ -443,54 +451,68 @@
     const bodyWithoutDupTitle = rawTitle && V().normalizeText(rawContent).startsWith(V().normalizeText(rawTitle))
       ? rawContent : [rawTitle, rawContent].filter(Boolean).join('\n\n')
     const fullText = V().composeBodyAndHashtags(bodyWithoutDupTitle, rawHashtags, 6000)
+
+    // Đảm bảo đang ở Trang cá nhân
+    if (isNonProfilePage()) {
+      const moved = await navigateToProfileViaTopRightAvatar(stepLog)
+      if (!moved && isNonProfilePage()) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
+    }
+
+    // CHECKPOINT: Nếu trước đó ĐÃ BẤM ĐĂNG rồi mới tải lại/văng trang -> chỉ kiểm chứng, KHÔNG đăng trùng!
+    if (checkpoint.verifyOnly) {
+      stepLog('verify', 'Phục hồi từ Checkpoint sau bước Đăng — đang xác nhận bài mới...')
+      const prevSet = new Set(checkpoint.existingPermalinks || [])
+      const authorName = detectLoggedInAccountName(null)
+      const verified = await waitForFacebookPublishConfirmation(fullText, prevSet, requestedPrivacy, authorName, stepLog)
+      V().clearHud(4000)
+      return { ...verified, visionTrace: trace }
+    }
+
+    if (window.scrollY > 80) await V().smoothScrollToTop()
+    if (!payload?.imageDataUrl) return { ok: false, error: 'PRODUCT_IMAGE_REQUIRED', visionTrace: trace }
     if (!fullText) return { ok: false, error: 'POST_TEXT_REQUIRED', visionTrace: trace }
 
-    await V().humanDelay(650, 1250)
-    const existingPermalinks = new Set(collectPostPermalinks())
+    await V().humanDelay(450, 900)
+    const existingPermalinksList = collectPostPermalinks()
+    const existingPermalinks = new Set(existingPermalinksList)
+    stepLog('navigated', 'Đã ở Trang cá nhân, chuẩn bị mở khung tạo bài...', 'info', { checkpointStep: 'navigated', existingPermalinks: existingPermalinksList.slice(0, 25) })
 
+    // Bước 1: Mở hộp thoại Tạo bài viết (không báo trang lệch oan khi đang ở đúng profile!)
     let dialog = findComposerDialog()
     if (!dialog) {
-      stepLog('open_composer', 'Đang chọn vào thanh "Bạn đang nghĩ gì?" để đăng bài...')
-
-      let trigger = findComposerTrigger() || findProfilePhotoShortcut()
-      if (!trigger) {
-        window.scrollBy({ top: 380, behavior: 'smooth' })
-        await V().humanDelay(600, 1000)
-        trigger = findComposerTrigger() || findProfilePhotoShortcut()
-      }
-      if (!trigger) {
-        window.scrollTo({ top: 0, behavior: 'smooth' })
-        await V().humanDelay(600, 1000)
-        trigger = findComposerTrigger() || findProfilePhotoShortcut()
+      const triggerReady = await M().waitFor(() => Boolean(findComposerTrigger() || findProfilePhotoShortcut()), 15000)
+      if (!triggerReady) {
+        // Chỉ cuộn xuống 450px tìm thử (phòng trường hợp cover photo quá cao)
+        window.scrollTo({ top: 450, behavior: 'auto' })
+        await V().sleep(500)
       }
 
-      if (!trigger) {
-        const ready = await M().waitFor(() => Boolean(findComposerTrigger() || findProfilePhotoShortcut()), 8000)
-        if (ready) trigger = findComposerTrigger() || findProfilePhotoShortcut()
-      }
-      if (!trigger) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
+      for (let openTry = 1; openTry <= 3 && !dialog; openTry++) {
+        const trigger = openTry <= 2 ? (findComposerTrigger() || findProfilePhotoShortcut()) : (findProfilePhotoShortcut() || findComposerTrigger())
+        if (!trigger) { await V().sleep(700); continue }
 
-      await V().scrollIntoViewSafely(trigger, 'center')
-      await V().humanDelay(350, 700)
-      await V().humanClick(trigger)
-
-      let opened = await M().waitFor(() => Boolean(findComposerDialog()), 5500)
-      if (!opened) {
-        const photoShortcut = findProfilePhotoShortcut()
-        if (photoShortcut && photoShortcut !== trigger) {
-          stepLog('open_composer', 'Đang bấm nút "Ảnh/video" để mở khung đăng bài...')
-          await V().scrollIntoViewSafely(photoShortcut, 'center')
-          await V().humanDelay(300, 600)
-          await V().humanClick(photoShortcut)
-          opened = await M().waitFor(() => Boolean(findComposerDialog()), 7000)
+        stepLog('open_composer', openTry <= 2 ? `Đang bấm "Bạn đang nghĩ gì?" (lần ${openTry}/3)...` : 'Đang thử mở qua nút "Ảnh/video"...')
+        await V().humanClick(trigger)
+        // Nếu bấm lần 2 chưa mở, gửi thêm phím Enter sau focus
+        if (openTry === 2) {
+          try {
+            trigger.focus({ preventScroll: true })
+            trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }))
+          } catch (_) {}
         }
+        const opened = await M().waitFor(() => Boolean(findComposerDialog()), 7500)
+        if (opened) dialog = findComposerDialog()
       }
-
-      dialog = findComposerDialog()
     }
-    if (!dialog) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
+
+    if (!dialog) {
+      // Nếu trang bị văng sang nơi khác trong lúc bấm thì mới xin điều hướng
+      if (isNonProfilePage()) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
+      return { ok: false, error: 'FACEBOOK_COMPOSER_NOT_OPENED', visionTrace: trace }
+    }
 
     const authorName = detectLoggedInAccountName(dialog)
+    stepLog('open_composer', 'Đã mở khung "Tạo bài viết".', 'info', { checkpointStep: 'composer_opened' })
     await V().humanReadPause()
 
     // Bước 2: Đổi quyền riêng tư
@@ -498,19 +520,19 @@
     if (actualPrivacy !== requestedPrivacy) {
       return { ok: false, error: requestedPrivacy === 'only_me' ? 'FACEBOOK_ONLY_ME_NOT_CONFIRMED' : 'FACEBOOK_PUBLIC_NOT_CONFIRMED', actualPrivacy, visionTrace: trace }
     }
-    stepLog('privacy', `Đã chọn đối tượng: ${actualPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Công khai'}.`)
-    await V().humanDelay(600, 1100)
+    stepLog('privacy', `Đã xác nhận đối tượng: ${actualPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Công khai'}.`, 'info', { checkpointStep: 'privacy_set' })
+    await V().humanDelay(450, 850)
 
-    // Bước 3: Nạp ảnh sản phẩm
+    // Bước 3: Nạp ảnh sản phẩm (bỏ qua nếu đã có ảnh sẵn trong khung khi phục hồi)
     dialog = findComposerDialog() || dialog
     if (!hasExistingMediaInDialog(dialog)) {
       stepLog('upload_image', 'Đang tải ảnh sản phẩm lên...')
       const imageSnapshot = V().captureVisualImageSnapshot(dialog)
       const imageFile = await M().createProductImageFile(payload.imageDataUrl, 'omnicart-fb-product.png')
-      let imageInput = await M().findImageInput(dialog, 1500, false)
+      let imageInput = await M().findImageInput(dialog, 1800, false)
       if (!imageInput) {
         const photoBtn = findPhotoToolbarButtonInDialog(dialog)
-        if (photoBtn) { await V().humanClick(photoBtn); await V().humanDelay(750, 1300) }
+        if (photoBtn) { await V().humanClick(photoBtn, { skipScroll: true }); await V().humanDelay(650, 1100) }
         imageInput = await M().findImageInput(dialog, 6000, false) || await M().findImageInput(document, 3000, false)
       }
       if (!imageInput || !M().attachFile(imageInput, imageFile)) return { ok: false, error: 'FACEBOOK_IMAGE_NOT_ATTACHED', visionTrace: trace }
@@ -519,27 +541,34 @@
         return Boolean(V().findNewlyRenderedMedia(imageSnapshot, { root: d, minTop: 80, minWidth: 70, minHeight: 70 }) || hasExistingMediaInDialog(d))
       }, 24000, 350)
       if (!previewOk) return { ok: false, error: 'FACEBOOK_IMAGE_PREVIEW_NOT_CONFIRMED', visionTrace: trace }
-      await V().humanDelay(1500, 2500)
+      stepLog('upload_image', 'Đã tải ảnh lên thành công.', 'info', { checkpointStep: 'image_uploaded' })
+      await V().humanDelay(1200, 2000)
     }
 
-    // Bước 4: Điền chữ & hashtag
+    // Bước 4: Điền chữ & hashtag (bỏ qua nếu nội dung đã khớp)
     dialog = findComposerDialog()
-    if (!dialog) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
+    if (!dialog) {
+      if (isNonProfilePage()) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
+      return { ok: false, error: 'FACEBOOK_COMPOSER_CLOSED_UNEXPECTEDLY', visionTrace: trace }
+    }
     const editorBox = findComposerEditor(dialog)
     if (!editorBox) return { ok: false, error: 'FACEBOOK_EDITOR_NOT_FOUND', visionTrace: trace }
 
-    stepLog('fill_text', 'Đang điền nội dung & hashtag...')
-    let typeResult = await V().smartTypeText(editorBox, fullText, { clearFirst: true, placeholderRe: COMPOSER_TEXT_RE })
-    if (!typeResult.ok) {
-      await V().humanDelay(800, 1300)
-      typeResult = await V().smartTypeText(editorBox, fullText, { clearFirst: true, placeholderRe: COMPOSER_TEXT_RE })
+    if (!V().isTextMatched(V().readEditorValue(editorBox), fullText, COMPOSER_TEXT_RE)) {
+      stepLog('fill_text', 'Đang điền nội dung & hashtag...')
+      let typeResult = await V().smartTypeText(editorBox, fullText, { clearFirst: true, placeholderRe: COMPOSER_TEXT_RE })
+      if (!typeResult.ok) {
+        await V().humanDelay(700, 1100)
+        typeResult = await V().smartTypeText(editorBox, fullText, { clearFirst: true, placeholderRe: COMPOSER_TEXT_RE })
+      }
+      if (!typeResult.ok) return { ok: false, error: 'FACEBOOK_TEXT_NOT_INSERTED', visionTrace: trace }
     }
-    if (!typeResult.ok) return { ok: false, error: 'FACEBOOK_TEXT_NOT_INSERTED', visionTrace: trace }
+    stepLog('fill_text', 'Đã điền xong nội dung.', 'info', { checkpointStep: 'text_filled' })
     await V().humanReviewPause()
 
     // Bước 5: Bấm Đăng
     dialog = findComposerDialog()
-    if (!dialog) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
+    if (!dialog) return { ok: false, error: 'FACEBOOK_COMPOSER_CLOSED_BEFORE_SUBMIT', visionTrace: trace }
     let submitInfo = null
     await M().waitFor(() => {
       const found = findSubmitOrNextButton(findComposerDialog() || dialog)
@@ -548,10 +577,10 @@
     }, 10000)
     if (!submitInfo) return { ok: false, error: 'FACEBOOK_SUBMIT_BUTTON_NOT_READY', visionTrace: trace }
 
-    stepLog('submit', 'Đang bấm Đăng bài...')
-    await V().humanClick(submitInfo.element)
+    stepLog('submit', 'Đang bấm Đăng bài...', 'info', { checkpointStep: 'submitted' })
+    await V().humanClick(submitInfo.element, { skipScroll: true })
     if (submitInfo.kind === 'next') {
-      await V().humanDelay(850, 1400)
+      await V().humanDelay(750, 1250)
       let finalPostBtn = null
       await M().waitFor(() => {
         const d = findComposerDialog()
@@ -560,7 +589,7 @@
         if (found?.kind === 'post' && !V().isElementDisabled(found.element)) { finalPostBtn = found.element; return true }
         return false
       }, 9000)
-      if (finalPostBtn) await V().humanClick(finalPostBtn)
+      if (finalPostBtn) await V().humanClick(finalPostBtn, { skipScroll: true })
     }
 
     stepLog('verify', 'Đang xác nhận bài viết mới...')
@@ -570,7 +599,7 @@
   }
 
   async function waitForFacebookPublishConfirmation(fullText, existingPermalinks, actualPrivacy, authorName, stepLog) {
-    const deadline = Date.now() + 42000
+    const deadline = Date.now() + 45000
     const textProbe = V().normalizeText(fullText).slice(0, Math.min(28, fullText.length))
     let dialogClosedAt = 0
 
@@ -578,7 +607,7 @@
       const secondaryBtn = V().queryAllDeep(document, '[role="dialog"] [role="button"], [role="dialog"] button').find((btn) =>
         V().isReallyVisible(btn) && /^(không phải bây giờ|not now|đăng ngay|post now)$/i.test(V().normalizeText(btn.innerText || btn.textContent))
       )
-      if (secondaryBtn && !findComposerDialog()) { await V().humanClick(secondaryBtn); await V().humanDelay(600, 1000) }
+      if (secondaryBtn && !findComposerDialog()) { await V().humanClick(secondaryBtn, { skipScroll: true }); await V().humanDelay(550, 900) }
 
       const alertText = V().queryAllDeep(document, '[role="alert"], [role="dialog"] [role="status"]')
         .filter((el) => V().isReallyVisible(el)).map((el) => V().normalizeText(el.innerText || el.textContent)).join(' ')
@@ -632,7 +661,7 @@
         a.dispatchEvent(new FocusEvent('focus', { bubbles: true }))
       } catch (_) {}
     }
-    if (timeLinks.length > 0) await V().sleep(300)
+    if (timeLinks.length > 0) await V().sleep(280)
     return readLinks()[0] || null
   }
 
@@ -650,6 +679,8 @@
     try {
       const u = new URL(raw)
       if (!/(^|\.)facebook\.com$/i.test(u.hostname)) return raw
+      const reelMatch = u.pathname.match(/\/reel\/(\d+)/i)
+      if (reelMatch) return `https://www.facebook.com/reel/${reelMatch[1]}`
       const next = new URL(`${u.origin}${u.pathname}`)
       for (const key of ['story_fbid', 'fbid', 'id', 'v', 'set', 'multi_permalinks']) {
         if (u.searchParams.has(key)) next.searchParams.set(key, u.searchParams.get(key))
@@ -690,20 +721,17 @@
   }
 
   // =========================================================================
-  // ĐỌC TƯƠNG TÁC CHUẨN FACEBOOK DESKTOP 2026 (INLINE [👍 5,5K] + [aria-label^="Like:"] + HOVER TOOLTIP!)
+  // CÀO BÀI VIRAL FACEBOOK: TÁCH RÕ TRANG CHỦ (FEED) VÀ THƯỚC PHIM (REELS)
   // =========================================================================
 
   async function extractFeedPostMetrics2026(article) {
     let likes = 0, comments = 0, shares = 0
-
-    // 1. Đọc [aria-label^="Thích:"] / [aria-label^="Like:"] (DOM Facebook 10/2026)
     for (const el of article.querySelectorAll('[aria-label^="Thích:"], [aria-label^="Like:"], [aria-label*="cảm xúc"], [aria-label*="reaction"]')) {
       const aria = V().normalizeText(el.getAttribute('aria-label') || '')
       if (/lượt xem|views?/i.test(aria)) continue
       likes = Math.max(likes, V().parseHumanCount(aria), V().parseHumanCount(el.innerText || el.textContent))
     }
 
-    // 2. Đọc trực tiếp thanh nút dưới bài 2026: [👍 5,5K] [💬 68] [↗ 43]
     for (const btn of article.querySelectorAll('[role="button"], button')) {
       const aria = V().normalizeText(btn.getAttribute('aria-label') || '')
       const txt = V().normalizeText(btn.innerText || btn.textContent || '')
@@ -733,14 +761,13 @@
       }
     }
 
-    // 3. Biến thể Desktop 2026 ẩn số lượt thích cho tới khi hover vào cụm icon cảm xúc (👍❤️)
     if (likes === 0) {
       const reactCluster = article.querySelector('[role="toolbar"] [role="button"], [aria-label*="cảm xúc"], [aria-label*="reaction"]')
       if (reactCluster) {
         try {
           reactCluster.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))
           reactCluster.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
-          await V().sleep(220)
+          await V().sleep(200)
           const tooltipText = Array.from(document.querySelectorAll('[role="tooltip"]'))
             .map((t) => V().normalizeText(t.innerText || t.textContent)).join(' ')
           if (tooltipText) likes = Math.max(likes, V().parseHumanCount(tooltipText))
@@ -748,11 +775,9 @@
       }
     }
 
-    // 4. Dạng chữ truyền thống ("Tất cả cảm xúc: 12K")
     const fullText = V().normalizeText(article.innerText || '')
     const allReact = fullText.match(/(?:tất cả cảm xúc|all reactions)\s*:?\s*(\d+(?:[.,]\d+)?\s*(?:k|n|nghìn|m|tr|triệu)?)/i)
     if (allReact) likes = Math.max(likes, V().parseHumanCount(allReact[1]))
-
     return { likes, comments, shares }
   }
 
@@ -761,21 +786,22 @@
     const postUrl = cleanFacebookUrl(location.href)
     let likes = 0, comments = 0, shares = 0
 
+    // Chỉ lấy nút nằm đúng trong khung hình hiện tại (loại bỏ Reel liền kề bị cache ở ngoài màn hình!)
     const buttons = Array.from(document.querySelectorAll('[role="button"], button')).filter((b) => {
       if (!V().isReallyVisible(b, { minWidth: 20, minHeight: 20 })) return false
       const r = b.getBoundingClientRect()
-      return r.top > 120 && r.left > window.innerWidth * 0.45
+      return r.top > 90 && r.bottom < window.innerHeight - 10 && r.left > window.innerWidth * 0.45 && r.right <= window.innerWidth
     })
 
     for (const btn of buttons) {
       const aria = V().normalizeText(btn.getAttribute('aria-label') || '')
       const nearText = V().normalizeText(`${btn.innerText || ''} ${btn.nextElementSibling?.innerText || ''} ${btn.parentElement?.innerText || ''}`)
       if (/^(thích|like|bỏ thích|unlike)$/i.test(aria) || /thích|like/i.test(aria)) {
-        if (nearText.length <= 30) likes = Math.max(likes, V().parseHumanCount(nearText))
+        if (nearText.length <= 32) likes = Math.max(likes, V().parseHumanCount(nearText))
       } else if (/bình luận|comment/i.test(aria)) {
-        if (nearText.length <= 30) comments = Math.max(comments, V().parseHumanCount(nearText))
+        if (nearText.length <= 32) comments = Math.max(comments, V().parseHumanCount(nearText))
       } else if (/chia sẻ|share/i.test(aria)) {
-        if (nearText.length <= 30) shares = Math.max(shares, V().parseHumanCount(nearText))
+        if (nearText.length <= 32) shares = Math.max(shares, V().parseHumanCount(nearText))
       }
     }
 
@@ -783,35 +809,41 @@
       .filter((el) => {
         if (!V().isReallyVisible(el)) return false
         const r = el.getBoundingClientRect()
-        return r.top > window.innerHeight * 0.72 && r.left > 180 && r.right < window.innerWidth * 0.85
+        return r.top > window.innerHeight * 0.65 && r.bottom <= window.innerHeight && r.left > 160 && r.right < window.innerWidth * 0.84
       })
       .map((el) => V().normalizeText(el.innerText || el.textContent))
-      .filter((t) => t.length >= 6 && t.length <= 260 && !/^(theo dõi|đang theo dõi|follow|following|âm thanh gốc)$/i.test(t))
+      .filter((t) => t.length >= 6 && t.length <= 260 && !/^(theo dõi|đang theo dõi|follow|following|âm thanh gốc|xem thêm|see more)$/i.test(t))
 
-    return { postUrl, likes, comments, shares, caption: bottomTexts.sort((a, b) => b.length - a.length)[0] || 'Facebook Reels Viral' }
+    const bestCaption = bottomTexts.sort((a, b) => b.length - a.length)[0] || ''
+    return { postUrl, likes, comments, shares, caption: bestCaption || `Thước phim Facebook #${extractFacebookPostId(postUrl) || Date.now()}` }
   }
 
-  async function advanceToNextFacebookReel() {
+  async function advanceToNextFacebookReel(prevUrl) {
     const nextBtn = Array.from(document.querySelectorAll('[role="button"], button')).find((b) =>
-      V().isReallyVisible(b, { minWidth: 28, minHeight: 28 }) && b.getBoundingClientRect().left >= window.innerWidth * 0.85 &&
-      /tiếp theo|next|sau|xuống|down/i.test(V().normalizeText(b.getAttribute('aria-label') || ''))
+      V().isReallyVisible(b, { minWidth: 28, minHeight: 28 }) && b.getBoundingClientRect().left >= window.innerWidth * 0.82 &&
+      /tiếp theo|next|sau|xuống|down|thẻ tiếp theo/i.test(V().normalizeText(b.getAttribute('aria-label') || ''))
     )
-    if (nextBtn) await V().humanClick(nextBtn)
+    if (nextBtn) await V().humanClick(nextBtn, { skipScroll: true })
     else {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, bubbles: true }))
       document.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, bubbles: true }))
+      window.dispatchEvent(new WheelEvent('wheel', { deltaY: 600, bubbles: true }))
     }
-    await V().humanDelay(1650, 2600)
+    // Đợi URL thực sự chuyển sang thước phim kế tiếp để KHÔNG BAO GIỜ cào trùng!
+    await M().waitFor(() => cleanFacebookUrl(location.href) !== prevUrl, 5000, 250)
+    await V().humanDelay(900, 1500)
   }
 
   async function scrapeFacebookViralPosts(options = {}) {
     const targetCount = Number(options.targetCount) || 10
     const minLikes = Number(options.minLikes) || 5000
-    const maxRoundsOnPage = Number(options.maxRoundsOnPage) || 22
-    const idleTimeoutMs = Number(options.idleTimeoutMs) || 5 * 60 * 1000
+    const maxRoundsOnPage = Number(options.maxRoundsOnPage) || 20
+    const idleTimeoutMs = Number(options.idleTimeoutMs) || 4 * 60 * 1000
     let lastFoundAt = Number(options.lastFoundAt) || Date.now()
     const totalAlreadyFound = Number(options.totalAlreadyFound) || 0
     const topicLabel = options.topicLabel || ''
+    const sourceKind = options.sourceKind || (/\/(reel|watch|search\/videos)/i.test(location.pathname) ? 'reels' : 'feed')
+    const sourceTag = sourceKind === 'reels' ? 'Thước phim (Reels)' : 'Trang chủ'
 
     const seenUrls = new Set((options.excludeUrls || []).map((u) => cleanFacebookUrl(u).toLowerCase()))
     const seenFingerprints = new Set()
@@ -822,37 +854,49 @@
 
     const collected = []
 
+    // Chế độ Reels trực tiếp (/reel/...)
     if (/\/reel\b/i.test(location.pathname)) {
+      let stuckCount = 0
       for (let round = 0; round < maxRoundsOnPage && collected.length < targetCount; round++) {
         if (Date.now() - lastFoundAt >= idleTimeoutMs) return { ok: true, posts: collected, timedOut: true, lastFoundAt }
+        const curUrl = cleanFacebookUrl(location.href)
         const reel = extractActiveReelPost2026()
         if (reel && reel.likes >= minLikes) {
           const urlKey = reel.postUrl.toLowerCase()
-          if (!seenUrls.has(urlKey)) {
+          const fp = `${V().stripToMatchKey(reel.caption).slice(0, 42)}|${reel.likes}`
+          if (!seenUrls.has(urlKey) && !seenFingerprints.has(fp)) {
             seenUrls.add(urlKey)
+            seenFingerprints.add(fp)
             lastFoundAt = Date.now()
             collected.push({
               id: `fb-reel-${Date.now()}-${collected.length}`,
               title: V().truncateClean(reel.caption, 105),
               platform: 'facebook',
-              category: topicLabel || 'Facebook Reels',
+              category: topicLabel || 'Thước phim (Reels)',
               postUrl: reel.postUrl,
               summary: V().truncateClean(`${reel.caption} • ${reel.likes.toLocaleString('vi-VN')} cảm xúc`, 250),
               viralityScore: Math.min(99, 86 + Math.min(13, Math.floor(Math.log10(reel.likes) * 3))),
               likesCount: reel.likes, sharesCount: reel.shares, commentsCount: reel.comments,
-              trendingTopic: `${(reel.likes / 1000).toFixed(1)}K+ Reels`,
+              trendingTopic: `Thước phim (Reels) • ${(reel.likes / 1000).toFixed(1)}K+ cảm xúc`,
               createdAt: new Date().toISOString()
             })
-            V().reportStep('facebook', 'scrape_viral', `Facebook Viral: ${totalAlreadyFound + collected.length}/10 bài (${reel.likes.toLocaleString('vi-VN')})`)
+            V().reportStep('facebook', 'scrape_viral', `FB Thước phim: ${totalAlreadyFound + collected.length} bài (${reel.likes.toLocaleString('vi-VN')})`)
           }
         }
         if (collected.length >= targetCount) break
-        await advanceToNextFacebookReel()
+        await advanceToNextFacebookReel(curUrl)
+        if (cleanFacebookUrl(location.href) === curUrl) {
+          stuckCount++
+          if (stuckCount >= 2) break
+        } else {
+          stuckCount = 0
+        }
       }
       V().clearHud(2500)
       return { ok: true, posts: collected, timedOut: false, lastFoundAt }
     }
 
+    // Chế độ Trang chủ / Tìm kiếm Bài viết / Tìm kiếm Video-Reels
     let stagnantScrolls = 0, lastScrollHeight = 0
     for (let round = 0; round < maxRoundsOnPage && collected.length < targetCount; round++) {
       if (Date.now() - lastFoundAt >= idleTimeoutMs) return { ok: true, posts: collected, timedOut: true, lastFoundAt }
@@ -872,29 +916,30 @@
             Array.from(article.querySelectorAll('div[dir="auto"]')).find((d) => V().normalizeText(d.innerText).length >= 12)
           const rawText = V().normalizeText(msgEl?.innerText || msgEl?.textContent || '')
           const author = V().normalizeText(article.querySelector('h2 a, h3 a, h4 a, strong a')?.innerText || '')
-          const hasVideo = Boolean(article.querySelector('video')) || /\/(reel|videos|watch)\//i.test(postUrl)
-          const mediaLabel = hasVideo ? 'Video Facebook' : /\/groups\//i.test(postUrl) ? 'Hội nhóm' : 'Bài ảnh'
+          const isVideoOrReel = Boolean(article.querySelector('video')) || /\/(reel|videos|watch)\//i.test(postUrl)
+          const actualKindTag = isVideoOrReel ? 'Thước phim (Reels)' : 'Trang chủ'
+          if (sourceKind === 'feed' && /\/reel\//i.test(postUrl)) continue
 
-          const summaryText = rawText || `${mediaLabel} từ ${author || 'Facebook'} đạt ${metrics.likes.toLocaleString('vi-VN')} cảm xúc.`
-          const fp = V().stripToMatchKey(summaryText).slice(0, 48)
-          if (fp && seenFingerprints.has(fp)) continue
+          const summaryText = rawText || `[${actualKindTag}] ${author || 'Bài Viral Facebook'} đạt ${metrics.likes.toLocaleString('vi-VN')} cảm xúc.`
+          const fp = `${V().stripToMatchKey(summaryText).slice(0, 44)}|${metrics.likes}`
+          if (seenFingerprints.has(fp)) continue
 
           seenUrls.add(urlKey)
-          if (fp) seenFingerprints.add(fp)
+          seenFingerprints.add(fp)
           lastFoundAt = Date.now()
           collected.push({
-            id: `fb-viral-${Date.now()}-${collected.length}`,
-            title: V().truncateClean(rawText || `[${mediaLabel}] ${author || 'Bài Viral Facebook'}`, 105),
+            id: `fb-${sourceKind}-${Date.now()}-${collected.length}`,
+            title: V().truncateClean(rawText || `[${actualKindTag}] ${author || 'Bài Viral Facebook'}`, 105),
             platform: 'facebook',
-            category: topicLabel || mediaLabel,
+            category: topicLabel || actualKindTag,
             postUrl,
             summary: V().truncateClean(`${author ? `[${author}] ` : ''}${summaryText}`, 250),
             viralityScore: Math.min(99, 85 + Math.min(14, Math.floor(Math.log10(metrics.likes) * 3))),
             likesCount: metrics.likes, sharesCount: metrics.shares, commentsCount: metrics.comments,
-            trendingTopic: `${(metrics.likes / 1000).toFixed(1)}K+ cảm xúc`,
+            trendingTopic: `${actualKindTag} • ${(metrics.likes / 1000).toFixed(1)}K+ cảm xúc`,
             createdAt: new Date().toISOString()
           })
-          V().reportStep('facebook', 'scrape_viral', `Facebook Viral: ${totalAlreadyFound + collected.length}/10 bài (${metrics.likes.toLocaleString('vi-VN')})`)
+          V().reportStep('facebook', 'scrape_viral', `FB ${sourceTag}: ${totalAlreadyFound + collected.length} bài (${metrics.likes.toLocaleString('vi-VN')})`)
         } catch (_) {}
       }
 
@@ -904,8 +949,8 @@
       else { stagnantScrolls = 0; lastScrollHeight = curH }
       if (stagnantScrolls >= 4) break
 
-      window.scrollBy({ top: 900 + Math.round(Math.random() * 550), behavior: 'smooth' })
-      await V().humanDelay(1600, 2600)
+      await V().scrollPageDownForFeed(1150 + Math.round(Math.random() * 450))
+      await V().humanDelay(1300, 2100)
     }
 
     V().clearHud(2500)
@@ -938,7 +983,7 @@
       for (const a of mainRoot.querySelectorAll('a[href*="/groups/"]')) {
         if (groups.length >= targetCount) break
         if (a.closest('[role="navigation"], [role="banner"]')) continue
-        if (!V().isReallyVisible(a, { minWidth: 40, minHeight: 14 }) || a.getBoundingClientRect().left < 280) continue
+        if (!V().isReallyVisible(a, { minWidth: 40, minHeight: 14 }) || a.getBoundingClientRect().left < 240) continue
 
         const cleanUrl = normalizeFacebookGroupUrl(a.href)
         if (!cleanUrl) continue
@@ -973,8 +1018,8 @@
       }
 
       if (groups.length >= targetCount) break
-      window.scrollBy({ top: 800 + Math.round(Math.random() * 450), behavior: 'smooth' })
-      await V().humanDelay(1400, 2300)
+      await V().scrollPageDownForFeed(950 + Math.round(Math.random() * 400))
+      await V().humanDelay(1200, 2000)
     }
 
     V().clearHud(2500)

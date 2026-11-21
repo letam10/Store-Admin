@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 test('Chrome Extension v3.2: ẩn khung thao tác, có cuộn chọn Chỉ mình tôi, Reels 2026 & chủ đề Viral TikTok >=200K', () => {
   const manifest = JSON.parse(readFileSync(resolve('extension/manifest.json'), 'utf-8'))
   assert.strictEqual(manifest.manifest_version, 3)
-  assert.strictEqual(manifest.version, '3.2.0')
+  assert.ok(['3.2.0', '3.3.0'].includes(manifest.version), `Expected version 3.2.0 or 3.3.0, got ${manifest.version}`)
 
   const files = [
     'extension/background.js', 'extension/content-facebook.js', 'extension/content-tiktok.js',

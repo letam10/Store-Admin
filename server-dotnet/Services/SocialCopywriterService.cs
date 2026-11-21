@@ -1,8 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Dịch vụ sáng tạo nội dung tiếp thị bài đăng mạng xã hội (Facebook / TikTok), tích hợp trực tiếp Local Qwen AI (Ollama qwen3.5:4b) và bộ sinh nội dung chuyên biệt dự phòng với đường dẫn sản phẩm chính xác.
+  - Mục đích: Dịch vụ sáng tạo nội dung tiếp thị bài đăng mạng xã hội (Facebook / TikTok), tích hợp trực tiếp Local Qwen AI (Ollama qwen3.5:4b) và bộ mở rộng từ khóa, phân loại/gắn tag bài viral.
   - Liên kết trực tiếp: Store-Admin/server-dotnet/Services/OllamaChatClient.cs, Store-Admin/server-dotnet/Data/StoreDb.SocialAutomation.cs, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs
-  - Vùng ảnh hưởng khi sửa: Chất lượng văn chương, phong cách viết bài bán hàng, định dạng caption, hashtag, liên kết sản phẩm chính xác và câu kêu gọi hành động (CTA).
+  - Vùng ảnh hưởng khi sửa: Chất lượng viết bài, hashtag, gợi ý từ khóa mở rộng và phân loại lọc bài viral.
 */
 
 using System.Globalization;
@@ -270,4 +270,317 @@ public sealed class SocialCopywriterService(IConfiguration configuration)
             Tone = tone
         };
     }
+
+
+    public sealed record ExpandedTopicResult(
+        string TopicLabel,
+        IReadOnlyList<string> FbKeywords,
+        IReadOnlyList<string> TtKeywords,
+        IReadOnlyList<string> Tags,
+        string GeneratedBy);
+
+    public sealed record ClassifiedViralResult(
+        IReadOnlyList<SocialViralPost> Posts,
+        int RemovedOffTopic,
+        int RemovedDuplicates,
+        string GeneratedBy);
+
+    public async Task<ExpandedTopicResult> ExpandViralTopicAsync(string? topicKey, string? customTopic)
+    {
+        var key = (topicKey ?? "all").Trim().ToLowerInvariant();
+        var custom = (customTopic ?? "").Trim();
+        var label = key switch
+        {
+            "vehicles" => "Xe cộ",
+            "anime" => "Anime",
+            "cartoon" => "Hoạt hình",
+            "game" => "Game",
+            "new_product" => "Quảng bá sản phẩm mới",
+            "electronics_compare" => "So sánh sản phẩm điện tử",
+            "custom" => custom,
+            _ => ""
+        };
+
+        var fallback = DefaultKeywordsForTopic(key, custom);
+        if (string.IsNullOrWhiteSpace(label))
+            return new ExpandedTopicResult("", fallback.Fb, fallback.Tt, fallback.Tags, "Preset");
+
+        try
+        {
+            var prompt =
+                $"Bạn là chuyên gia tìm kiếm nội dung Viral Facebook và TikTok tại Việt Nam.\n" +
+                $"Chủ đề cần cào bài viral: \"{label}\".\n" +
+                $"Hãy tạo danh sách 6 từ khóa tìm kiếm phổ biến trên Facebook (fbKeywords), 6 từ khóa dễ ra video triệu tim trên TikTok gồm cả tiếng Việt lẫn tiếng Anh ngắn gọn (ttKeywords), và 5 hashtag ngắn gọn (tags).\n" +
+                $"CHỈ TRẢ VỀ DUY NHẤT JSON hợp lệ theo mẫu (không giải thích thêm):\n" +
+                $"{{\"fbKeywords\":[\"...\"],\"ttKeywords\":[\"...\"],\"tags\":[\"#...\"]}}";
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(18));
+            var raw = await TryGenerateWithOllamaAsync(prompt, maxTokens: 420, cts.Token);
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                var jsonText = ExtractJsonObject(raw);
+                if (jsonText is not null)
+                {
+                    using var doc = JsonDocument.Parse(jsonText);
+                    var root = doc.RootElement;
+                    var fb = ReadStringList(root, "fbKeywords").Concat(fallback.Fb).Distinct(StringComparer.OrdinalIgnoreCase).Take(8).ToArray();
+                    var tt = ReadStringList(root, "ttKeywords").Concat(fallback.Tt).Distinct(StringComparer.OrdinalIgnoreCase).Take(8).ToArray();
+                    var tags = ReadStringList(root, "tags").Concat(fallback.Tags).Distinct(StringComparer.OrdinalIgnoreCase).Take(6).ToArray();
+                    if (fb.Length > 0 && tt.Length > 0)
+                        return new ExpandedTopicResult(label, fb, tt, tags, $"Local Qwen ({ModelName})");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SocialCopywriter] AI mở rộng từ khóa dự phòng ({ex.Message})");
+        }
+
+        return new ExpandedTopicResult(label, fallback.Fb, fallback.Tt, fallback.Tags, "Smart Preset");
+    }
+
+    public async Task<ClassifiedViralResult> ClassifyAndFilterViralPostsAsync(
+        string? requestedTopic,
+        string? requestedTopicLabel,
+        IReadOnlyList<SocialViralPost> inputPosts)
+    {
+        if (inputPosts.Count == 0)
+            return new ClassifiedViralResult([], 0, 0, "None");
+
+        // Bước 1: Lọc trùng chắc chắn theo URL chuẩn hóa và chữ ký tiêu đề + tương tác
+        var deduped = new List<SocialViralPost>();
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenFingerprints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int removedDup = 0;
+
+        foreach (var p in inputPosts)
+        {
+            var urlKey = (p.PostUrl ?? "").Trim().TrimEnd('/').ToLowerInvariant();
+            var titleNorm = Regex.Replace((p.Title ?? "").ToLowerInvariant(), @"[^a-z0-9\p{L}]+", " ").Trim();
+            var fp = $"{p.Platform}|{(titleNorm.Length > 42 ? titleNorm[..42] : titleNorm)}|{p.LikesCount}";
+
+            if ((!string.IsNullOrEmpty(urlKey) && !seenUrls.Add(urlKey)) || !seenFingerprints.Add(fp))
+            {
+                removedDup++;
+                continue;
+            }
+            deduped.Add(p);
+        }
+
+        var topicKey = (requestedTopic ?? "all").Trim().ToLowerInvariant();
+        var topicLabel = (requestedTopicLabel ?? "").Trim();
+        var isFilteredTopic = topicKey != "all" && !string.IsNullOrWhiteSpace(topicLabel);
+
+        // Bước 2: Gọi Local AI qwen3.5:4b để phân loại chủ đề, kiểm tra độ liên quan, gắn #tag & lọc trùng ngữ nghĩa
+        int removedOffTopic = 0;
+        var finalPosts = new List<SocialViralPost>();
+        string generatedBy = "Smart Rules";
+
+        try
+        {
+            const int batchSize = 15;
+            for (int offset = 0; offset < deduped.Count; offset += batchSize)
+            {
+                var batch = deduped.Skip(offset).Take(batchSize).ToList();
+                var compactItems = batch.Select((p, idx) => new
+                {
+                    idx,
+                    platform = p.Platform,
+                    title = p.Title.Length > 110 ? p.Title[..110] : p.Title,
+                    summary = p.Summary.Length > 130 ? p.Summary[..130] : p.Summary
+                });
+
+                var prompt =
+                    "Bạn là bộ lọc AI phân loại bài đăng Viral mạng xã hội.\n" +
+                    (isFilteredTopic
+                        ? $"Chủ đề người dùng yêu cầu: \"{topicLabel}\". Đặt match=true CHỈ KHI bài viết thực sự liên quan tới \"{topicLabel}\", nếu là chủ đề hoàn toàn khác (vd nấu ăn, giáng sinh, máy bay khi đang tìm Anime) thì đặt match=false.\n"
+                        : "Người dùng đang lấy tất cả xu hướng (match luôn là true).\n") +
+                    "Với mỗi bài, hãy gán:\n" +
+                    "- category: 1 tên thể loại Tiếng Việt ngắn gọn (ví dụ: Anime, Xe cộ, Hoạt hình, Game, Quảng bá sản phẩm mới, So sánh sản phẩm điện tử, Công nghệ, Ẩm thực, Thời trang, Đời sống, Giải trí).\n" +
+                    "- tags: 2-3 hashtag ngắn gọn phù hợp nội dung (ví dụ: #Anime #Edit).\n" +
+                    "- dup: true nếu bài có nội dung gần như giống hệt một bài có idx nhỏ hơn trong danh sách, ngược lại false.\n" +
+                    "CHỈ TRẢ VỀ MẢNG JSON hợp lệ (không giải thích): [{\"idx\":0,\"match\":true,\"category\":\"...\",\"tags\":\"#...\",\"dup\":false}]\n" +
+                    "DANH SÁCH BÀI:\n" + JsonSerializer.Serialize(compactItems);
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(28));
+                var raw = await TryGenerateWithOllamaAsync(prompt, maxTokens: 900, cts.Token);
+                var jsonArr = ExtractJsonArray(raw);
+
+                if (jsonArr is not null)
+                {
+                    generatedBy = $"Local Qwen ({ModelName})";
+                    var decisions = new Dictionary<int, (bool Match, string Category, string Tags, bool Dup)>();
+                    using var doc = JsonDocument.Parse(jsonArr);
+                    foreach (var elem in doc.RootElement.EnumerateArray())
+                    {
+                        if (!elem.TryGetProperty("idx", out var idxProp) || !idxProp.TryGetInt32(out var idx)) continue;
+                        var match = !elem.TryGetProperty("match", out var mProp) || mProp.ValueKind != JsonValueKind.False;
+                        var cat = elem.TryGetProperty("category", out var cProp) ? (cProp.GetString() ?? "").Trim() : "";
+                        var tags = elem.TryGetProperty("tags", out var tProp) ? (tProp.GetString() ?? "").Trim() : "";
+                        var dup = elem.TryGetProperty("dup", out var dProp) && dProp.ValueKind == JsonValueKind.True;
+                        decisions[idx] = (match, cat, tags, dup);
+                    }
+
+                    for (int i = 0; i < batch.Count; i++)
+                    {
+                        var post = batch[i];
+                        if (decisions.TryGetValue(i, out var d))
+                        {
+                            if (d.Dup) { removedDup++; continue; }
+                            if (isFilteredTopic && !d.Match) { removedOffTopic++; continue; }
+                            if (!string.IsNullOrWhiteSpace(d.Category))
+                                post.Category = isFilteredTopic ? topicLabel : d.Category;
+                            if (!string.IsNullOrWhiteSpace(d.Tags) && !post.TrendingTopic.Contains('#'))
+                                post.TrendingTopic = string.IsNullOrWhiteSpace(post.TrendingTopic) ? d.Tags : $"{post.TrendingTopic} • {d.Tags}";
+                        }
+                        finalPosts.Add(post);
+                    }
+                    continue;
+                }
+
+                // Dự phòng bằng quy tắc từ khóa nếu Ollama không phản hồi JSON
+                ApplyFallbackClassification(batch, isFilteredTopic, topicKey, topicLabel, finalPosts, ref removedOffTopic);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SocialCopywriter] AI phân loại bài Viral chuyển sang dự phòng ({ex.Message})");
+            finalPosts.Clear();
+            removedOffTopic = 0;
+            ApplyFallbackClassification(deduped, isFilteredTopic, topicKey, topicLabel, finalPosts, ref removedOffTopic);
+        }
+
+        return new ClassifiedViralResult(finalPosts, removedOffTopic, removedDup, generatedBy);
+    }
+
+    private async Task<string?> TryGenerateWithOllamaAsync(string prompt, int maxTokens, CancellationToken ct)
+    {
+        var requestPayload = new
+        {
+            model = ModelName,
+            messages = new[] { new { role = "user", content = prompt } },
+            stream = false,
+            think = false,
+            options = new { temperature = 0.25, num_predict = maxTokens }
+        };
+
+        var json = JsonSerializer.Serialize(requestPayload);
+        using var content = new StringContent(json, Encoding.UTF8, "application/json");
+        using var response = await _httpClient.PostAsync(OllamaHost + "/api/chat", content, ct);
+        if (!response.IsSuccessStatusCode) return null;
+
+        var respStr = await response.Content.ReadAsStringAsync(ct);
+        using var doc = JsonDocument.Parse(respStr);
+        if (doc.RootElement.TryGetProperty("message", out var msgElem) &&
+            msgElem.TryGetProperty("content", out var textElem))
+            return textElem.GetString();
+        return null;
+    }
+
+    private static string? ExtractJsonObject(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var clean = Regex.Replace(raw, @"<think>[\s\S]*?</think>", "", RegexOptions.IgnoreCase).Trim();
+        var start = clean.IndexOf('{');
+        var end = clean.LastIndexOf('}');
+        return start >= 0 && end > start ? clean[start..(end + 1)] : null;
+    }
+
+    private static string? ExtractJsonArray(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var clean = Regex.Replace(raw, @"<think>[\s\S]*?</think>", "", RegexOptions.IgnoreCase).Trim();
+        var start = clean.IndexOf('[');
+        var end = clean.LastIndexOf(']');
+        return start >= 0 && end > start ? clean[start..(end + 1)] : null;
+    }
+
+    private static List<string> ReadStringList(JsonElement root, string prop)
+    {
+        var list = new List<string>();
+        if (!root.TryGetProperty(prop, out var arr) || arr.ValueKind != JsonValueKind.Array) return list;
+        foreach (var item in arr.EnumerateArray())
+        {
+            var s = item.GetString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(s)) list.Add(s);
+        }
+        return list;
+    }
+
+    private static (string[] Fb, string[] Tt, string[] Tags) DefaultKeywordsForTopic(string key, string custom) => key switch
+    {
+        "vehicles" => (["review ô tô", "xe máy độ đẹp", "siêu xe việt nam", "đánh giá xe hơi", "xe điện vinfast", "xe cộ viral"],
+            ["review xe hơi", "siêu xe việt nam", "car edit", "xe máy độ", "motor edit", "supercar viral"], ["#XeCo", "#Oto", "#ReviewXe"]),
+        "anime" => (["anime vietsub", "anime edit", "review anime hay", "jujutsu kaisen vietsub", "one piece vietsub", "naruto vietsub"],
+            ["anime edit", "anime vietsub", "jujutsu kaisen edit", "one piece edit", "naruto edit", "demon slayer edit"], ["#Anime", "#AnimeEdit", "#Vietsub"]),
+        "cartoon" => (["phim hoạt hình review", "hoạt hình 3d trung quốc", "doraemon vietsub", "conan vietsub", "hoạt hình hay"],
+            ["hoạt hình 3d", "donghua edit", "doraemon edit", "conan edit", "cartoon edit", "animation viral"], ["#HoatHinh", "#Donghua", "#PhimHoatHinh"]),
+        "game" => (["liên quân mobile highlight", "lmht highlight", "valorant việt nam", "gaming highlight", "game mobile hay"],
+            ["gaming highlight", "liên quân mobile", "league of legends edit", "valorant clutch", "minecraft viral", "game edit"], ["#Game", "#Gaming", "#Highlight"]),
+        "new_product" => (["unbox sản phẩm mới", "review đồ công nghệ mới", "ra mắt sản phẩm mới", "đồ gia dụng thông minh review", "săn deal đồ tiện ích"],
+            ["unbox review", "đồ gia dụng thông minh", "review đồ tiện ích", "tech unboxing", "tiktok made me buy it", "sản phẩm mới"], ["#SanPhamMoi", "#Unbox", "#Review"]),
+        "electronics_compare" => (["so sánh iphone samsung", "so sánh laptop", "so sánh điện thoại", "so sánh tai nghe", "đánh giá công nghệ"],
+            ["so sánh iphone", "iphone vs samsung", "laptop review", "tech comparison", "so sánh điện thoại", "smartphone test"], ["#CongNghe", "#SoSanh", "#Tech"]),
+        "custom" when !string.IsNullOrWhiteSpace(custom) => ([custom, $"{custom} review", $"{custom} việt nam", $"{custom} viral"],
+            [custom, $"{custom} edit", $"{custom} review", $"{custom} viral"], [$"#{Regex.Replace(custom, @"[^\p{L}\p{N}]", "")}"]),
+        _ => ([], [], [])
+    };
+
+    private static void ApplyFallbackClassification(
+        IEnumerable<SocialViralPost> batch,
+        bool isFilteredTopic,
+        string topicKey,
+        string topicLabel,
+        List<SocialViralPost> target,
+        ref int removedOffTopic)
+    {
+        var rules = new Dictionary<string, string[]>
+        {
+            ["anime"] = ["anime", "manga", "otaku", "vietsub", "jujutsu", "gojo", "one piece", "luffy", "naruto", "sasuke", "hinata", "kimetsu", "demon slayer", "bleach", "dragon ball", "isekai", "waifu", "cosplay", "kyuurun"],
+            ["vehicles"] = ["xe ", "ô tô", "oto", "xe máy", "motor", "moto", "car", "supercar", "vinfast", "bmw", "mercedes", "porsche", "lamborghini", "ferrari", "exciter", "winner", "sh ", "vespa"],
+            ["cartoon"] = ["hoạt hình", "hoat hinh", "cartoon", "donghua", "doraemon", "conan", "pixar", "disney", "tom and jerry", "animation", "3d"],
+            ["game"] = ["game", "gaming", "liên quân", "lien quan", "lmht", "lol", "valorant", "pubg", "free fire", "minecraft", "roblox", "gta", "genshin", "esports", "highlight"],
+            ["new_product"] = ["unbox", "review", "sản phẩm", "san pham", "gia dụng", "tiện ích", "deal", "shopee", "mua", "ra mắt", "mới nhất", "gadgets", "finds"],
+            ["electronics_compare"] = ["so sánh", "so sanh", " vs ", "iphone", "samsung", "xiaomi", "laptop", "macbook", "ipad", "tai nghe", "airpods", "điện thoại", "camera", "chip", "snapdragon"]
+        };
+
+        foreach (var post in batch)
+        {
+            var hay = $"{post.Title} {post.Summary}".ToLowerInvariant();
+            if (isFilteredTopic)
+            {
+                var kws = rules.TryGetValue(topicKey, out var r)
+                    ? r
+                    : topicLabel.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => w.Length >= 2).ToArray();
+                if (kws.Length > 0 && !kws.Any(k => hay.Contains(k)))
+                {
+                    removedOffTopic++;
+                    continue;
+                }
+                post.Category = topicLabel;
+            }
+            else if (string.IsNullOrWhiteSpace(post.Category) || post.Category is "Video TikTok" or "Facebook Reels" or "Bài ảnh")
+            {
+                foreach (var (rk, rkws) in rules)
+                {
+                    if (rkws.Any(k => hay.Contains(k)))
+                    {
+                        post.Category = rk switch
+                        {
+                            "anime" => "Anime",
+                            "vehicles" => "Xe cộ",
+                            "cartoon" => "Hoạt hình",
+                            "game" => "Game",
+                            "new_product" => "Quảng bá sản phẩm mới",
+                            "electronics_compare" => "So sánh sản phẩm điện tử",
+                            _ => post.Category
+                        };
+                        break;
+                    }
+                }
+            }
+            target.Add(post);
+        }
+    }
+
 }

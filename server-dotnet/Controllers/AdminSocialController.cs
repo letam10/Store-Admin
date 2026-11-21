@@ -1,20 +1,9 @@
 /*
-
   FILE NOTE
-
-  - Mục đích: Bộ điều khiển API Tự động hóa đăng bài MXH đa tài khoản (v3.1).
-
-  - Bổ sung mới:
-
-    1. GET /api/admin/social/posts/export — Xuất báo cáo lịch sử đăng bài dạng file Excel (.xlsx) chuẩn OpenXML!
-
-    2. Chấp nhận permalink thật của BẤT KỲ tài khoản Facebook hoặc TikTok nào (@any_handle/video|photo/id).
-
-    3. Giữ nguyên đầy đủ các endpoint cũ + /pending-review + /posts/clear-all + /viral/clear-all + /groups/import-real.
-
+  - Mục đích: Controller quản lý chiến dịch MXH, hàng đợi đăng bài, cào bài viral và tích hợp AI mở rộng từ khóa / phân loại viral.
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Services/SocialCopywriterService.cs, Store-Admin/server-dotnet/Data/StoreDb.SocialAutomation.cs
+  - Vùng ảnh hưởng khi sửa: Các API đăng bài MXH, quản lý bài viral và gợi ý AI cho mạng xã hội.
 */
-
-
 
 using System.Text.RegularExpressions;
 
@@ -496,19 +485,52 @@ public sealed class AdminSocialController(
 
 
 
-    [HttpDelete("viral/{id}")]
-
+        [HttpDelete("viral/{id}")]
     public IActionResult DeleteViral(string id)
-
     {
-
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
-
         return db.DeleteSocialViralPost(id) ? Ok(new { ok = true }) : NotFound(new { ok = false, error = "VIRAL_NOT_FOUND" });
-
     }
 
+    [HttpPost("ai/expand-topic")]
+    public async Task<IActionResult> ExpandViralTopic([FromBody] ExpandViralTopicRequest request)
+    {
+        if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+        var result = await copywriter.ExpandViralTopicAsync(request.TopicKey, request.CustomTopic);
+        return Ok(new
+        {
+            ok = true,
+            topicLabel = result.TopicLabel,
+            fbKeywords = result.FbKeywords,
+            ttKeywords = result.TtKeywords,
+            tags = result.Tags,
+            generatedBy = result.GeneratedBy
+        });
+    }
 
+    [HttpPost("ai/classify-viral")]
+    public async Task<IActionResult> ClassifyViralPosts([FromBody] ClassifyViralPostsRequest request)
+    {
+        if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+        var source = request.Posts is { Count: > 0 } ? request.Posts : db.GetSocialViralPosts().ToList();
+        var result = await copywriter.ClassifyAndFilterViralPostsAsync(request.RequestedTopic, request.RequestedTopicLabel, source);
+
+        // Nếu gọi để lọc & gắn tag lại kho bài hiện có (không truyền posts mới) -> cập nhật thẳng vào DB
+        if (request.Posts is null or { Count: 0 })
+        {
+            db.DeleteAllSocialViralPosts();
+            db.ImportRealViralPosts(result.Posts);
+        }
+
+        return Ok(new
+        {
+            ok = true,
+            posts = result.Posts,
+            removedOffTopic = result.RemovedOffTopic,
+            removedDuplicates = result.RemovedDuplicates,
+            generatedBy = result.GeneratedBy
+        });
+    }
 
     private static bool IsAnyLoggedInRealPermalink(string platform, string postUrl)
 

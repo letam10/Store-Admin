@@ -1,13 +1,15 @@
 /*
   FILE NOTE
-  - Mục đích: Giao diện quản lý thương mại quản trị (Khách hàng, Voucher, Mục yêu thích, Đánh giá sản phẩm, Đơn hàng).
+  - Mục đích: Giao diện quản lý thương mại quản trị (Khách hàng, Voucher, Mục yêu thích, Đánh giá sản phẩm kèm xóa đánh giá, Đơn hàng).
   - Liên kết trực tiếp: Store-Admin/src/pages/AdminOrderWorkflow.jsx, Store-Admin/src/pages/CustomerPasswordEditor.jsx, Store-Admin/src/pages/AdminCommerce.css
-  - Vùng ảnh hưởng khi sửa: Bảng và form quản lý khách hàng, sửa xóa tài khoản, cuộn nội bộ bảng thương mại.
+  - Vùng ảnh hưởng khi sửa: Bảng và form quản lý khách hàng, sửa xóa tài khoản, đánh giá và quyền quản trị viên.
 */
+
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
 import { AdminOrders as OrderManager } from './AdminOrderWorkflow'
 import CustomerPasswordEditor from './CustomerPasswordEditor'
+import ConfirmRemoval from '../components/ui/ConfirmRemoval'
 import DropdownMenu from '../components/ui/DropdownMenu'
 import { tierLabel, dateOnlyLabel, voucherLabel } from '../services/vietnameseLabels'
 import './AdminCommerce.css'
@@ -359,14 +361,15 @@ export function AdminFavorites() {
 }
 
 // Chức năng AdminReviews: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
-export function AdminReviews({ csrfToken }) {
+export function AdminReviews({ csrfToken, role = 'admin' }) {
   const { data, error, reload } = useReport('/api/admin/reviews')
   const [drafts, setDrafts] = useState({})
   const [saveError, setSaveError] = useState('')
+  const [pendingDelete, setPendingDelete] = useState(null)
   const reviews = data?.reviews || []
   const averageRating = reviews.length ? new Intl.NumberFormat('vi-VN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(reviews.reduce((sum, item) => sum + Number(item.rating || 0), 0) / reviews.length) : '—'
   const unanswered = reviews.filter((item) => !item.adminReply).length
-  // Chức năng reply: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
+
   async function reply(id) {
     setSaveError('')
     try {
@@ -374,13 +377,76 @@ export function AdminReviews({ csrfToken }) {
       reload()
     } catch (failure) { setSaveError(failure.message) }
   }
-  return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">PHẢN HỒI KHÁCH HÀNG</p><h2>Đánh giá và bình luận</h2></div><span className="admin-preview-badge">{data?.reviews.length || 0} đánh giá</span></div><div className="admin-commerce-summary admin-commerce-summary--three"><div><small>Tổng đánh giá</small><b>{reviews.length}</b><span>Đã nhận</span></div><div><small>Điểm trung bình</small><b>★ {averageRating}</b><span>Trên thang 5</span></div><div><small>Chưa trả lời</small><b>{unanswered}</b><span>Cần xử lý</span></div></div>
-    {error && <p role="alert">{error}</p>}{saveError && <p role="alert">{saveError}</p>}
+
+  async function removeReview(item) {
+    setSaveError('')
+    try {
+      await apiJson('/api/admin/reviews/' + item.id, { method: 'DELETE', headers: { 'x-csrf-token': csrfToken } })
+      setPendingDelete(null)
+      reload()
+    } catch (failure) { setSaveError(failure.message) }
+  }
+
+  return <section className="admin-module-card">
+    <div className="admin-module-head">
+      <div><p className="admin-eyebrow">PHẢN HỒI KHÁCH HÀNG</p><h2>Đánh giá và bình luận</h2></div>
+      <span className="admin-preview-badge">{data?.reviews.length || 0} đánh giá</span>
+    </div>
+    <div className="admin-commerce-summary admin-commerce-summary--three">
+      <div><small>Tổng đánh giá</small><b>{reviews.length}</b><span>Đã nhận</span></div>
+      <div><small>Điểm trung bình</small><b>★ {averageRating}</b><span>Trên thang 5</span></div>
+      <div><small>Chưa trả lời</small><b>{unanswered}</b><span>Cần xử lý</span></div>
+    </div>
+    {error && <p role="alert" className="admin-error">{error}</p>}
+    {saveError && <p role="alert" className="admin-error">{saveError}</p>}
+    {pendingDelete && (
+      <ConfirmRemoval
+        name={`đánh giá của "${pendingDelete.username}" cho sản phẩm "${pendingDelete.productName}"`}
+        onConfirm={() => removeReview(pendingDelete)}
+        onCancel={() => setPendingDelete(null)}
+      />
+    )}
     {!data && !error && <p>Đang tải…</p>}
-    <div className="admin-commerce-list">{data?.reviews.map((item) => <article key={item.id}><h3>{item.productName}</h3><p>{item.username} · {'★'.repeat(item.rating)} · {new Date(item.createdAt).toLocaleDateString('vi-VN')}</p><blockquote>{item.comment}</blockquote>{item.adminReply && <p><b>Store trả lời:</b> {item.adminReply}</p>}<label>Trả lời khách<textarea rows="2" maxLength="2000" value={drafts[item.id] ?? item.adminReply} onChange={(event) => setDrafts((current) => ({ ...current, [item.id]: event.target.value }))} /></label><button type="button" disabled={!(drafts[item.id] || '').trim()} onClick={() => reply(item.id)}>Gửi trả lời</button></article>)}</div>
+    <div className="admin-commerce-list">
+      {data?.reviews.map((item) => (
+        <article key={item.id}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
+            <div>
+              <h3>{item.productName}</h3>
+              <p>{item.username} · {'★'.repeat(item.rating)} · {new Date(item.createdAt).toLocaleDateString('vi-VN')}</p>
+            </div>
+            {role === 'admin' && (
+              <button
+                type="button"
+                className="table-action table-action--danger"
+                style={{ marginTop: 0 }}
+                onClick={() => setPendingDelete(item)}
+              >
+                Xóa đánh giá
+              </button>
+            )}
+          </div>
+          <blockquote>{item.comment}</blockquote>
+          {item.adminReply && <p><b>Store trả lời:</b> {item.adminReply}</p>}
+          <label>
+            Trả lời khách
+            <textarea
+              rows="2"
+              maxLength="2000"
+              value={drafts[item.id] ?? item.adminReply}
+              onChange={(event) => setDrafts((current) => ({ ...current, [item.id]: event.target.value }))}
+            />
+          </label>
+          <button type="button" className="admin-review-reply-btn" disabled={!(drafts[item.id] || '').trim()} onClick={() => reply(item.id)}>
+            Gửi trả lời
+          </button>
+        </article>
+      ))}
+    </div>
     {data?.reviews.length === 0 && <p>Chưa có đánh giá.</p>}
   </section>
 }
+
 
 // Chức năng AdminOrders: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export function AdminOrders({ csrfToken, role }) { return <OrderManager csrfToken={csrfToken} role={role} /> }

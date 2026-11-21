@@ -1,6 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Giao diện Tự động đăng bài MXH v3.2 — Gọn gàng, tối giản, cào Viral theo chủ đề (FB >= 5K, TikTok >= 200K), bộ sắp xếp & xuất Excel (.xlsx).
+  - Mục đích: Module Quản trị Đăng bài Tự động MXH (Facebook & TikTok), tích hợp OmniVision v3.3.0, mở rộng từ khóa AI Local, lọc & gắn tag bài viral đa chủ đề, mở 1 tab duy nhất.
+  - Liên kết trực tiếp: Store-Admin/extension/content-admin-bridge.js, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs, Store-Admin/src/pages/AdminSocialAutomation.css
+  - Vùng ảnh hưởng khi sửa: Toàn bộ bảng điều khiển đăng bài tự động, cào bài viral và giao tiếp Extension.
 */
 
 import { useEffect, useState, useMemo, useRef } from 'react'
@@ -74,6 +76,19 @@ export default function AdminSocialAutomation({ csrfToken }) {
 
   const [viralPosts, setViralPosts] = useState([])
   const [viralTopic, setViralTopic] = useState('all')
+  const [fbSourceMode, setFbSourceMode] = useState('both') // 'both' | 'feed' | 'reels'
+  const [viralFilterTopic, setViralFilterTopic] = useState('all')
+  const [viralFbKindFilter, setViralFbKindFilter] = useState('all') // 'all' | 'feed' | 'reels'
+  const [viralSearch, setViralSearch] = useState('')
+  const [aiCleaningViral, setAiCleaningViral] = useState(false)
+
+  const handleOpenViralSingleTab = async (url, platform) => {
+    if (!url) return
+    const res = await sendExtensionMessage('OPEN_SINGLE_TAB', { url, platform })
+    if (!res?.ok) {
+      window.open(url, 'omnicart_viral_single_tab', 'noopener')
+    }
+  }
   const [customViralTopic, setCustomViralTopic] = useState('')
   const [fbViralSort, setFbViralSort] = useState('likes_desc')
   const [ttViralSort, setTtViralSort] = useState('likes_desc')
@@ -528,41 +543,108 @@ export default function AdminSocialAutomation({ csrfToken }) {
     }
     try {
       setScrapingViralBusy(true)
-      const topicLabel = VIRAL_TOPICS.find(([k]) => k === viralTopic)?.[1] || 'Tất cả'
-      showNotice(`Đang cào 20 bài Viral (${viralTopic === 'custom' ? customViralTopic.trim() : topicLabel})...`, 'info')
+      const topicLabel = viralTopic === 'custom'
+        ? customViralTopic.trim()
+        : (VIRAL_TOPICS.find(([k]) => k === viralTopic)?.[1]?.replace(/^[^\p{L}\p{N}]+/u, '').trim() || '')
+
+      // Bước 1: Dùng Model AI Local (qwen3.5:4b) sinh 6-8 từ khóa đa dạng theo chủ đề
+      let fbKeywords = []
+      let ttKeywords = []
+      if (viralTopic !== 'all') {
+        showNotice(`🤖 AI Local đang mở rộng đa từ khóa cho chủ đề "${topicLabel}"...`, 'info')
+        try {
+          const expanded = await apiJson('/api/admin/social/ai/expand-topic', {
+            method: 'POST',
+            headers: { 'x-csrf-token': csrfToken },
+            body: JSON.stringify({ topicKey: viralTopic, customTopic: customViralTopic.trim() })
+          })
+          fbKeywords = expanded?.fbKeywords || []
+          ttKeywords = expanded?.ttKeywords || []
+        } catch (_) {}
+      }
+
+      showNotice(`🔥 Đang cào bài Viral (${topicLabel || 'Tất cả'} · FB: ${fbSourceMode === 'feed' ? 'Trang chủ' : fbSourceMode === 'reels' ? 'Thước phim' : 'Trang chủ + Reels'})...`, 'info')
       const res = await sendExtensionMessage('FETCH_REAL_VIRAL', {
         platform: 'both',
         fbCount: 10,
         tiktokCount: 10,
         fbMinLikes: 5000,
         tiktokMinLikes: 200000,
+        fbSourceMode,
         topic: viralTopic,
         customTopic: customViralTopic.trim(),
+        topicLabel,
+        fbKeywords,
+        ttKeywords,
         excludeUrls: viralPosts.map(v => v.postUrl).filter(Boolean)
       })
       if (res?.error === 'EXTENSION_NOT_DETECTED') { setShowExtensionHelp(true); throw new Error('Chưa kết nối Chrome Extension.') }
 
-      const scrapedPosts = res?.data?.posts || []
-      const fbCount = (res?.data?.facebookPosts || []).length
-      const ttCount = (res?.data?.tiktokPosts || []).length
-
+      let scrapedPosts = res?.data?.posts || []
       if (scrapedPosts.length > 0) {
-        const saved = await apiJson('/api/admin/social/viral/import-real', {
-          method: 'POST', headers: { 'x-csrf-token': csrfToken },
-          body: JSON.stringify({ posts: scrapedPosts })
-        })
-        if (saved?.posts) setViralPosts(saved.posts)
-        else {
-          const resViral = await apiJson('/api/admin/social/viral')
-          if (resViral?.posts) setViralPosts(resViral.posts)
+        // Bước 2: Dùng Model AI Local lọc bài sai chủ đề, tự gắn tag & xóa bài trùng lặp
+        showNotice(`🤖 AI Local đang phân loại thể loại, gắn tag & lọc trùng ${scrapedPosts.length} bài...`, 'info')
+        let removedInfo = ''
+        try {
+          const classified = await apiJson('/api/admin/social/ai/classify-viral', {
+            method: 'POST',
+            headers: { 'x-csrf-token': csrfToken },
+            body: JSON.stringify({
+              requestedTopic: viralTopic,
+              requestedTopicLabel: topicLabel,
+              posts: scrapedPosts
+            })
+          })
+          if (classified?.ok && Array.isArray(classified.posts)) {
+            scrapedPosts = classified.posts
+            if (classified.removedOffTopic > 0 || classified.removedDuplicates > 0) {
+              removedInfo = ` (AI lọc bỏ ${classified.removedOffTopic} sai tag, ${classified.removedDuplicates} trùng)`
+            }
+          }
+        } catch (_) {}
+
+        if (scrapedPosts.length > 0) {
+          const saved = await apiJson('/api/admin/social/viral/import-real', {
+            method: 'POST',
+            headers: { 'x-csrf-token': csrfToken },
+            body: JSON.stringify({ posts: scrapedPosts })
+          })
+          if (saved?.posts) setViralPosts(saved.posts)
+          else {
+            const resViral = await apiJson('/api/admin/social/viral')
+            if (resViral?.posts) setViralPosts(resViral.posts)
+          }
+          const fbAdded = scrapedPosts.filter(p => p.platform === 'facebook').length
+          const ttAdded = scrapedPosts.filter(p => p.platform === 'tiktok').length
+          showNotice(`✅ Đã lưu: Facebook +${fbAdded} • TikTok +${ttAdded} bài${removedInfo}.`)
+          setActiveSubTab('groups')
+        } else {
+          showNotice(`Không còn bài nào đạt đúng chủ đề "${topicLabel}" sau khi AI lọc${removedInfo}.`, 'info')
         }
-        showNotice(`Đã cào thêm: Facebook +${fbCount} • TikTok +${ttCount} bài.`)
-        setActiveSubTab('groups')
       } else {
         showNotice('Không tìm thấy thêm bài viral nào đạt ngưỡng.', 'error')
       }
     } catch (err) { showNotice(err.message || 'Lỗi cào bài viral.', 'error') }
     finally { setScrapingViralBusy(false) }
+  }
+
+  // Nút dùng AI Local phân loại lại & lọc trùng toàn bộ kho bài Viral hiện có
+  const handleAiCleanExistingViral = async () => {
+    if (aiCleaningViral || !viralPosts.length) return
+    try {
+      setAiCleaningViral(true)
+      showNotice(`🤖 AI Local đang nhận diện thể loại, tự gắn tag & lọc trùng ${viralPosts.length} bài hiện có...`, 'info')
+      const res = await apiJson('/api/admin/social/ai/classify-viral', {
+        method: 'POST',
+        headers: { 'x-csrf-token': csrfToken },
+        body: JSON.stringify({ requestedTopic: 'all', requestedTopicLabel: '', posts: [] })
+      })
+      if (res?.ok && Array.isArray(res.posts)) {
+        setViralPosts(res.posts)
+        showNotice(`✅ AI đã gắn tag & làm gọn còn ${res.posts.length} bài (đã lọc ${res.removedDuplicates || 0} bài trùng).`)
+      }
+    } catch (err) { showNotice(err.message || 'Lỗi lọc AI.', 'error') }
+    finally { setAiCleaningViral(false) }
   }
 
   const handleAutoScrape5FacebookGroups = async () => {
@@ -684,8 +766,49 @@ export default function AdminSocialAutomation({ csrfToken }) {
     return Number(b.likesCount || 0) - Number(a.likesCount || 0)
   })
 
-  const facebookViralTop10 = useMemo(() => sortViralList(viralPosts.filter(v => String(v.platform || '').toLowerCase() === 'facebook'), fbViralSort).slice(0, 10), [viralPosts, fbViralSort])
-  const tiktokViralTop10 = useMemo(() => sortViralList(viralPosts.filter(v => String(v.platform || '').toLowerCase() === 'tiktok'), ttViralSort).slice(0, 10), [viralPosts, ttViralSort])
+  const isFacebookReelItem = (v) =>
+    /\/reel\/|\/videos\/|\/watch/i.test(String(v.postUrl || '')) ||
+    /thước phim|reels/i.test(`${v.category || ''} ${v.trendingTopic || ''}`)
+
+  const availableViralCategories = useMemo(() => {
+    const set = new Set()
+    for (const v of viralPosts) {
+      const cat = String(v.category || '').trim()
+      if (cat) set.add(cat)
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi'))
+  }, [viralPosts])
+
+  const matchesViralFilters = (v) => {
+    if (viralFilterTopic !== 'all') {
+      const cat = String(v.category || '').trim().toLowerCase()
+      if (cat !== viralFilterTopic.toLowerCase()) return false
+    }
+    if (viralSearch.trim()) {
+      const q = viralSearch.trim().toLowerCase()
+      const hay = `${v.title || ''} ${v.category || ''} ${v.trendingTopic || ''} ${v.summary || ''}`.toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  }
+
+  const facebookViralAll = useMemo(() => {
+    const list = viralPosts.filter((v) => {
+      if (String(v.platform || '').toLowerCase() !== 'facebook') return false
+      if (!matchesViralFilters(v)) return false
+      if (viralFbKindFilter === 'reels') return isFacebookReelItem(v)
+      if (viralFbKindFilter === 'feed') return !isFacebookReelItem(v)
+      return true
+    })
+    return sortViralList(list, fbViralSort)
+  }, [viralPosts, fbViralSort, viralFilterTopic, viralFbKindFilter, viralSearch])
+
+  const tiktokViralAll = useMemo(() => {
+    const list = viralPosts.filter((v) =>
+      String(v.platform || '').toLowerCase() === 'tiktok' && matchesViralFilters(v)
+    )
+    return sortViralList(list, ttViralSort)
+  }, [viralPosts, ttViralSort, viralFilterTopic, viralSearch])
 
   const formatTime = (isoString) => {
     if (!isoString) return '—'
@@ -738,7 +861,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{ fontSize: '20px' }}>👁️</span>
-          <strong style={{ fontSize: '13px' }}>OmniVision v3.2</strong>
+          <strong style={{ fontSize: '13px' }}>OmniVision v3.3</strong>
           <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '12px', background: extensionConnected ? '#10b981' : '#f59e0b', color: '#fff' }}>
             {extensionConnected ? '🟢 Đã kết nối' : '🟡 Chờ Extension'}
           </span>
@@ -924,8 +1047,19 @@ export default function AdminSocialAutomation({ csrfToken }) {
           {/* Bài đăng Viral theo Chủ đề — Chia đôi FB (>= 5K) & TikTok (>= 200K) */}
           <section className="social-panel">
             <div className="social-panel__heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-              <h3>🔥 Bài đăng Viral</h3>
+              <h3>🔥 Bài đăng Viral ({viralPosts.length} bài)</h3>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <select
+                  id="viral-fb-source-select"
+                  aria-label="Nguồn cào Facebook"
+                  className="social-sort-select"
+                  value={fbSourceMode}
+                  onChange={e => setFbSourceMode(e.target.value)}
+                >
+                  <option value="both">📘 FB: Trang chủ + Thước phim</option>
+                  <option value="feed">🏠 FB: Chỉ Trang chủ / Bài viết</option>
+                  <option value="reels">🎬 FB: Chỉ Thước phim (Reels)</option>
+                </select>
                 <select
                   id="viral-topic-select"
                   aria-label="Chủ đề cào bài viral"
@@ -946,7 +1080,10 @@ export default function AdminSocialAutomation({ csrfToken }) {
                   />
                 )}
                 <button type="button" className="social-btn-trigger" onClick={handleScrapeRealViralThroughExtension} disabled={scrapingViralBusy || loading} style={{ fontSize: '12px', padding: '8px 14px' }}>
-                  {scrapingViralBusy ? '⏳ Đang cào 2 Tab...' : '⚡ Cào 20 Bài Viral'}
+                  {scrapingViralBusy ? '⏳ Đang cào...' : '⚡ Cào Bài Viral (AI)'}
+                </button>
+                <button type="button" className="social-action-btn" onClick={handleAiCleanExistingViral} disabled={aiCleaningViral || viralPosts.length === 0} style={{ fontSize: '12px', padding: '8px 12px' }} title="Dùng AI Local tự nhận diện thể loại, gắn tag & lọc bài trùng">
+                  {aiCleaningViral ? '⏳ AI đang lọc...' : '🤖 AI Gắn Tag & Lọc Trùng'}
                 </button>
                 <button type="button" className="social-action-btn social-action-btn--danger" onClick={handleClearAllViralPosts} disabled={loading || viralPosts.length === 0} style={{ fontSize: '12px', padding: '8px 12px' }}>
                   🗑️ Xóa tất cả ({viralPosts.length})
@@ -954,8 +1091,43 @@ export default function AdminSocialAutomation({ csrfToken }) {
               </div>
             </div>
 
+            {/* Thanh lọc bài đăng Viral theo chủ đề, nguồn FB & từ khóa */}
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <input
+                type="search"
+                className="social-input"
+                style={{ maxWidth: '260px', padding: '7px 11px' }}
+                placeholder="🔍 Tìm trong bài viral, hashtag..."
+                value={viralSearch}
+                onChange={e => setViralSearch(e.target.value)}
+              />
+              <div className="social-sort-bar">
+                <label htmlFor="filter-viral-topic">Lọc chủ đề:</label>
+                <select id="filter-viral-topic" className="social-sort-select" value={viralFilterTopic} onChange={e => setViralFilterTopic(e.target.value)}>
+                  <option value="all">Tất cả chủ đề ({viralPosts.length})</option>
+                  {availableViralCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                </select>
+              </div>
+              <div className="social-sort-bar">
+                <label htmlFor="filter-fb-kind">Loại FB:</label>
+                <select id="filter-fb-kind" className="social-sort-select" value={viralFbKindFilter} onChange={e => setViralFbKindFilter(e.target.value)}>
+                  <option value="all">Tất cả (Trang chủ + Reels)</option>
+                  <option value="feed">🏠 Chỉ bài Trang chủ</option>
+                  <option value="reels">🎬 Chỉ Thước phim (Reels)</option>
+                </select>
+              </div>
+              {(viralFilterTopic !== 'all' || viralFbKindFilter !== 'all' || viralSearch) && (
+                <button type="button" className="social-action-btn" onClick={() => { setViralFilterTopic('all'); setViralFbKindFilter('all'); setViralSearch('') }}>
+                  ✕ Bỏ lọc
+                </button>
+              )}
+              <span className="social-muted-text" style={{ marginLeft: 'auto' }}>
+                Đang hiển thị: {facebookViralAll.length + tiktokViralAll.length}/{viralPosts.length} bài · Mở link trên 1 tab duy nhất
+              </span>
+            </div>
+
             <div className="social-viral-split-grid">
-              {/* CỘT TRÁI: FACEBOOK (≥ 5K) */}
+              {/* CỘT TRÁI: TOÀN BỘ FACEBOOK (≥ 5K) */}
               <div className="social-viral-column">
                 <div className="social-viral-column__head social-viral-column__head--fb">
                   <span>📘 Facebook (≥ 5K)</span>
@@ -966,31 +1138,45 @@ export default function AdminSocialAutomation({ csrfToken }) {
                       <option value="name_asc">Tên (A → Z)</option>
                       <option value="name_desc">Tên (Z → A)</option>
                     </select>
-                    <span className="social-viral-count">{facebookViralTop10.length}/10</span>
+                    <span className="social-viral-count">{facebookViralAll.length} bài</span>
                   </div>
                 </div>
                 <div className="social-table-shell social-table-shell--compact">
                   <table className="social-table">
                     <thead><tr><th>#</th><th>Bài đăng</th><th>Cảm xúc</th><th>Link</th></tr></thead>
                     <tbody>
-                      {facebookViralTop10.map((v, idx) => (
+                      {facebookViralAll.map((v, idx) => (
                         <tr key={v.id}>
                           <td><strong>{idx + 1}</strong></td>
                           <td>
-                            <div style={{ fontWeight: 700, marginBottom: '2px' }}>{v.title}</div>
-                            <span className="channel-tag channel-tag--facebook">{v.category || 'Facebook'}</span>
+                            <div style={{ fontWeight: 700, marginBottom: '4px' }}>{v.title}</div>
+                            <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' }}>
+                              <span className="channel-tag channel-tag--facebook">{v.category || 'Facebook'}</span>
+                              <span className="status-tag status-tag--internal_draft" style={{ fontSize: '10px', padding: '2px 6px' }}>
+                                {isFacebookReelItem(v) ? '🎬 Thước phim' : '🏠 Trang chủ'}
+                              </span>
+                            </div>
                           </td>
                           <td style={{ whiteSpace: 'nowrap', fontSize: '11.5px' }}>👍 <strong>{Number(v.likesCount || 0).toLocaleString('vi-VN')}</strong></td>
-                          <td style={{ whiteSpace: 'nowrap' }}><a href={v.postUrl} target="_blank" rel="noopener noreferrer" className="social-action-btn social-table-link">Mở ↗</a></td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            <button
+                              type="button"
+                              className="social-action-btn social-table-link"
+                              onClick={() => handleOpenViralSingleTab(v.postUrl, 'facebook')}
+                              title="Mở gọn trên 1 tab duy nhất"
+                            >
+                              Mở ↗
+                            </button>
+                          </td>
                         </tr>
                       ))}
-                      {facebookViralTop10.length === 0 && <tr><td colSpan={4} className="social-table-empty">Chưa có bài Facebook ≥ 5K.</td></tr>}
+                      {facebookViralAll.length === 0 && <tr><td colSpan={4} className="social-table-empty">Chưa có bài Facebook phù hợp bộ lọc.</td></tr>}
                     </tbody>
                   </table>
                 </div>
               </div>
 
-              {/* CỘT PHẢI: TIKTOK (≥ 200K) */}
+              {/* CỘT PHẢI: TOÀN BỘ TIKTOK (≥ 200K) */}
               <div className="social-viral-column">
                 <div className="social-viral-column__head social-viral-column__head--tt">
                   <span>🎵 TikTok (≥ 200K)</span>
@@ -1001,25 +1187,37 @@ export default function AdminSocialAutomation({ csrfToken }) {
                       <option value="name_asc">Tên (A → Z)</option>
                       <option value="name_desc">Tên (Z → A)</option>
                     </select>
-                    <span className="social-viral-count">{tiktokViralTop10.length}/10</span>
+                    <span className="social-viral-count">{tiktokViralAll.length} bài</span>
                   </div>
                 </div>
                 <div className="social-table-shell social-table-shell--compact">
                   <table className="social-table">
                     <thead><tr><th>#</th><th>Video / Ảnh</th><th>Lượt Tim</th><th>Link</th></tr></thead>
                     <tbody>
-                      {tiktokViralTop10.map((v, idx) => (
+                      {tiktokViralAll.map((v, idx) => (
                         <tr key={v.id}>
                           <td><strong>{idx + 1}</strong></td>
                           <td>
-                            <div style={{ fontWeight: 700, marginBottom: '2px' }}>{v.title}</div>
+                            <div style={{ fontWeight: 700, marginBottom: '4px' }}>{v.title}</div>
                             <span className="channel-tag channel-tag--tiktok">{v.category || 'TikTok'}</span>
+                            {v.trendingTopic?.includes('#') && (
+                              <div className="social-muted-text" style={{ marginTop: '2px', fontSize: '10.5px' }}>{v.trendingTopic.slice(v.trendingTopic.indexOf('#'))}</div>
+                            )}
                           </td>
                           <td style={{ whiteSpace: 'nowrap', fontSize: '11.5px' }}>❤️ <strong>{Number(v.likesCount || 0).toLocaleString('vi-VN')}</strong></td>
-                          <td style={{ whiteSpace: 'nowrap' }}><a href={v.postUrl} target="_blank" rel="noopener noreferrer" className="social-action-btn social-table-link">Mở ↗</a></td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            <button
+                              type="button"
+                              className="social-action-btn social-table-link"
+                              onClick={() => handleOpenViralSingleTab(v.postUrl, 'tiktok')}
+                              title="Mở gọn trên 1 tab duy nhất"
+                            >
+                              Mở ↗
+                            </button>
+                          </td>
                         </tr>
                       ))}
-                      {tiktokViralTop10.length === 0 && <tr><td colSpan={4} className="social-table-empty">Chưa có bài TikTok ≥ 200K tim.</td></tr>}
+                      {tiktokViralAll.length === 0 && <tr><td colSpan={4} className="social-table-empty">Chưa có bài TikTok phù hợp bộ lọc.</td></tr>}
                     </tbody>
                   </table>
                 </div>
@@ -1139,7 +1337,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
         <div className="social-modal-overlay" onClick={() => setShowExtensionHelp(false)}>
           <div className="social-modal-card" style={{ maxWidth: '520px' }} onClick={e => e.stopPropagation()}>
             <div className="social-modal-head">
-              <h3>👁️ Cài đặt OmniVision v3.2</h3>
+              <h3>👁️ Cài đặt OmniVision v3.3</h3>
               <button type="button" className="social-modal-close" onClick={() => setShowExtensionHelp(false)}>✕</button>
             </div>
             <ol style={{ paddingLeft: '20px', fontSize: '13px', lineHeight: 1.65 }}>

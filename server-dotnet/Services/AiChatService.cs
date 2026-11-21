@@ -1,9 +1,10 @@
 /*
   FILE NOTE
-  - Mục đích: Dịch vụ AI Chat điều phối kết nối Ollama, quản lý context size, thinking mode và sinh prompt hệ thống với hướng dẫn định dạng ảnh Markdown, tính toán số học từng bước (100x100:10=) và tra cứu thứ bậc sản phẩm theo đúng rank.
-  - Liên kết trực tiếp: OllamaChatClient.cs, AiStoreContext.cs, Controllers/AdminController.cs, Controllers/SupportController.cs
-  - Vùng ảnh hưởng khi sửa: Toàn bộ phản hồi chat AI cho khách hàng và quản trị viên, thông số nạp mô hình trong Ollama.
+  - Mục đích: Dịch vụ AI Chat chính kết nối Ollama runtime, định dạng system prompt quản trị viên / khách hàng và xây dựng ngữ cảnh.
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Services/AiStoreContext.cs, Store-Admin/server-dotnet/Services/ChatStreamService.cs
+  - Vùng ảnh hưởng khi sửa: Toàn bộ chất lượng và tính chính xác trong câu trả lời của AI Local.
 */
+
 using StoreApi.Data;
 using StoreApi.Models;
 
@@ -45,7 +46,8 @@ public sealed class AiChatService(IConfiguration configuration, StoreDb db, Olla
 
     public Task<AiProviderStatus> GetProviderStatusAsync(CancellationToken cancellationToken) => client.StatusAsync(Host, ModelName, cancellationToken);
 
-    public AiContext Context(string message, IReadOnlyList<ChatTurnData> history, bool admin) => AiStoreContext.Build(message, history, db, admin);
+    public AiContext Context(string message, IReadOnlyList<ChatTurnData> history, bool admin, long? customerId = null)
+        => AiStoreContext.Build(message, history, db, admin, customerId);
 
     public Task StreamAsync(string message, IReadOnlyList<ChatTurnData> history, AiContext facts, bool admin,
         Func<string, Task> delta, Func<string, Task> status, CancellationToken cancellationToken)
@@ -71,7 +73,14 @@ public sealed class AiChatService(IConfiguration configuration, StoreDb db, Olla
             "Tự động không có nghĩa là ngay lập tức. Khi dữ liệu nêu chu kỳ đồng bộ hoặc độ trễ, không hứa kết quả tức thì hay thời gian chắc chắn. " +
             "Khi promotions có requestedMonth, trả lời đúng tháng đó; không đổi tháng sau thành tháng hiện tại. Tồn kho là số sản phẩm, không phải số đơn hàng. " +
             "Không tự nhận đã thực hiện giao dịch hoặc gửi tin nhắn. Không in suy nghĩ nội bộ, mã JSON, nhãn nguồn hay mục Nguồn. " +
-            (admin ? "Bạn đang hỗ trợ quản trị; chỉ dùng adminReport cho số liệu tài chính trong đúng khoảng ngày của báo cáo. " : "Bạn đang hỗ trợ khách hàng. ") +
+            (admin
+                ? "VAI TRÒ QUẢN TRỊ VIÊN: Bạn là Trợ lý phân tích dữ liệu nội bộ kết nối trực tiếp với cơ sở dữ liệu SQL Server của Store. " +
+                  "Bạn ĐƯỢC QUYỀN và BẮT BUỘC sử dụng trực tiếp các trường `adminOrders` (danh sách đơn hàng kèm đầy đủ `items` sản phẩm bên trong từng đơn), `adminMultiPeriodStats` (doanh thu hôm nay, tháng này, kỳ được hỏi, toàn thời gian), `adminReport`, `catalog.bestSellingProducts` (sản phẩm bán chạy nhất từ đơn thực tế), và `adminOperations` (khách hàng tiêu biểu, sản phẩm sắp hết/hết hàng, đánh giá, đổi trả, CSKH) để trả lời trực diện, chính xác từng mã đơn, tên sản phẩm, số lượng, giá tiền và thống kê. " +
+                  "TUYỆT ĐỐI KHÔNG bao giờ trả lời quản trị viên kiểu 'hãy kiểm tra hóa đơn trên app' hay 'liên hệ dịch vụ khách hàng' khi dữ liệu đã có sẵn trong `adminOrders` / `adminOperations` / `adminMultiPeriodStats`! " +
+                  "Nếu quản trị hỏi chung 'sản phẩm trong đơn hàng là sản phẩm gì?' mà không nêu mã cụ thể, hãy liệt kê rõ các đơn hàng gần nhất trong `adminOrders.orders` kèm mã đơn, tên khách, trạng thái và chi tiết các sản phẩm (`items`) trong từng đơn. "
+                : "VAI TRÒ TƯ VẤN KHÁCH HÀNG: Bạn đang hỗ trợ khách hàng mua sắm trực tiếp trên Store. " +
+                  "Khi khách muốn tìm sản phẩm phù hợp theo ngân sách/nhu cầu hoặc so sánh nhiều sản phẩm, hãy chủ động lập bảng/gạch đầu dòng so sánh trực tiếp giá bán, mức giảm, tồn kho, số lượng đã bán (`soldCount`), đánh giá (`averageRating`) và điểm nổi bật của các sản phẩm trong `catalog.products` hoặc `catalog.bestSellingProducts` rồi đưa ra gợi ý hợp lý nhất. " +
+                  "Nếu có `customerAccount` (dữ liệu cá nhân của chính khách đang đăng nhập), bạn có thể trả lời chính xác về đơn hàng gần nhất (`myRecentOrders` kèm sản phẩm đã mua), điểm, hạng thành viên và voucher cá nhân của họ. ") +
             "\nDỮ LIỆU HIỆN TẠI:\n" + facts.Json;
         var messages = new List<AiMessage> { new("system", system) };
         foreach (var turn in history.Where(t => t.Status == "completed").TakeLast(6))

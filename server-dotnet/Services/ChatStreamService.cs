@@ -1,3 +1,10 @@
+/*
+  FILE NOTE
+  - Mục đích: Dịch vụ truyền phát tin nhắn thời gian thực qua Server-Sent Events (SSE) cho trợ lý AI, trích xuất customerId từ phiên khách hàng.
+  - Liên kết trực tiếp: Store-Admin/server-dotnet/Services/AiChatService.cs, Store-Admin/server-dotnet/Services/AiStoreContext.cs
+  - Vùng ảnh hưởng khi sửa: Luồng hội thoại trực tiếp và trích xuất ngữ cảnh người dùng.
+*/
+
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
@@ -67,7 +74,10 @@ public sealed class ChatStreamService(StoreDb db, AiChatService ai, IHostApplica
             started = true;
             Start(http);
             await Write(http, new { type = "conversation", conversationId = conversation }, ct);
-            facts = ai.Context(message, history, kind == "admin");
+            long? customerId = kind == "support" && owner.StartsWith("customer:", StringComparison.Ordinal) && long.TryParse(owner[9..], out var parsedCid)
+                ? parsedCid
+                : null;
+            facts = ai.Context(message, history, kind == "admin", customerId);
             await Write(http, new { type = "sources", sources = facts.Sources }, ct);
             await ai.StreamAsync(message, history, facts, kind == "admin", async chunk =>
             {

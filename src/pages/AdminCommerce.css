@@ -1,9 +1,10 @@
 /*
   FILE NOTE
-  - Mục đích: Định kiểu giao diện quản lý đơn hàng, khách hàng, voucher và sau bán hàng (bảng cuộn nội bộ, sticky th, form).
-  - Liên kết trực tiếp: Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/src/pages/AdminOrderWorkflow.jsx, Store-Admin/src/pages/AdminAfterSales.jsx
-  - Vùng ảnh hưởng khi sửa: Bảng khách hàng, đơn hàng, đổi trả và các form thao tác quản trị.
+  - Mục đích: Phong cách giao diện các module thương mại, form quản lý nhân viên, checkbox đăng nhập và nút sửa mật khẩu.
+  - Liên kết trực tiếp: Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/src/pages/AdminStaff.jsx
+  - Vùng ảnh hưởng khi sửa: Bố cục form quản trị thương mại, bảng khách hàng và nhân viên.
 */
+
 .admin-table-wrap,
 .admin-product-table-wrap,
 .admin-customer-table-wrap,
@@ -243,4 +244,70 @@ html[data-admin-theme="dark"] article.admin-module-card[data-unmatched-id] {
 }
 html[data-admin-theme="dark"] details summary {
   color: #86efac;
+}
+
+/* Căn chỉnh form Nhân viên, checkbox "Cho phép đăng nhập" và nút "Sửa thông tin / mật khẩu" */
+.admin-staff-form {
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  border: 1px solid #d5e4d9;
+  border-radius: 14px;
+  background: #f6fbf8;
+}
+.admin-staff-form__footer {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+}
+.admin-staff-active-toggle {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 9px !important;
+  flex: 0 0 auto !important;
+  min-width: auto !important;
+  margin: 0 !important;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #173b28;
+  user-select: none;
+}
+.admin-staff-active-toggle input[type="checkbox"] {
+  width: 18px !important;
+  height: 18px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  accent-color: #256b47;
+  cursor: pointer;
+  flex: 0 0 18px;
+}
+.admin-staff-edit-btn {
+  white-space: nowrap;
+  padding: 7px 13px !important;
+  font-size: 12px !important;
+  border-radius: 9px !important;
+}
+.admin-review-reply-btn {
+  color: #ffffff !important;
+}
+html[data-admin-theme="dark"] .admin-staff-form {
+  background: #0e2118;
+  border-color: #264c36;
+}
+html[data-admin-theme="dark"] .admin-staff-active-toggle {
+  color: #dff4e5;
+}
+html[data-admin-theme="dark"] .admin-staff-form .button-secondary {
+  background: #142b1f !important;
+  border: 1px solid #2c573e !important;
+  color: #d6f0de !important;
+}
+html[data-admin-theme="dark"] .admin-staff-form .button-secondary:hover {
+  background: #1d3d2c !important;
+  border-color: #4ade80 !important;
 }

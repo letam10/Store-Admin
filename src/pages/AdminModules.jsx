@@ -1,9 +1,10 @@
 /*
   FILE NOTE
-  - Mục đích: Các module quản trị, dashboard và quản lý danh mục hàng hóa (AdminProducts, ProductOfferRow).
-  - Liên kết trực tiếp: Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/src/pages/AdminModules.css, Store-Admin/src/pages/AdminPolish.css
-  - Vùng ảnh hưởng khi sửa: Bảng danh mục hàng hóa, cuộn nội bộ admin-product-table-wrap, dashboard và các module phụ.
+  - Mục đích: Bộ điều hướng và hiển thị các module quản trị Store-Admin theo quyền hạn (role).
+  - Liên kết trực tiếp: Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/src/pages/AdminOrderWorkflow.jsx, Store-Admin/src/pages/AdminStaff.jsx
+  - Vùng ảnh hưởng khi sửa: Các module quản trị được nạp và quyền thao tác (role) truyền vào từng module.
 */
+
 /**
  * @codex-vn-doc
  * Tệp: src/pages/AdminModules.jsx
@@ -313,7 +314,7 @@ export default function AdminModule({ module, csrfToken, onNavigate, language = 
   if (module === 'customers') return <AdminCustomers csrfToken={csrfToken} readOnly={role !== 'admin'} />
   if (module === 'favorites') return <AdminFavorites />
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-  if (module === 'reviews') return <AdminReviews csrfToken={csrfToken} />
+  if (module === 'reviews') return <AdminReviews csrfToken={csrfToken} role={role} />
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
   if (module === 'customer-orders') return <AdminOrders csrfToken={csrfToken} role={role} />
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
