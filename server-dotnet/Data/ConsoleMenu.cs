@@ -1,7 +1,9 @@
 /*
- * Tệp: server-dotnet/Data/ConsoleMenu.cs
- * Mục đích: Bảng menu tương tác quản lý hệ thống trên Console ASP.NET Core (giao diện chuẩn, căn lề thẳng hàng 100%).
- */
+  FILE NOTE
+  - Mục đích: Bảng menu tương tác quản lý hệ thống trên Console ASP.NET Core, điều khiển bật/tắt API, Store, Admin và AI (xả mô hình khi bấm số 2).
+  - Liên kết trực tiếp: Services/OllamaRuntime.cs, Services/AiChatService.cs, Program.cs
+  - Vùng ảnh hưởng khi sửa: Toàn bộ bảng điều khiển Console của server-dotnet.
+*/
 using System.Diagnostics;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -194,6 +196,7 @@ public static class ConsoleMenu
 
         async Task StopAllCoreAsync()
         {
+            await aiRuntime.UnloadModelAsync();
             aiRuntime.StopOwnedServer();
             // 1. Dung API in-process neu dang chay
             if (IsApiRunning())
@@ -231,7 +234,7 @@ public static class ConsoleMenu
                 : "  [3/3] Quản trị :5174-> Đã tắt.");
             var remainingAi = await aiRuntime.StatusAsync();
             Console.WriteLine(remainingAi.ServerReady
-                ? "  [AI] Ollama được mở bên ngoài menu nên vẫn chạy độc lập."
+                ? (remainingAi.ModelLoaded ? "  [AI] Mô hình vẫn đang trong bộ nhớ." : "  [AI] Đã giải phóng mô hình khỏi bộ nhớ (RAM/VRAM).")
                 : "  [AI] Dịch vụ Ollama hiện không chạy.");
         }
         while (true)

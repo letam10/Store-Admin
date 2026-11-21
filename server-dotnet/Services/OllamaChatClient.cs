@@ -1,8 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Client giao tiếp HTTP trực tiếp với API Ollama (/api/chat, /api/tags), quản lý streaming SSE và thinking mode.
+  - Mục đích: Client giao tiếp HTTP trực tiếp với API Ollama (/api/chat, /api/tags), quản lý streaming SSE, thinking mode và keep_alive vĩnh viễn.
   - Liên kết trực tiếp: AiChatService.cs, OllamaRuntime.cs
-  - Vùng ảnh hưởng khi sửa: Tốc độ và định dạng phản hồi stream AI, cờ suy luận think, timeout và hàng đợi Semaphore.
+  - Vùng ảnh hưởng khi sửa: Tốc độ và định dạng phản hồi stream AI, cờ suy luận think, thời gian duy trì mô hình trong RAM/VRAM.
 */
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -34,7 +34,7 @@ public sealed class OllamaChatClient : IDisposable
             var payload = new
             {
                 model, messages = messages.Select(item => new { role = item.Role, content = item.Content }),
-                stream = true, think = thinkingMode != "off", keep_alive = "10m",
+                stream = true, think = thinkingMode != "off", keep_alive = -1,
                 // Giữ sampling mặc định của model; temperature quá thấp có thể làm suy luận lặp đến hết ngân sách.
                 options = new { num_ctx = contextSize, num_predict = thinkingMode == "high" ? 8192 : 4096 }
             };

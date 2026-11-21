@@ -1,8 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Quản lý vòng đời tiến trình Ollama local (tìm kiếm exe, khởi động service serve, kiểm tra trạng thái và nạp trước model với num_ctx).
+  - Mục đích: Quản lý vòng đời tiến trình Ollama local (tìm kiếm exe, khởi động service serve, kiểm tra trạng thái và nạp trước model với num_ctx, keep_alive vĩnh viễn và xả mô hình).
   - Liên kết trực tiếp: Data/ConsoleMenu.cs, Services/AiChatService.cs
-  - Vùng ảnh hưởng khi sửa: Khởi động tự động và nạp mô hình vào RAM/VRAM qua Console Menu.
+  - Vùng ảnh hưởng khi sửa: Khởi động tự động, nạp mô hình vĩnh viễn vào RAM/VRAM và xả mô hình khi tắt qua Console Menu.
 */
 using System.Diagnostics;
 using System.Net.Http.Json;
@@ -105,9 +105,9 @@ public sealed class OllamaRuntime(IConfiguration configuration, AiChatService ai
         timeout.CancelAfter(TimeSpan.FromSeconds(120));
         try
         {
-            // Yêu cầu trống chỉ nạp mô hình, không tạo câu trả lời mẫu hoặc hội thoại giả.
+            // Yêu cầu nạp mô hình vào RAM/VRAM vĩnh viễn (keep_alive = -1), chỉ tắt khi người dùng bấm phím 2.
             using var response = await http.PostAsJsonAsync(Host + "/api/generate",
-                new { model = Model, stream = false, keep_alive = "10m", options = new { num_ctx = ai.ContextSize } }, timeout.Token);
+                new { model = Model, stream = false, keep_alive = -1, options = new { num_ctx = ai.ContextSize } }, timeout.Token);
             if (!response.IsSuccessStatusCode)
                 return status with { ModelLoaded = false, Message = "Không nạp được mô hình. Kiểm tra bộ nhớ và cấu hình Ollama." };
             var loaded = await StatusAsync(cancellationToken);
@@ -117,6 +117,22 @@ public sealed class OllamaRuntime(IConfiguration configuration, AiChatService ai
         {
             cancellationToken.ThrowIfCancellationRequested();
             return status with { ModelLoaded = false, Message = "Nạp mô hình chưa hoàn tất. Máy có thể thiếu bộ nhớ hoặc cần thêm thời gian." };
+        }
+    }
+
+    public async Task<bool> UnloadModelAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(8));
+            using var response = await http.PostAsJsonAsync(Host + "/api/generate",
+                new { model = Model, keep_alive = 0 }, timeout.Token);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
         }
     }
 

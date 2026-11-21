@@ -1,11 +1,12 @@
 /*
   FILE NOTE
-  - Mục đích: Content Script OmniVision v3.2.1 cho Facebook Desktop 2026 (Đa tài khoản • Ẩn khung thao tác).
-  - Cập nhật DOM Facebook 2026:
-    1. Bắt chuẩn [aria-label^="Thích:"], [aria-label^="Like:"], [aria-label="Leave a comment"], [aria-label*="Viết bình luận"] và nút số inline [👍 5,5K] (Ảnh 9 & 11).
-    2. Hỗ trợ hover cụm icon cảm xúc nếu tài khoản thuộc giao diện A/B ẩn số lượt thích trên desktop 2026.
-    3. Hỗ trợ Reels 2026 (Ảnh 1 & 10): đọc cột dọc bên phải & bấm mũi tên xuống (⌄).
-    4. Đổi quyền riêng tư Công khai <-> Chỉ mình tôi bằng cuộn hộp thoại "Đối tượng của bài viết" (Ảnh 5 & 6) + bấm Avatar góc trên phải từ mọi tab (Ảnh 3).
+  - Mục đích: Content Script OmniVision v3.2.2 cho Facebook Desktop 2026 (Đa tài khoản • Ẩn khung thao tác).
+  - Liên kết trực tiếp: extension/manifest.json, extension/vision-engine.js, extension/background.js
+  - Vùng ảnh hưởng khi sửa: Tự động đăng bài Facebook & cào bài viral Facebook
+  - Cập nhật v3.2.2:
+    1. Bắt trực tiếp thanh "Bạn đang nghĩ gì?" (pill bar) và nút "Ảnh/video" trên Trang cá nhân (kể cả khi ảnh bìa cao).
+    2. Tự động cuộn đến thanh đăng bài nếu bị che khuất dưới ảnh bìa và bấm nút "Ảnh/video" dự phòng nếu click thanh chưa mở.
+    3. Giữ nguyên đầy đủ logic cuộn chọn Chỉ mình tôi, Reels 2026 và cào bài Viral Facebook >= 5K.
 */
 
 ;(() => {
@@ -144,40 +145,71 @@
 
   function findComposerTrigger() {
     let best = null, bestScore = -Infinity
-    for (const el of V().queryAllDeep(document, '[role="button"], button, span, div')) {
-      if (!V().isReallyVisible(el, { minWidth: 80, minHeight: 22 })) continue
+    for (const el of document.querySelectorAll('span, div, p, [role="button"], button, [tabindex="0"]')) {
       if (isInsideFixedTopBanner(el) || el.closest('[role="dialog"], [role="article"]')) continue
-      const rect = el.getBoundingClientRect()
-      if (rect.height > 110 || rect.width < 110) continue
-      const label = V().normalizeText(`${el.innerText || el.textContent || ''} ${el.getAttribute('aria-label') || ''}`)
-      if (!label || label.length > 90 || !COMPOSER_TEXT_RE.test(label)) continue
-      const clickable = el.closest('[role="button"], button, [tabindex="0"]') || el
-      if (isInsideFixedTopBanner(clickable)) continue
+      if (!V().isReallyVisible(el, { minWidth: 20, minHeight: 12 })) continue
+
+      const raw = V().normalizeText(`${el.innerText || el.textContent || ''} ${el.getAttribute('aria-label') || ''} ${el.getAttribute('placeholder') || ''}`)
+      if (!raw || raw.length > 90 || !COMPOSER_TEXT_RE.test(raw)) continue
+
+      let clickable = el.closest('[role="button"], button, [tabindex="0"]')
+      if (!clickable || isInsideFixedTopBanner(clickable)) {
+        let cur = el
+        for (let i = 0; i < 4 && cur && cur !== document.body; i++) {
+          const cr = cur.getBoundingClientRect()
+          if (cr.width >= 100 && cr.height >= 20 && cr.height <= 85) { clickable = cur; break }
+          cur = cur.parentElement
+        }
+      }
+      if (!clickable) clickable = el
+
       const cRect = clickable.getBoundingClientRect()
-      if (cRect.width < 130 || cRect.height < 26 || cRect.height > 95) continue
-      const score = 50 + (cRect.left > window.innerWidth * 0.2 ? 25 : 0) + (cRect.top > 70 && cRect.top < 950 ? 25 : 0) + (label.length < 40 ? 15 : 0)
+      if (cRect.width < 70 || cRect.height < 18 || cRect.height > 120) continue
+
+      let score = 50
+      if (cRect.width >= 150) score += 30
+      if (cRect.left > window.innerWidth * 0.15 && cRect.left < window.innerWidth * 0.85) score += 20
+      if (cRect.top > 60) score += 10
+      if (raw.length < 45) score += 15
+
       if (score > bestScore) { bestScore = score; best = clickable }
     }
-    return best
+    if (best) return best
+
+    const photoBtn = findProfilePhotoShortcut()
+    if (photoBtn) return photoBtn
+
+    return null
   }
 
   function findProfilePhotoShortcut() {
-    return V().queryAllDeep(document, '[role="button"], button').find((el) => {
-      if (!V().isReallyVisible(el, { minWidth: 60, minHeight: 26 })) return false
-      if (isInsideFixedTopBanner(el) || el.closest('[role="dialog"], [role="article"]')) return false
+    for (const el of document.querySelectorAll('span, div, [role="button"], button, [tabindex="0"]')) {
+      if (isInsideFixedTopBanner(el) || el.closest('[role="dialog"], [role="article"]')) continue
+      if (!V().isReallyVisible(el, { minWidth: 20, minHeight: 14 })) continue
+
       const label = V().normalizeText(`${el.innerText || el.textContent || ''} ${el.getAttribute('aria-label') || ''}`)
-      return label.length <= 35 && PHOTO_BTN_RE.test(label)
-    }) || null
+      if (!label || label.length > 40 || !PHOTO_BTN_RE.test(label)) continue
+
+      const clickable = el.closest('[role="button"], button, [tabindex="0"]') || el
+      const r = clickable.getBoundingClientRect()
+      if (r.width >= 40 && r.height >= 18 && r.height <= 90) return clickable
+    }
+    return null
   }
 
   function findComposerDialog() {
     const dialogs = V().queryAllDeep(document, 'div[role="dialog"]')
-      .filter((d) => V().isReallyVisible(d, { minWidth: 320, minHeight: 220 }))
+      .filter((d) => V().isReallyVisible(d, { minWidth: 260, minHeight: 160 }))
     for (let i = dialogs.length - 1; i >= 0; i--) {
       const dialog = dialogs[i]
-      const text = V().normalizeText(dialog.innerText || dialog.textContent).slice(0, 320)
-      if (/đối tượng của bài viết|post audience/i.test(text)) continue
-      if ((/tạo bài viết|create post/i.test(text) && (findComposerEditor(dialog) || findSubmitOrNextButton(dialog))) || (findComposerEditor(dialog) && findSubmitOrNextButton(dialog))) {
+      const text = V().normalizeText(dialog.innerText || dialog.textContent).slice(0, 450)
+      if (/đối tượng của bài viết|post audience|ai có thể xem bài viết/i.test(text)) continue
+
+      const hasEditor = Boolean(findComposerEditor(dialog))
+      const hasSubmit = Boolean(findSubmitOrNextButton(dialog))
+      const hasComposerTitle = /tạo bài viết|create post|bạn đang nghĩ gì|what's on your mind/i.test(text)
+
+      if ((hasComposerTitle && (hasEditor || hasSubmit)) || (hasEditor && hasSubmit) || (hasEditor && hasExistingMediaInDialog(dialog)) || (hasComposerTitle && hasExistingMediaInDialog(dialog))) {
         return dialog
       }
     }
@@ -418,15 +450,42 @@
 
     let dialog = findComposerDialog()
     if (!dialog) {
-      stepLog('open_composer', 'Đang mở hộp thoại "Tạo bài viết"...')
-      const triggerReady = await M().waitFor(() => {
-        if (window.scrollY > 120) window.scrollTo(0, 0)
-        return Boolean(findComposerTrigger() || findProfilePhotoShortcut())
-      }, 16000)
-      if (!triggerReady) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
+      stepLog('open_composer', 'Đang chọn vào thanh "Bạn đang nghĩ gì?" để đăng bài...')
 
-      await V().humanClick(findComposerTrigger() || findProfilePhotoShortcut())
-      await M().waitFor(() => Boolean(findComposerDialog()), 8500)
+      let trigger = findComposerTrigger() || findProfilePhotoShortcut()
+      if (!trigger) {
+        window.scrollBy({ top: 380, behavior: 'smooth' })
+        await V().humanDelay(600, 1000)
+        trigger = findComposerTrigger() || findProfilePhotoShortcut()
+      }
+      if (!trigger) {
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+        await V().humanDelay(600, 1000)
+        trigger = findComposerTrigger() || findProfilePhotoShortcut()
+      }
+
+      if (!trigger) {
+        const ready = await M().waitFor(() => Boolean(findComposerTrigger() || findProfilePhotoShortcut()), 8000)
+        if (ready) trigger = findComposerTrigger() || findProfilePhotoShortcut()
+      }
+      if (!trigger) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
+
+      await V().scrollIntoViewSafely(trigger, 'center')
+      await V().humanDelay(350, 700)
+      await V().humanClick(trigger)
+
+      let opened = await M().waitFor(() => Boolean(findComposerDialog()), 5500)
+      if (!opened) {
+        const photoShortcut = findProfilePhotoShortcut()
+        if (photoShortcut && photoShortcut !== trigger) {
+          stepLog('open_composer', 'Đang bấm nút "Ảnh/video" để mở khung đăng bài...')
+          await V().scrollIntoViewSafely(photoShortcut, 'center')
+          await V().humanDelay(300, 600)
+          await V().humanClick(photoShortcut)
+          opened = await M().waitFor(() => Boolean(findComposerDialog()), 7000)
+        }
+      }
+
       dialog = findComposerDialog()
     }
     if (!dialog) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
