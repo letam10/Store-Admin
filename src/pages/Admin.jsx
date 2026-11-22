@@ -440,18 +440,44 @@ export default function Admin() {
   }
 
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-  if (session === null) return <main className="admin-shell admin-shell--login"><div className="admin-login-card admin-loading-state"><div className="admin-login-card__preferences"><ThemeLanguageControls /></div><p>Đang kiểm tra phiên quản trị…</p></div></main>
-  if (!session?.authenticated) return (
-    <main className="admin-shell admin-shell--login"><div className="admin-login-card"><div className="admin-login-card__preferences"><ThemeLanguageControls /></div><form className="admin-login" onSubmit={login}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-        <img src="/brand-logo-square.jpg" alt="OmniCart" style={{ width: '40px', height: '40px', borderRadius: '8px', objectFit: 'cover' }} />
-        <span style={{ fontSize: '24px', fontWeight: 900, color: '#163f2d', letterSpacing: '-1px' }}>OmniCart<span style={{ color: '#2e8658' }}>.</span></span>
+  const loginVideoBg = (
+    <div className="admin-video-bg" aria-hidden="true">
+      <iframe
+        src="https://www.youtube.com/embed/2qeTbiQ57C0?autoplay=1&mute=1&loop=1&playlist=2qeTbiQ57C0&controls=0&showinfo=0&rel=0&iv_load_policy=3&modestbranding=1&playsinline=1"
+        title="Background video"
+        allow="autoplay; encrypted-media"
+        tabIndex="-1"
+      />
+      <div className="admin-video-overlay" />
+    </div>
+  )
+
+  if (session === null) return (
+    <main className="admin-shell admin-shell--login">
+      {loginVideoBg}
+      <div className="admin-login-card admin-loading-state">
+        <div className="admin-login-card__preferences"><ThemeLanguageControls /></div>
+        <p>Đang kiểm tra phiên quản trị…</p>
       </div>
-      <p className="admin-eyebrow">QUẢN TRỊ STORE</p><h1>{copy.login}</h1><p>{copy.adminOnly}</p>
-      <label>{copy.account}<input autoComplete="username" value={credentials.username} onChange={(event) => setCredentials((current) => ({ ...current, username: event.target.value }))} /></label>
-      <label>{copy.password}<input type="password" autoComplete="current-password" value={credentials.password} onChange={(event) => setCredentials((current) => ({ ...current, password: event.target.value }))} /></label>
-      {loginError && <p className="admin-error" role="alert">{language === 'en' && loginError === 'Sai tài khoản hoặc mật khẩu.' ? copy.wrongLogin : loginError}</p>}<button type="submit">{copy.login}</button><a href={import.meta.env?.VITE_STOREFRONT_URL || 'http://localhost:5173'}>{copy.backStore}</a>
-    </form></div></main>
+    </main>
+  )
+  if (!session?.authenticated) return (
+    <main className="admin-shell admin-shell--login">
+      {loginVideoBg}
+      <div className="admin-login-card">
+        <div className="admin-login-card__preferences"><ThemeLanguageControls /></div>
+        <form className="admin-login" onSubmit={login}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+            <img src="/brand-logo-square.jpg" alt="OmniCart" style={{ width: '40px', height: '40px', borderRadius: '8px', objectFit: 'cover' }} />
+            <span style={{ fontSize: '24px', fontWeight: 900, color: '#163f2d', letterSpacing: '-1px' }}>OmniCart<span style={{ color: '#2e8658' }}>.</span></span>
+          </div>
+          <p className="admin-eyebrow">QUẢN TRỊ STORE</p><h1>{copy.login}</h1><p>{copy.adminOnly}</p>
+          <label>{copy.account}<input autoComplete="username" value={credentials.username} onChange={(event) => setCredentials((current) => ({ ...current, username: event.target.value }))} /></label>
+          <label>{copy.password}<input type="password" autoComplete="current-password" value={credentials.password} onChange={(event) => setCredentials((current) => ({ ...current, password: event.target.value }))} /></label>
+          {loginError && <p className="admin-error" role="alert">{language === 'en' && loginError === 'Sai tài khoản hoặc mật khẩu.' ? copy.wrongLogin : loginError}</p>}<button type="submit">{copy.login}</button><a href={import.meta.env?.VITE_STOREFRONT_URL || 'http://localhost:5173'}>{copy.backStore}</a>
+        </form>
+      </div>
+    </main>
   )
 
   const moduleEnglish = { dashboard: 'Dashboard', customers: 'Customers', favorites: 'Favorites', reviews: 'Reviews', 'customer-orders': 'Orders', products: 'Products', 'product-views': 'Most viewed', logistics: 'Logistics', inventory: 'Inventory', appearance: 'Storefront', returns: 'Returns', statistics: 'Statistics', 'ai-local': 'Local AI', 'order-types': 'Order types', support: 'Support', 'rewards-wheel': 'Voucher', staff: 'Staff', overtime: 'Overtime & rewards' }

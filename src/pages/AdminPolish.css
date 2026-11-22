@@ -1239,12 +1239,50 @@ select option,
    7. TRANG ĐĂNG NHẬP ADMIN (LOGIN SCREEN SIÊU CAO CẤP)
    ========================================================================== */
 .admin-shell--login {
+  position: relative !important;
   min-height: 100vh !important;
   min-height: 100dvh !important;
   display: grid !important;
   place-items: center !important;
   padding: 24px !important;
-  background: url('/auth-bg.png') center center / cover no-repeat fixed !important;
+  overflow: hidden !important;
+  background: #06120b !important;
+}
+
+.admin-video-bg {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+  z-index: 0 !important;
+}
+
+.admin-video-bg iframe {
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  width: 100vw !important;
+  height: 56.25vw !important;
+  min-height: 100vh !important;
+  min-width: 177.78vh !important;
+  transform: translate(-50%, -50%) !important;
+  pointer-events: none !important;
+  border: 0 !important;
+  filter: saturate(1.15) brightness(0.9) !important;
+}
+
+.admin-video-overlay {
+  position: absolute !important;
+  inset: 0 !important;
+  background: radial-gradient(circle at center, rgba(10, 23, 17, 0.25) 0%, rgba(10, 23, 17, 0.55) 100%) !important;
+  pointer-events: none !important;
+  z-index: 1 !important;
+}
+
+html[data-admin-theme="dark"] .admin-video-overlay {
+  background: radial-gradient(circle at center, rgba(10, 23, 17, 0.45) 0%, rgba(10, 23, 17, 0.75) 100%) !important;
 }
 
 @property --admin-rainbow-angle {
@@ -1265,7 +1303,7 @@ select option,
 /* Card bao bên ngoài giao diện đăng nhập (Hiệu ứng viền LED 7 màu chạy đuổi ở viền ngoài) */
 .admin-login-card {
   position: relative !important;
-  z-index: 1 !important;
+  z-index: 2 !important;
   width: min(440px, 94vw) !important;
   padding: 26px 32px 34px !important;
   border: 1px solid rgba(226, 232, 240, 0.9) !important;
@@ -1610,12 +1648,6 @@ html[data-admin-theme="dark"] .admin-order-table td {
 html[data-admin-theme="dark"] .admin-table-wrap tr:hover td,
 html[data-admin-theme="dark"] .admin-order-table tr:hover td {
   background: #193828 !important;
-}
-
-html[data-admin-theme="dark"] .admin-shell--login {
-  background: 
-    linear-gradient(rgba(10, 23, 17, 0.45), rgba(10, 23, 17, 0.45)),
-    url('/auth-bg.png') center center / cover no-repeat fixed !important;
 }
 
 html[data-admin-theme="dark"] .admin-login:not(.admin-login-card .admin-login) {
