@@ -1250,18 +1250,87 @@ select option,
     linear-gradient(135deg, #eef7f1 0%, #f4f9f5 50%, #e8f4ec 100%) !important;
 }
 
-/* Card bao bên ngoài giao diện đăng nhập */
+@property --admin-rainbow-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes adminRainbowLedChase {
+  0% {
+    --admin-rainbow-angle: 0deg;
+  }
+  100% {
+    --admin-rainbow-angle: 360deg;
+  }
+}
+
+/* Card bao bên ngoài giao diện đăng nhập (Hiệu ứng viền LED 7 màu chạy đuổi) */
 .admin-login-card {
+  position: relative !important;
+  z-index: 1 !important;
   width: min(440px, 94vw) !important;
   padding: 26px 32px 34px !important;
-  border: 1px solid rgba(255, 255, 255, 0.9) !important;
+  border: 3px solid transparent !important;
   border-radius: 24px !important;
-  background: rgba(255, 255, 255, 0.96) !important;
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.96)),
+    conic-gradient(
+      from var(--admin-rainbow-angle),
+      #ff0055 0%,
+      #ff7700 7.1%,
+      #ffee00 14.3%,
+      #00ff66 21.4%,
+      #00d4ff 28.6%,
+      #0066ff 35.7%,
+      #9900ff 42.9%,
+      #ff0055 50%,
+      #ff7700 57.1%,
+      #ffee00 64.3%,
+      #00ff66 71.4%,
+      #00d4ff 78.6%,
+      #0066ff 85.7%,
+      #9900ff 92.9%,
+      #ff0055 100%
+    ) !important;
+  background-origin: border-box !important;
+  background-clip: padding-box, border-box !important;
+  animation: adminRainbowLedChase 3.2s linear infinite !important;
   box-shadow: 0 24px 60px rgba(18, 50, 35, 0.12), 0 4px 16px rgba(0, 0, 0, 0.03) !important;
   backdrop-filter: blur(20px) !important;
   display: flex !important;
   flex-direction: column !important;
   box-sizing: border-box !important;
+}
+
+.admin-login-card::before {
+  content: '' !important;
+  position: absolute !important;
+  inset: -4px !important;
+  border-radius: 28px !important;
+  background: conic-gradient(
+    from var(--admin-rainbow-angle),
+    #ff0055 0%,
+    #ff7700 7.1%,
+    #ffee00 14.3%,
+    #00ff66 21.4%,
+    #00d4ff 28.6%,
+    #0066ff 35.7%,
+    #9900ff 42.9%,
+    #ff0055 50%,
+    #ff7700 57.1%,
+    #ffee00 64.3%,
+    #00ff66 71.4%,
+    #00d4ff 78.6%,
+    #0066ff 85.7%,
+    #9900ff 92.9%,
+    #ff0055 100%
+  ) !important;
+  filter: blur(14px) !important;
+  opacity: 0.5 !important;
+  z-index: -1 !important;
+  pointer-events: none !important;
+  animation: adminRainbowLedChase 3.2s linear infinite !important;
 }
 
 .admin-login-card__preferences {
@@ -1541,11 +1610,39 @@ html[data-admin-theme="dark"] .admin-order-table tr:hover td {
   background: #193828 !important;
 }
 
-html[data-admin-theme="dark"] .admin-login-card,
 html[data-admin-theme="dark"] .admin-login:not(.admin-login-card .admin-login) {
   background: rgba(14, 28, 20, 0.95) !important;
   border-color: rgba(74, 222, 128, 0.2) !important;
   box-shadow: 0 28px 70px rgba(0, 0, 0, 0.65), 0 0 40px rgba(37, 107, 71, 0.12) !important;
+}
+
+html[data-admin-theme="dark"] .admin-login-card {
+  background-image: 
+    linear-gradient(rgba(14, 28, 20, 0.97), rgba(14, 28, 20, 0.97)),
+    conic-gradient(
+      from var(--admin-rainbow-angle),
+      #ff0055 0%,
+      #ff7700 7.1%,
+      #ffee00 14.3%,
+      #00ff66 21.4%,
+      #00d4ff 28.6%,
+      #0066ff 35.7%,
+      #9900ff 42.9%,
+      #ff0055 50%,
+      #ff7700 57.1%,
+      #ffee00 64.3%,
+      #00ff66 71.4%,
+      #00d4ff 78.6%,
+      #0066ff 85.7%,
+      #9900ff 92.9%,
+      #ff0055 100%
+    ) !important;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.75), 0 0 40px rgba(0, 0, 0, 0.5) !important;
+}
+
+html[data-admin-theme="dark"] .admin-login-card::before {
+  opacity: 0.72 !important;
+  filter: blur(18px) !important;
 }
 
 html[data-admin-theme="dark"] .admin-login-card .admin-login {
