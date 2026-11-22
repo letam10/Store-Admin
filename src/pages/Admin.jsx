@@ -159,10 +159,10 @@ export default function Admin() {
   }
 
   // Chức năng ThemeLanguageControls: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
-  function ThemeLanguageControls({ compact = false }) {
+  function ThemeLanguageControls({ compact = false, showTheme = true }) {
     return <div className={'admin-preferences' + (compact ? ' admin-preferences--compact' : '')}>
       <label className="admin-language-control"><span className="sr-only">{copy.language}</span><DropdownMenu value={language} options={[['vi', 'VI'], ['en', 'EN']]} onChange={setLanguage} ariaLabel={copy.language} /></label>
-      <button type="button" className="admin-theme-toggle" onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? copy.themeLight : copy.themeDark} title={theme === 'dark' ? copy.themeLight : copy.themeDark}>{theme === 'dark' ? '☀' : '☾'}<span>{language === 'en' ? (theme === 'dark' ? 'Light' : 'Dark') : (theme === 'dark' ? 'Sáng' : 'Tối')}</span></button>
+      {showTheme && <button type="button" className="admin-theme-toggle" onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? copy.themeLight : copy.themeDark} title={theme === 'dark' ? copy.themeLight : copy.themeDark}>{theme === 'dark' ? '☀' : '☾'}<span>{language === 'en' ? (theme === 'dark' ? 'Light' : 'Dark') : (theme === 'dark' ? 'Sáng' : 'Tối')}</span></button>}
     </div>
   }
 
@@ -456,7 +456,7 @@ export default function Admin() {
     <main className="admin-shell admin-shell--login">
       {loginVideoBg}
       <div className="admin-login-card admin-loading-state">
-        <div className="admin-login-card__preferences"><ThemeLanguageControls /></div>
+        <div className="admin-login-card__preferences"><ThemeLanguageControls showTheme={false} /></div>
         <p>Đang kiểm tra phiên quản trị…</p>
       </div>
     </main>
@@ -465,11 +465,11 @@ export default function Admin() {
     <main className="admin-shell admin-shell--login">
       {loginVideoBg}
       <div className="admin-login-card">
-        <div className="admin-login-card__preferences"><ThemeLanguageControls /></div>
+        <div className="admin-login-card__preferences"><ThemeLanguageControls showTheme={false} /></div>
         <form className="admin-login" onSubmit={login}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-            <img src="/brand-logo-square.jpg" alt="OmniCart" style={{ width: '40px', height: '40px', borderRadius: '8px', objectFit: 'cover' }} />
-            <span style={{ fontSize: '24px', fontWeight: 900, color: '#163f2d', letterSpacing: '-1px' }}>OmniCart<span style={{ color: '#2e8658' }}>.</span></span>
+          <div className="admin-login__brand">
+            <img src="/brand-logo-square.jpg" alt="OmniCart" className="admin-login__brand-logo" />
+            <span className="admin-login__brand-title">OmniCart<span>.</span></span>
           </div>
           <p className="admin-eyebrow">QUẢN TRỊ STORE</p><h1>{copy.login}</h1><p>{copy.adminOnly}</p>
           <label>{copy.account}<input autoComplete="username" value={credentials.username} onChange={(event) => setCredentials((current) => ({ ...current, username: event.target.value }))} /></label>
