@@ -141,10 +141,10 @@ public sealed partial class StoreDb
         item.Status = "resolved";
     }
 
-    private static void CompleteExchange(SqlConnection connection, SqlTransaction transaction, AfterSalesCase item, AfterSalesOrder order)
+    private void CompleteExchange(SqlConnection connection, SqlTransaction transaction, AfterSalesCase item, AfterSalesOrder order)
     {
         var points = order.RewardPolicyVersion >= LoyaltyPolicy.Version
-            ? LoyaltyPolicy.AwardPoints(item.Quote.ReplacementGoods, order.Tier)
+            ? LoyaltyPolicy.AwardPoints(item.Quote.ReplacementGoods, order.Tier, GetMembershipPolicy())
             : order.RemainingPaid > 0 ? (int)Math.Min(int.MaxValue, Math.Max(1, order.RemainingPaid / 10000)) : 0;
         AdjustAfterSalesRewards(connection, transaction, order, item.Quote.ReplacementGoods, points);
         using var update = CheckoutCommand(connection, transaction, """

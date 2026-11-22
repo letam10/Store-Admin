@@ -1,7 +1,7 @@
 /*
   FILE NOTE
-  - Mục đích: Cầu nối bền vững 24/7 giữa Store-Admin và Service Worker v3.5.0.
-  - Bổ sung v3.5.0: Cầu nối BRIDGE_API_FETCH để Extension gọi thẳng API AI Local qwen3.5:4b và đồng bộ kho kiến thức giao diện học được vào SQL Server mà không dính CORS.
+  - Mục đích: Cầu nối bền vững 24/7 v3.5.0 giữa Store-Admin và Service Worker.
+  - Hỗ trợ: BRIDGE_API_FETCH (gọi API Vision AI / Knowledge kèm CSRF tự động), VIRAL_BATCH_READY (hiện ngay nền tảng xong trước), OMNICART_POST_VERIFIED.
 */
 
 ;(() => {
@@ -27,8 +27,8 @@
     try { return typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id) } catch (_) { return false }
   }
 
-  async function ensureAdminCsrf() {
-    if (cachedCsrfToken) return cachedCsrfToken
+  async function ensureCsrfToken(forceRefresh = false) {
+    if (cachedCsrfToken && !forceRefresh) return cachedCsrfToken
     try {
       const res = await fetch('/api/admin/session', { credentials: 'same-origin' })
       if (res.ok) {
@@ -39,24 +39,39 @@
     return cachedCsrfToken
   }
 
-  async function handleBridgeApiFetch(msg) {
+  async function executeBridgeApiFetch(msg) {
+    const method = String(msg.method || 'POST').toUpperCase()
+    const path = String(msg.path || '')
+    if (!path.startsWith('/api/admin/')) {
+      return { ok: false, error: 'INVALID_BRIDGE_API_PATH' }
+    }
     try {
-      const method = (msg.method || 'POST').toUpperCase()
-      const csrf = method !== 'GET' ? await ensureAdminCsrf() : ''
-      const res = await fetch(msg.path, {
+      let csrf = method !== 'GET' ? await ensureCsrfToken(false) : ''
+      let res = await fetch(path, {
         method,
         credentials: 'same-origin',
         headers: {
-          ...(msg.body !== undefined ? { 'content-type': 'application/json' } : {}),
+          ...(msg.body != null ? { 'content-type': 'application/json' } : {}),
           ...(csrf ? { 'x-csrf-token': csrf } : {})
         },
-        body: msg.body !== undefined ? JSON.stringify(msg.body) : undefined
+        body: msg.body != null && method !== 'GET' ? JSON.stringify(msg.body) : undefined
       })
-      if (res.status === 403) cachedCsrfToken = ''
+      if (res.status === 403 && method !== 'GET') {
+        csrf = await ensureCsrfToken(true)
+        res = await fetch(path, {
+          method,
+          credentials: 'same-origin',
+          headers: {
+            ...(msg.body != null ? { 'content-type': 'application/json' } : {}),
+            ...(csrf ? { 'x-csrf-token': csrf } : {})
+          },
+          body: msg.body != null ? JSON.stringify(msg.body) : undefined
+        })
+      }
       const data = await res.json().catch(() => null)
-      port?.postMessage({ type: 'BRIDGE_API_FETCH_RESULT', fetchId: msg.fetchId, ok: res.ok, status: res.status, data })
+      return { ok: res.ok, data, error: res.ok ? null : (data?.error || `HTTP_${res.status}`) }
     } catch (err) {
-      port?.postMessage({ type: 'BRIDGE_API_FETCH_RESULT', fetchId: msg.fetchId, ok: false, status: 0, error: err.message })
+      return { ok: false, data: null, error: err.message || 'FETCH_FAILED' }
     }
   }
 
@@ -75,7 +90,7 @@
           .dot.busy { background:#f59e0b;animation:pulse 1s infinite; }
           .dot.err { background:#ef4444; }
           @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
-          .panel { width:410px;max-height:360px;background:#071710;color:#e2f8ec;border:1px solid #1f5c3f;border-radius:12px;box-shadow:0 14px 36px rgba(0,0,0,0.5);overflow:hidden;display:none;flex-direction:column;margin-bottom:8px; }
+          .panel { width:400px;max-height:350px;background:#071710;color:#e2f8ec;border:1px solid #1f5c3f;border-radius:12px;box-shadow:0 14px 36px rgba(0,0,0,0.5);overflow:hidden;display:none;flex-direction:column;margin-bottom:8px; }
           .panel.open { display:flex; }
           .head { display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:#0e2c1f;border-bottom:1px solid #1a4731;font-size:12px;font-weight:700;gap:6px; }
           .head-btn { background:transparent;border:1px solid #2b6e4c;color:#a7f3d0;border-radius:6px;padding:2px 7px;font-size:11px;cursor:pointer; }
@@ -89,7 +104,7 @@
         </style>
         <div class="panel" id="panel">
           <div class="head">
-            <span>👁️ OmniVision v${getExtensionVersion()} AI</span>
+            <span>👁️ OmniVision v${getExtensionVersion()} • AI Ready</span>
             <div style="display:flex;gap:4px;">
               <button class="head-btn" id="btn-check-pending">Soi duyệt</button>
               <button class="head-btn" id="btn-unlock">Mở khóa</button>
@@ -97,7 +112,7 @@
               <button class="head-btn" id="btn-close">Thu gọn</button>
             </div>
           </div>
-          <div class="logs" id="logs"><div class="row">Đã kết nối OmniVision v${getExtensionVersion()} (AI Tự Học).</div></div>
+          <div class="logs" id="logs"><div class="row">Đã kết nối OmniVision v${getExtensionVersion()} (AI Ready).</div></div>
         </div>
         <div class="pill" id="pill">
           <span class="dot" id="dot"></span>
@@ -127,8 +142,11 @@
     if (!dockShadow) return
     const container = dockShadow.getElementById('logs')
     if (!container) return
-    if (!dockLogs.length) { container.innerHTML = '<div class="row">Chưa có sự kiện mới.</div>'; return }
-    container.innerHTML = dockLogs.slice(0, 36).map((item) => {
+    if (!dockLogs.length) {
+      container.innerHTML = '<div class="row">Chưa có sự kiện mới.</div>'
+      return
+    }
+    container.innerHTML = dockLogs.slice(0, 34).map((item) => {
       const time = new Date(item.timestamp || Date.now()).toLocaleTimeString('vi-VN')
       const safeMsg = String(item.message || '').replace(/[<>&]/g, '')
       return `<div class="row ${item.level || 'info'}"><div class="meta">[${time}] ${String(item.platform || 'sys').toUpperCase()}</div>${safeMsg}</div>`
@@ -161,16 +179,14 @@
     if (destroyed || !isRuntimeAlive()) return
     try {
       port = chrome.runtime.connect({ name: 'omnicart-admin-bridge' })
-      port.onMessage.addListener((msg) => {
+      port.onMessage.addListener(async (msg) => {
         if (!msg) return
-        if (msg.type === 'BRIDGE_API_FETCH' && msg.fetchId) { handleBridgeApiFetch(msg); return }
-        if (msg.type === 'VIRAL_BATCH_READY' && msg.payload) {
-          window.postMessage({ source: 'OMNICART_VIRAL_BATCH', payload: msg.payload }, window.location.origin)
-          return
-        }
         if (msg.type === 'BRIDGE_HELLO') {
           const pendingCount = Array.isArray(msg.pendingVerifications) ? msg.pendingVerifications.length : 0
-          updateDockStatus(pendingCount > 0 ? `⏳ Đang theo dõi ${pendingCount} bài TikTok chờ duyệt...` : `👁️ OmniVision v${msg.version || getExtensionVersion()} • AI Ready`, pendingCount > 0 ? 'busy' : 'ready')
+          updateDockStatus(
+            pendingCount > 0 ? `⏳ Đang theo dõi ${pendingCount} bài TikTok chờ duyệt...` : `👁️ OmniVision v${msg.version || getExtensionVersion()} • AI Ready`,
+            pendingCount > 0 ? 'busy' : 'ready'
+          )
           if (Array.isArray(msg.recentLogs)) {
             msg.recentLogs.slice(0, 12).reverse().forEach((ev) => dockLogs.unshift(ev))
             renderDockLogs()
@@ -178,7 +194,19 @@
           if (Array.isArray(msg.resolvedVerifications)) msg.resolvedVerifications.forEach(forwardResolvedVerification)
           return
         }
-        if (msg.type === 'POST_VERIFICATION_RESOLVED' && msg.payload) { forwardResolvedVerification(msg.payload); return }
+        if (msg.type === 'BRIDGE_API_FETCH' && msg.fetchId) {
+          const res = await executeBridgeApiFetch(msg)
+          try { port?.postMessage({ type: 'BRIDGE_API_FETCH_RESULT', fetchId: msg.fetchId, ...res }) } catch (_) {}
+          return
+        }
+        if (msg.type === 'VIRAL_BATCH_READY' && msg.payload) {
+          window.postMessage({ source: 'OMNICART_VIRAL_BATCH', payload: msg.payload }, window.location.origin)
+          return
+        }
+        if (msg.type === 'POST_VERIFICATION_RESOLVED' && msg.payload) {
+          forwardResolvedVerification(msg.payload)
+          return
+        }
         if (msg.type === 'PROGRESS_EVENT' && msg.event) {
           pushDockEvent(msg.event)
           window.postMessage({ source: 'OMNICART_EXTENSION_PROGRESS', event: msg.event }, window.location.origin)
@@ -186,9 +214,13 @@
         }
         if (msg.type === 'ADMIN_COMMAND_RESULT' && msg.requestId) {
           const pending = pendingPortRequests.get(msg.requestId)
-          if (pending) { pendingPortRequests.delete(msg.requestId); pending.resolve(msg) }
+          if (pending) {
+            pendingPortRequests.delete(msg.requestId)
+            pending.resolve(msg)
+          }
         }
       })
+
       port.onDisconnect.addListener(() => {
         port = null
         for (const [reqId, pending] of pendingPortRequests.entries()) {
@@ -202,8 +234,14 @@
         }
       })
       clearInterval(heartbeatTimer)
-      heartbeatTimer = setInterval(() => { if (port) { try { port.postMessage({ type: 'HEARTBEAT' }) } catch (_) {} } }, 20000)
-    } catch (_) { port = null }
+      heartbeatTimer = setInterval(() => {
+        if (port) {
+          try { port.postMessage({ type: 'HEARTBEAT' }) } catch (_) {}
+        }
+      }, 20000)
+    } catch (_) {
+      port = null
+    }
   }
 
   async function sendToBackground(command, requestId) {
@@ -221,7 +259,11 @@
       chrome.runtime.sendMessage(command, (response) => {
         let lastError = null
         try { lastError = chrome.runtime.lastError || null } catch (_) { lastError = { message: 'EXTENSION_CONTEXT_INVALIDATED' } }
-        resolve({ ok: !lastError && response?.ok === true, data: response || null, error: lastError?.message || response?.error || 'NO_EXTENSION_RESPONSE' })
+        resolve({
+          ok: !lastError && response?.ok === true,
+          data: response || null,
+          error: lastError?.message || response?.error || 'NO_EXTENSION_RESPONSE'
+        })
       })
     })
   }
@@ -231,7 +273,9 @@
     document.documentElement.setAttribute('data-omnicart-extension-version', getExtensionVersion())
     document.documentElement.setAttribute('data-omnicart-vision-ready', 'true')
   } catch (_) {}
-  try { window.dispatchEvent(new CustomEvent('omnicart-extension-ready', { detail: { version: getExtensionVersion(), vision: true } })) } catch (_) {}
+  try {
+    window.dispatchEvent(new CustomEvent('omnicart-extension-ready', { detail: { version: getExtensionVersion(), vision: true } }))
+  } catch (_) {}
 
   mountLiveDock()
   connectPort()
@@ -252,8 +296,9 @@
       dockShadow?.getElementById('panel')?.classList.add('open')
       updateDockStatus(
         action === 'AUTO_POST' ? `🚀 Đang đăng bài ${payload?.platform || ''}...`
-          : action === 'SCRAPE_FB_GROUPS' ? '👥 Đang tìm 5 hội nhóm Facebook mới...'
-            : '🔥 Đang cào bài Viral (AI Local)...',
+          : action === 'SCRAPE_FB_GROUPS' ? '👥 Đang tìm 5 hội nhóm Facebook...'
+            : action === 'FETCH_REAL_VIRAL' ? '🔥 Đang cào Viral (bên nào xong hiện ngay)...'
+              : '🤖 Đang chạy tác vụ tự động...',
         'busy'
       )
     }
@@ -261,8 +306,10 @@
     try {
       const result = await sendToBackground({ type: action, ...(payload || {}) }, requestId)
       window.postMessage({
-        source: 'OMNICART_EXTENSION_RESPONSE', requestId,
-        ok: Boolean(result?.ok), data: result?.data || null,
+        source: 'OMNICART_EXTENSION_RESPONSE',
+        requestId,
+        ok: Boolean(result?.ok),
+        data: result?.data || null,
         error: result?.ok ? null : (result?.error || 'NO_EXTENSION_RESPONSE')
       }, window.location.origin)
     } catch (err) {

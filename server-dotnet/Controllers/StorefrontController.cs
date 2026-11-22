@@ -29,6 +29,9 @@ public sealed class StorefrontController(StoreDb db, StorefrontCache cache) : Co
     // Chức năng Appearance: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.
     public IActionResult Appearance() => Ok(cache.GetAppearance(() => new { appearance = db.Appearance(), theme = db.Theme() }));
 
+    [HttpGet("membership")]
+    public IActionResult Membership() => Ok(new { policy = db.GetMembershipPolicy() });
+
     [HttpPost("products/{id}/view")]
     // Chức năng ViewProduct: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.
     public IActionResult ViewProduct(string id) => Ok(new { id, viewCount = db.IncrementView(id) });

@@ -1,8 +1,11 @@
 /*
   FILE NOTE
-  - Mục đích: Service Worker nền (Manifest V3) v3.3.0 — Chạy ngầm không cần mở xem tab, Checkpoint nhớ bước, cào Viral đa từ khóa AI (tách FB Trang chủ & Reels) và mở link gọn 1 tab.
-  - Liên kết trực tiếp: manifest.json, vision-engine.js, content-facebook.js, content-tiktok.js, content-admin-bridge.js
-  - Vùng ảnh hưởng khi sửa: Điều phối luồng đăng bài, cào viral, duy trì tab và giao tiếp với Store-Admin.
+  - Mục đích: Service Worker nền (Manifest V3) v3.5.0 — Đầy đủ, không cắt đoạn, chạy ổn định 24/7.
+  - Tính năng:
+    1. Đăng bài Facebook & TikTok đa tài khoản có cơ chế tự phục hồi 3 lần + theo dõi xét duyệt TikTok.
+    2. Cầu nối Vision AI (qwen3.5:4b) qua Admin Bridge Port + lưu kiến thức selector tự học.
+    3. Cào Viral Progressive (bên nào xong trước bắn VIRAL_BATCH_READY hiện ngay lên bảng): FB Bài viết >= 1K, FB Thước phim >= 10K, TikTok >= 1M (tùy chỉnh được).
+    4. Đầy đủ 4 tác vụ tự động mới: Xem video/bài viết N lần, Đọc bình luận, Quét hồ sơ kênh/trang cá nhân, Lướt feed theo thời gian.
 */
 
 const FB_POST_HOME_URL = 'https://www.facebook.com/me'
@@ -17,10 +20,7 @@ const ALARM_PENDING_VERIFY = 'omnicart-verify-pending-posts'
 const STORAGE_PENDING_KEY = 'omnicartPendingVerifications'
 const STORAGE_RESOLVED_KEY = 'omnicartResolvedVerifications'
 const STORAGE_SCRAPE_CURSOR_KEY = 'omnicartScrapeCursors'
-const STORAGE_CHECKPOINTS_KEY = 'omnicartJobCheckpoints'
 const STORAGE_KNOWLEDGE_KEY = 'omnicartLearnedSelectors'
-const pendingBridgeFetches = new Map()
-let knowledgeSyncedFromServer = false
 
 const DEFAULT_VISION_CONFIG = {
   showHud: true,
@@ -38,7 +38,6 @@ const GROUP_SEARCH_KEYWORDS = [
   'ẩm thực nấu ăn ngon', 'làm đẹp chăm sóc da'
 ]
 
-// Bộ từ khóa đa dạng dự phòng cho từng chủ đề (khi không truyền hoặc bổ sung cho AI Local)
 const VIRAL_TOPIC_PRESETS = {
   all: {
     label: '',
@@ -49,38 +48,38 @@ const VIRAL_TOPIC_PRESETS = {
   },
   vehicles: {
     label: 'Xe cộ',
-    fbKeywords: ['review ô tô', 'xe máy độ đẹp', 'siêu xe việt nam', 'đánh giá xe hơi', 'xe điện vinfast', 'xe cộ viral'],
-    ttKeywords: ['review xe hơi', 'siêu xe việt nam', 'car edit', 'xe máy độ', 'motor edit', 'supercar viral'],
+    fbQuery: 'xe cộ review ô tô xe máy',
+    ttQuery: 'xe cộ review xe',
     ttExploreTab: 'Xe hơi'
   },
   anime: {
     label: 'Anime',
-    fbKeywords: ['anime vietsub', 'anime edit', 'review anime hay', 'jujutsu kaisen vietsub', 'one piece vietsub', 'anime tiktok'],
-    ttKeywords: ['anime edit', 'anime vietsub', 'jujutsu kaisen edit', 'one piece edit', 'naruto edit', 'anime viral', 'demon slayer edit'],
+    fbQuery: 'anime edit vietsub review',
+    ttQuery: 'anime edit vietsub',
     ttExploreTab: 'Anime'
   },
   cartoon: {
     label: 'Hoạt hình',
-    fbKeywords: ['phim hoạt hình review', 'hoạt hình 3d trung quốc', 'doraemon vietsub', 'conan vietsub', 'hoạt hình disney'],
-    ttKeywords: ['hoạt hình 3d', 'donghua edit', 'doraemon edit', 'conan edit', 'pixar animation', 'cartoon edit'],
+    fbQuery: 'hoạt hình 3d review phim',
+    ttQuery: 'hoạt hình 3d review phim',
     ttExploreTab: ''
   },
   game: {
     label: 'Game',
-    fbKeywords: ['liên quân mobile highlight', 'lmht highlight', 'valorant việt nam', 'gaming highlight', 'gta 5 việt nam', 'game mobile hay'],
-    ttKeywords: ['gaming highlight', 'liên quân mobile', 'league of legends edit', 'valorant clutch', 'minecraft viral', 'game edit'],
+    fbQuery: 'game highlight gaming việt nam',
+    ttQuery: 'game highlight gaming',
     ttExploreTab: 'Trò chơi'
   },
   new_product: {
     label: 'Quảng bá sản phẩm mới',
-    fbKeywords: ['unbox sản phẩm mới', 'review đồ công nghệ mới', 'ra mắt sản phẩm mới', 'đồ gia dụng thông minh review', 'săn deal đồ tiện ích'],
-    ttKeywords: ['unbox review', 'đồ gia dụng thông minh', 'review đồ tiện ích', 'tech unboxing', 'amazon finds viral', 'tiktok made me buy it'],
+    fbQuery: 'unbox review sản phẩm mới ra mắt',
+    ttQuery: 'unbox review sản phẩm mới',
     ttExploreTab: ''
   },
   electronics_compare: {
     label: 'So sánh sản phẩm điện tử',
-    fbKeywords: ['so sánh iphone samsung', 'so sánh laptop', 'so sánh điện thoại', 'so sánh tai nghe', 'đánh giá công nghệ'],
-    ttKeywords: ['so sánh iphone', 'iphone vs samsung', 'laptop review', 'tech comparison', 'so sánh điện thoại', 'smartphone test'],
+    fbQuery: 'so sánh điện thoại laptop công nghệ',
+    ttQuery: 'so sánh điện thoại công nghệ',
     ttExploreTab: ''
   }
 }
@@ -89,14 +88,21 @@ const adminPorts = new Set()
 const activeJobs = new Map()
 const recentLogs = []
 const scraperTabIds = { fbFeed: null, fbReels: null, ttViral: null, fbGroups: null }
-let viralViewerTabId = null
+const singleViewTabIds = { facebook: null, tiktok: null }
+const bridgeApiWaiters = new Map()
 let keepAliveTimer = null
 let verificationCheckInFlight = false
 
-function getExtensionVersion() { return chrome.runtime.getManifest().version }
+function getExtensionVersion() {
+  return chrome.runtime.getManifest().version
+}
 
 function pushLog(entry) {
-  const item = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, timestamp: new Date().toISOString(), ...entry }
+  const item = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    timestamp: new Date().toISOString(),
+    ...entry
+  }
   recentLogs.unshift(item)
   if (recentLogs.length > 90) recentLogs.length = 90
   broadcastToAdmins({ type: 'PROGRESS_EVENT', event: item })
@@ -104,16 +110,24 @@ function pushLog(entry) {
 
 function broadcastToAdmins(payload) {
   for (const port of Array.from(adminPorts)) {
-    try { port.postMessage(payload) } catch (_) { adminPorts.delete(port) }
+    try {
+      port.postMessage(payload)
+    } catch (_) {
+      adminPorts.delete(port)
+    }
   }
 }
 
 function ensureKeepAlive() {
   if (activeJobs.size > 0 && !keepAliveTimer) {
     keepAliveTimer = setInterval(() => {
-      if (activeJobs.size === 0) { clearInterval(keepAliveTimer); keepAliveTimer = null; return }
+      if (activeJobs.size === 0) {
+        clearInterval(keepAliveTimer)
+        keepAliveTimer = null
+        return
+      }
       try { chrome.runtime.getPlatformInfo(() => {}) } catch (_) {}
-    }, 15000)
+    }, 18000)
   } else if (activeJobs.size === 0 && keepAliveTimer) {
     clearInterval(keepAliveTimer)
     keepAliveTimer = null
@@ -128,116 +142,10 @@ function setup247Alarms() {
 }
 
 chrome.alarms?.onAlarm?.addListener(async (alarm) => {
-  if (alarm?.name === ALARM_PENDING_VERIFY) await processPendingVerifications()
+  if (alarm?.name === ALARM_PENDING_VERIFY) {
+    await processPendingVerifications()
+  }
 })
-
-// =========================================================================
-// GIỮ TAB CHẠY NGẦM LUÔN THỨC (CHỐNG CHROME ĐÓNG BĂNG / BÓP TAB NỀN!)
-// =========================================================================
-
-async function ensureTabAwake(tabId) {
-  if (!tabId) return
-  try { await chrome.tabs.update(tabId, { autoDiscardable: false }) } catch (_) {}
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      world: 'MAIN',
-      func: () => {
-        window.__OMNICART_KEEP_AWAKE__ = true
-        if (window.__OMNICART_AWAKE_PATCHED__) {
-          try { document.dispatchEvent(new Event('visibilitychange')) } catch (_) {}
-          try { window.dispatchEvent(new Event('focus')) } catch (_) {}
-          return
-        }
-        window.__OMNICART_AWAKE_PATCHED__ = true
-        try {
-          Object.defineProperty(document, 'hidden', { configurable: true, get: () => false })
-          Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' })
-          Object.defineProperty(document, 'webkitHidden', { configurable: true, get: () => false })
-          Object.defineProperty(document, 'webkitVisibilityState', { configurable: true, get: () => 'visible' })
-          document.hasFocus = () => true
-        } catch (_) {}
-
-        // Khi tab ẩn, native rAF bị Chrome dừng — tạo nhánh fallback setTimeout(16ms) để React/Dialog/Feed luôn render!
-        const origRAF = window.requestAnimationFrame?.bind(window)
-        if (origRAF) {
-          window.requestAnimationFrame = function patchedRAF(cb) {
-            if (!window.__OMNICART_KEEP_AWAKE__) return origRAF(cb)
-            let called = false
-            const run = (ts) => {
-              if (called) return
-              called = true
-              try { cb(ts || performance.now()) } catch (_) {}
-            }
-            const timerId = setTimeout(() => run(performance.now()), 32)
-            origRAF((ts) => { clearTimeout(timerId); run(ts) })
-            return timerId
-          }
-        }
-        try { document.dispatchEvent(new Event('visibilitychange')) } catch (_) {}
-        try { window.dispatchEvent(new Event('focus')) } catch (_) {}
-      }
-    })
-  } catch (_) {}
-}
-
-// =========================================================================
-// CHECKPOINT NHỚ BƯỚC (CHỐNG MẤT BƯỚC HOẶC ĐĂNG TRÙNG KHI VĂNG / TẢI LẠI TRANG)
-// =========================================================================
-
-async function getJobCheckpoints() {
-  const res = await chrome.storage.local.get(STORAGE_CHECKPOINTS_KEY)
-  return res?.[STORAGE_CHECKPOINTS_KEY] || {}
-}
-
-async function saveJobCheckpoint(platform, patch) {
-  const all = await getJobCheckpoints()
-  const prev = all[platform] || { completedSteps: [] }
-  const mergedSteps = Array.from(new Set([...(prev.completedSteps || []), ...(patch.completedSteps || [])]))
-  if (patch.completedStep) {
-    if (!mergedSteps.includes(patch.completedStep)) mergedSteps.push(patch.completedStep)
-  }
-  const next = {
-    ...prev,
-    ...patch,
-    completedSteps: patch.resetSteps ? [] : mergedSteps,
-    updatedAt: Date.now()
-  }
-  delete next.completedStep
-  delete next.resetSteps
-  all[platform] = next
-  await chrome.storage.local.set({ [STORAGE_CHECKPOINTS_KEY]: all })
-  return next
-}
-
-async function clearJobCheckpoint(platform) {
-  const all = await getJobCheckpoints()
-  delete all[platform]
-  await chrome.storage.local.set({ [STORAGE_CHECKPOINTS_KEY]: all })
-}
-
-// =========================================================================
-// MỞ BÀI VIRAL GỌN TRÊN 1 TAB DUY NHẤT (TRÁNH MỞ NHIỀU TAB GÂY LAG)
-// =========================================================================
-
-async function openUrlInSingleViewerTab(url) {
-  if (!url) return { ok: false, error: 'URL_REQUIRED' }
-  if (viralViewerTabId) {
-    try {
-      const existing = await chrome.tabs.get(viralViewerTabId)
-      if (existing?.id) {
-        await chrome.tabs.update(existing.id, { url, active: true })
-        if (existing.windowId) await chrome.windows.update(existing.windowId, { focused: true }).catch(() => {})
-        return { ok: true, tabId: existing.id, reused: true }
-      }
-    } catch (_) {
-      viralViewerTabId = null
-    }
-  }
-  const created = await chrome.tabs.create({ url, active: true })
-  viralViewerTabId = created.id
-  return { ok: true, tabId: created.id, reused: false }
-}
 
 async function getVisionConfig() {
   const stored = await chrome.storage.local.get('visionConfig')
@@ -266,18 +174,61 @@ async function saveScrapeCursors(patch) {
   return next
 }
 
+async function getLearnedKnowledge() {
+  const res = await chrome.storage.local.get(STORAGE_KNOWLEDGE_KEY)
+  return res?.[STORAGE_KNOWLEDGE_KEY] || {}
+}
+
+async function saveLearnedKnowledge(patch) {
+  const next = { ...(await getLearnedKnowledge()), ...(patch || {}) }
+  await chrome.storage.local.set({ [STORAGE_KNOWLEDGE_KEY]: next })
+  callAdminApiViaBridge('/api/admin/social/ai/knowledge', 'POST', { knowledge: next }).catch(() => {})
+  return next
+}
+
+async function callAdminApiViaBridge(path, method = 'POST', body = null, timeoutMs = 35000) {
+  const bridgePort = Array.from(adminPorts).find((p) => p.name === 'omnicart-admin-bridge')
+  if (!bridgePort) throw new Error('ADMIN_BRIDGE_NOT_CONNECTED')
+  const fetchId = `bf-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  return await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      bridgeApiWaiters.delete(fetchId)
+      reject(new Error('BRIDGE_API_TIMEOUT'))
+    }, timeoutMs)
+    bridgeApiWaiters.set(fetchId, {
+      resolve: (data) => { clearTimeout(timer); resolve(data) },
+      reject: (err) => { clearTimeout(timer); reject(err) }
+    })
+    try {
+      bridgePort.postMessage({ type: 'BRIDGE_API_FETCH', fetchId, path, method, body })
+    } catch (err) {
+      clearTimeout(timer)
+      bridgeApiWaiters.delete(fetchId)
+      reject(err)
+    }
+  })
+}
+
 async function reinjectAdminBridges() {
   try {
     for (const tab of await chrome.tabs.query({})) {
       if (tab.id && tab.url && /^http:\/\/(localhost|127\.0\.0\.1):5174\//i.test(tab.url)) {
-        try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content-admin-bridge.js'] }) } catch (_) {}
+        try {
+          await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content-admin-bridge.js'] })
+        } catch (_) {}
       }
     }
   } catch (_) {}
 }
 
-chrome.runtime.onInstalled.addListener(() => { setup247Alarms(); reinjectAdminBridges() })
-chrome.runtime.onStartup.addListener(() => { setup247Alarms(); reinjectAdminBridges() })
+chrome.runtime.onInstalled.addListener(() => {
+  setup247Alarms()
+  reinjectAdminBridges()
+})
+chrome.runtime.onStartup.addListener(() => {
+  setup247Alarms()
+  reinjectAdminBridges()
+})
 setup247Alarms()
 
 // =========================================================================
@@ -288,12 +239,19 @@ async function getPendingVerifications() {
   const res = await chrome.storage.local.get(STORAGE_PENDING_KEY)
   return Array.isArray(res?.[STORAGE_PENDING_KEY]) ? res[STORAGE_PENDING_KEY] : []
 }
-async function savePendingVerifications(list) { await chrome.storage.local.set({ [STORAGE_PENDING_KEY]: list }) }
+
+async function savePendingVerifications(list) {
+  await chrome.storage.local.set({ [STORAGE_PENDING_KEY]: list })
+}
+
 async function getResolvedVerifications() {
   const res = await chrome.storage.local.get(STORAGE_RESOLVED_KEY)
   return Array.isArray(res?.[STORAGE_RESOLVED_KEY]) ? res[STORAGE_RESOLVED_KEY] : []
 }
-async function saveResolvedVerifications(list) { await chrome.storage.local.set({ [STORAGE_RESOLVED_KEY]: list.slice(0, 30) }) }
+
+async function saveResolvedVerifications(list) {
+  await chrome.storage.local.set({ [STORAGE_RESOLVED_KEY]: list.slice(0, 30) })
+}
 
 async function enqueuePendingVerification(item) {
   const list = (await getPendingVerifications()).filter((x) => x.postId !== item.postId)
@@ -320,7 +278,6 @@ async function processPendingVerifications() {
 
       try {
         let tab = await findOrCreateTikTokPostTab()
-        await ensureTabAwake(tab.id)
         const onStudioPosts = Boolean(tab.url && /tiktok\.com\/tiktokstudio\/(content|home)?(\?|$)/i.test(tab.url))
         if (!onStudioPosts) tab = await navigateTabAndWait(tab.id, TIKTOK_CONTENT_URL, 2600)
 
@@ -332,7 +289,10 @@ async function processPendingVerifications() {
 
         if (check?.status === 'rejected') {
           const rejectEvent = {
-            postId: item.postId, platform: 'tiktok', status: 'failed', rejected: true,
+            postId: item.postId,
+            platform: 'tiktok',
+            status: 'failed',
+            rejected: true,
             error: check.error || 'Bài đăng TikTok bị từ chối duyệt.'
           }
           resolvedList.unshift(rejectEvent)
@@ -357,9 +317,13 @@ async function processPendingVerifications() {
 
         if (check?.status === 'published' && check.postUrl) {
           const resolvedEvent = {
-            postId: item.postId, platform: 'tiktok', status: 'published',
-            postUrl: check.postUrl, realPostId: check.postId || `tiktok-${Date.now()}`,
-            privacy: item.privacy, publishedTime: new Date().toISOString(),
+            postId: item.postId,
+            platform: 'tiktok',
+            status: 'published',
+            postUrl: check.postUrl,
+            realPostId: check.postId || `tiktok-${Date.now()}`,
+            privacy: item.privacy,
+            publishedTime: new Date().toISOString(),
             account: check.accountHandle || item.account
           }
           resolvedList.unshift(resolvedEvent)
@@ -396,63 +360,92 @@ async function processPendingVerifications() {
 chrome.runtime.onConnect.addListener(async (port) => {
   if (port.name !== 'omnicart-admin-bridge' && port.name !== 'omnicart-popup') return
   adminPorts.add(port)
-  const [pendingVerifications, resolvedVerifications] = await Promise.all([getPendingVerifications(), getResolvedVerifications()])
+  const [pendingVerifications, resolvedVerifications] = await Promise.all([
+    getPendingVerifications(),
+    getResolvedVerifications()
+  ])
   try {
-    port.postMessage({ type: 'BRIDGE_HELLO', version: getExtensionVersion(), activeJobs: Array.from(activeJobs.values()), pendingVerifications, resolvedVerifications, recentLogs: recentLogs.slice(0, 18) })
+    port.postMessage({
+      type: 'BRIDGE_HELLO',
+      version: getExtensionVersion(),
+      activeJobs: Array.from(activeJobs.values()),
+      pendingVerifications,
+      resolvedVerifications,
+      recentLogs: recentLogs.slice(0, 18)
+    })
   } catch (_) {}
 
   port.onMessage.addListener(async (msg) => {
-    if (msg.type === 'BRIDGE_API_FETCH_RESULT' && msg.fetchId) {
-      const pending = pendingBridgeFetches.get(msg.fetchId)
-      if (pending) { pendingBridgeFetches.delete(msg.fetchId); pending.resolve(msg) }
+    if (!msg) return
+    if (msg.type === 'HEARTBEAT') {
+      port.postMessage({ type: 'HEARTBEAT_ACK', ts: Date.now(), version: getExtensionVersion() })
       return
     }
-    if (!msg) return
-    if (msg.type === 'HEARTBEAT') { port.postMessage({ type: 'HEARTBEAT_ACK', ts: Date.now(), version: getExtensionVersion() }); return }
     if (msg.type === 'ACK_RESOLVED_VERIFICATION' && msg.postId) {
       await saveResolvedVerifications((await getResolvedVerifications()).filter((r) => r.postId !== msg.postId))
+      return
+    }
+    if (msg.type === 'BRIDGE_API_FETCH_RESULT' && msg.fetchId) {
+      const waiter = bridgeApiWaiters.get(msg.fetchId)
+      if (waiter) {
+        bridgeApiWaiters.delete(msg.fetchId)
+        if (msg.ok) waiter.resolve(msg.data)
+        else waiter.reject(new Error(msg.error || 'BRIDGE_API_ERROR'))
+      }
       return
     }
     if (msg.type === 'ADMIN_COMMAND' && msg.requestId) {
       try {
         const result = await dispatchCommand(msg.command, { tab: port.sender?.tab })
-        port.postMessage({ type: 'ADMIN_COMMAND_RESULT', requestId: msg.requestId, ok: result?.ok === true, data: result, error: result?.ok === true ? null : (result?.error || 'COMMAND_FAILED') })
+        port.postMessage({
+          type: 'ADMIN_COMMAND_RESULT',
+          requestId: msg.requestId,
+          ok: result?.ok === true,
+          data: result,
+          error: result?.ok === true ? null : (result?.error || 'COMMAND_FAILED')
+        })
       } catch (err) {
-        port.postMessage({ type: 'ADMIN_COMMAND_RESULT', requestId: msg.requestId, ok: false, data: null, error: err.message || String(err) })
+        port.postMessage({
+          type: 'ADMIN_COMMAND_RESULT',
+          requestId: msg.requestId,
+          ok: false,
+          data: null,
+          error: err.message || String(err)
+        })
       }
     }
   })
+
   port.onDisconnect.addListener(() => adminPorts.delete(port))
 })
 
 // =========================================================================
-// QUẢN LÝ TAB & ĐIỀU HƯỚNG GIỮ TAB LUÔN HOẠT ĐỘNG NGẦM
+// QUẢN LÝ TAB & PHỤC HỒI CHECKPOINT
 // =========================================================================
 
-async function waitForTabComplete(tabId, timeoutMs = 22000) {
+async function waitForTabComplete(tabId, timeoutMs = 20000) {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     try {
       const tab = await chrome.tabs.get(tabId)
       if (tab.status === 'complete') return tab
-    } catch (_) { throw new Error('TAB_CLOSED_UNEXPECTEDLY') }
-    await new Promise((r) => setTimeout(r, 320))
+    } catch (_) {
+      throw new Error('TAB_CLOSED_UNEXPECTEDLY')
+    }
+    await new Promise((r) => setTimeout(r, 350))
   }
   throw new Error('TAB_LOAD_TIMEOUT')
 }
 
-async function navigateTabAndWait(tabId, url, settleMs = 2400) {
-  await chrome.tabs.update(tabId, { url, autoDiscardable: false })
+async function navigateTabAndWait(tabId, url, settleMs = 2200) {
+  await chrome.tabs.update(tabId, { url })
   await waitForTabComplete(tabId, 24000)
-  await ensureTabAwake(tabId)
   await new Promise((r) => setTimeout(r, settleMs))
-  await ensureTabAwake(tabId)
   return await chrome.tabs.get(tabId)
 }
 
 async function sendTabMessageWithRetry(tabId, message, scriptFiles) {
   await waitForTabComplete(tabId)
-  await ensureTabAwake(tabId)
   try {
     const res = await chrome.tabs.sendMessage(tabId, message)
     if (res) return res
@@ -461,8 +454,7 @@ async function sendTabMessageWithRetry(tabId, message, scriptFiles) {
     const receiverMissing = /receiving end does not exist|could not establish connection|no content script response|message port closed/i.test(err.message || '')
     if (receiverMissing && scriptFiles && chrome.scripting) {
       await chrome.scripting.executeScript({ target: { tabId }, files: Array.isArray(scriptFiles) ? scriptFiles : [scriptFiles] })
-      await ensureTabAwake(tabId)
-      await new Promise((r) => setTimeout(r, 900))
+      await new Promise((r) => setTimeout(r, 950))
       const retryRes = await chrome.tabs.sendMessage(tabId, message)
       if (retryRes) return retryRes
       throw new Error('NO_CONTENT_SCRIPT_RESPONSE')
@@ -471,32 +463,33 @@ async function sendTabMessageWithRetry(tabId, message, scriptFiles) {
   }
 }
 
-function isScraperOrViewerTabId(tabId) {
-  return tabId === scraperTabIds.fbFeed || tabId === scraperTabIds.fbReels ||
-    tabId === scraperTabIds.ttViral || tabId === scraperTabIds.fbGroups ||
-    tabId === viralViewerTabId
+function isScraperTabId(tabId) {
+  return (
+    tabId === scraperTabIds.fbFeed ||
+    tabId === scraperTabIds.fbReels ||
+    tabId === scraperTabIds.ttViral ||
+    tabId === scraperTabIds.fbGroups
+  )
 }
 
 async function findOrCreateFacebookPostTab() {
   const tabs = await chrome.tabs.query({})
-  const existing = tabs.find((tab) => !isScraperOrViewerTabId(tab.id) && tab.url && /(^|\.)facebook\.com/i.test(new URL(tab.url).hostname))
-  if (existing) { await ensureTabAwake(existing.id); return existing }
+  const existing = tabs.find((tab) => !isScraperTabId(tab.id) && tab.url && /(^|\.)facebook\.com/i.test(new URL(tab.url).hostname))
+  if (existing) return existing
   const created = await chrome.tabs.create({ url: FB_POST_HOME_URL, active: false })
-  await chrome.tabs.update(created.id, { autoDiscardable: false }).catch(() => {})
   await waitForTabComplete(created.id, 22000)
-  await ensureTabAwake(created.id)
   await new Promise((r) => setTimeout(r, 2400))
   return created
 }
 
 async function findOrCreateTikTokPostTab() {
   const tabs = await chrome.tabs.query({})
-  const existing = tabs.find((tab) => !isScraperOrViewerTabId(tab.id) && tab.url && /(^|\.)tiktok\.com/i.test(new URL(tab.url).hostname) && /\/(tiktokstudio|creator-center|upload)/i.test(tab.url))
-  if (existing) { await ensureTabAwake(existing.id); return existing }
+  const existing = tabs.find(
+    (tab) => !isScraperTabId(tab.id) && tab.url && /(^|\.)tiktok\.com/i.test(new URL(tab.url).hostname) && /\/(tiktokstudio|creator-center|upload)/i.test(tab.url)
+  )
+  if (existing) return existing
   const created = await chrome.tabs.create({ url: TIKTOK_STUDIO_HOME_URL, active: false })
-  await chrome.tabs.update(created.id, { autoDiscardable: false }).catch(() => {})
   await waitForTabComplete(created.id, 22000)
-  await ensureTabAwake(created.id)
   await new Promise((r) => setTimeout(r, 2500))
   return created
 }
@@ -507,16 +500,35 @@ async function openOrReuseScraperTab(key, url, settleMs = 2600) {
     try {
       const tab = await chrome.tabs.get(existingId)
       if (tab?.id) return await navigateTabAndWait(tab.id, url, settleMs)
-    } catch (_) { scraperTabIds[key] = null }
+    } catch (_) {
+      scraperTabIds[key] = null
+    }
   }
   const created = await chrome.tabs.create({ url, active: false })
   scraperTabIds[key] = created.id
-  await chrome.tabs.update(created.id, { autoDiscardable: false }).catch(() => {})
   await waitForTabComplete(created.id, 24000)
-  await ensureTabAwake(created.id)
   await new Promise((r) => setTimeout(r, settleMs))
-  await ensureTabAwake(created.id)
   return await chrome.tabs.get(created.id)
+}
+
+async function openOrReuseSingleViewTab(url, platform = 'facebook') {
+  const key = String(platform || '').toLowerCase() === 'tiktok' ? 'tiktok' : 'facebook'
+  const existingId = singleViewTabIds[key]
+  if (existingId) {
+    try {
+      const tab = await chrome.tabs.get(existingId)
+      if (tab?.id) {
+        await chrome.tabs.update(tab.id, { url, active: true })
+        if (tab.windowId) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {})
+        return { ok: true, tabId: tab.id, reused: true }
+      }
+    } catch (_) {
+      singleViewTabIds[key] = null
+    }
+  }
+  const created = await chrome.tabs.create({ url, active: true })
+  singleViewTabIds[key] = created.id
+  return { ok: true, tabId: created.id, reused: false }
 }
 
 function resolveProductImageUrl(rawValue, senderTabUrl) {
@@ -526,7 +538,9 @@ function resolveProductImageUrl(rawValue, senderTabUrl) {
   if (value.startsWith('/')) return `${senderTabUrl ? new URL(senderTabUrl).origin : ADMIN_DEFAULT_ORIGIN}${value}`
   let parsed
   try { parsed = new URL(value) } catch (_) { throw new Error('PRODUCT_IMAGE_URL_INVALID') }
-  if (!(parsed.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(parsed.hostname)) && parsed.protocol !== 'https:') throw new Error('PRODUCT_IMAGE_URL_NOT_ALLOWED')
+  if (!(parsed.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(parsed.hostname)) && parsed.protocol !== 'https:') {
+    throw new Error('PRODUCT_IMAGE_URL_NOT_ALLOWED')
+  }
   return parsed.href
 }
 
@@ -539,18 +553,25 @@ async function loadProductImageDataUrl(imageUrl, senderTabUrl) {
   if (!blob.size || blob.size > MAX_PRODUCT_IMAGE_BYTES) throw new Error('PRODUCT_IMAGE_SIZE_INVALID')
   let contentType = (response.headers.get('content-type') || blob.type || '').split(';')[0].trim().toLowerCase()
   if (!contentType.startsWith('image/')) {
-    if (/\.(png|jpe?g|webp|gif)(\?|$)/i.test(resolved)) contentType = resolved.toLowerCase().includes('.png') ? 'image/png' : 'image/jpeg'
-    else throw new Error('PRODUCT_IMAGE_TYPE_INVALID')
+    if (/\.(png|jpe?g|webp|gif)(\?|$)/i.test(resolved)) {
+      contentType = resolved.toLowerCase().includes('.png') ? 'image/png' : 'image/jpeg'
+    } else {
+      throw new Error('PRODUCT_IMAGE_TYPE_INVALID')
+    }
   }
   const bytes = new Uint8Array(await blob.arrayBuffer())
   let binary = ''
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+  }
   return `data:${contentType};base64,${btoa(binary)}`
 }
 
 function normalizeHashtagsField(raw) {
   if (!raw) return ''
-  if (Array.isArray(raw)) return raw.map((t) => String(t || '').trim()).filter(Boolean).map((t) => (t.startsWith('#') ? t : `#${t}`)).join(' ')
+  if (Array.isArray(raw)) {
+    return raw.map((t) => String(t || '').trim()).filter(Boolean).map((t) => (t.startsWith('#') ? t : `#${t}`)).join(' ')
+  }
   return String(raw).trim()
 }
 
@@ -562,7 +583,7 @@ async function preparePostPayload(postData, senderTabUrl) {
   if (!['only_me', 'public'].includes(privacy)) throw new Error('INVALID_PRIVACY')
   return {
     ...postData,
-    postId: postData.postId || postData.id || `job-${Date.now()}`,
+    postId: postData.postId || postData.id || null,
     title: String(postData.title || postData.headline || '').trim(),
     content: String(postData.content || postData.description || postData.caption || postData.body || '').trim(),
     hashtags: normalizeHashtagsField(postData.hashtags || postData.tags),
@@ -579,7 +600,42 @@ function isConfirmedPostResponse(response, platform, requestedPrivacy) {
 }
 
 // =========================================================================
-// ĐĂNG BÀI VỚI CHECKPOINT PHỤC HỒI CHÍNH XÁC BƯỚC KHI VĂNG / TẢI LẠI TRANG
+// VISION AI CỨU CÁNH GIAO DIỆN (qwen3.5:4b) & TỰ HỌC SELECTOR
+// =========================================================================
+
+async function handleVisionAiAssist(message, sender) {
+  let screenshotBase64 = null
+  try {
+    if (sender?.tab?.active && sender?.tab?.windowId) {
+      screenshotBase64 = await chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: 'jpeg', quality: 60 })
+    }
+  } catch (_) {}
+
+  try {
+    const payload = {
+      platform: message.platform || 'tiktok',
+      stepKey: message.stepKey || '',
+      goal: message.goal || '',
+      url: message.url || sender?.tab?.url || '',
+      errorReason: message.errorReason || '',
+      viewportWidth: Number(message.viewportWidth) || 1280,
+      viewportHeight: Number(message.viewportHeight) || 720,
+      scrollY: Number(message.scrollY) || 0,
+      screenshotBase64,
+      elements: Array.isArray(message.elements) ? message.elements : []
+    }
+    const res = await callAdminApiViaBridge('/api/admin/social/ai/vision-assist', 'POST', payload, 35000)
+    if (res?.ok && res?.learnedRule && payload.stepKey) {
+      await saveLearnedKnowledge({ [payload.stepKey]: res.learnedRule })
+    }
+    return res || { ok: false, error: 'AI_VISION_NO_RESPONSE' }
+  } catch (err) {
+    return { ok: false, error: err.message || 'AI_VISION_ERROR' }
+  }
+}
+
+// =========================================================================
+// ĐĂNG BÀI VỚI CHECKPOINT PHỤC HỒI 3 LẦN
 // =========================================================================
 
 async function executeWithRecovery(platform, postData, senderTabUrl) {
@@ -595,65 +651,24 @@ async function executeWithRecovery(platform, postData, senderTabUrl) {
       : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
     const msgType = platform === 'facebook' ? 'FB_EXECUTE_POST' : 'TIKTOK_EXECUTE_POST'
 
-    // Tạo checkpoint mới cho bài viết này
-    await saveJobCheckpoint(platform, {
-      postId: preparedPost.postId,
-      platform,
-      privacy: preparedPost.privacy,
-      step: 'init',
-      resetSteps: true,
-      existingPermalinks: [],
-      titleProbe: (preparedPost.title || preparedPost.content || '').slice(0, 40)
-    })
-
     let response = null
-    for (let attempt = 1; attempt <= 4; attempt++) {
-      const checkpoint = (await getJobCheckpoints())[platform] || { postId: preparedPost.postId, completedSteps: [] }
-      const alreadySubmitted = (checkpoint.completedSteps || []).includes('submitted')
-
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        let tab = platform === 'facebook' ? await findOrCreateFacebookPostTab() : await findOrCreateTikTokPostTab()
-        await ensureTabAwake(tab.id)
+        const tab = platform === 'facebook' ? await findOrCreateFacebookPostTab() : await findOrCreateTikTokPostTab()
         chrome.tabs.sendMessage(tab.id, { type: 'VISION_SET_CONFIG', config }).catch(() => {})
-
-        response = await sendTabMessageWithRetry(
-          tab.id,
-          { type: msgType, payload: preparedPost, checkpoint: { ...checkpoint, attempt, verifyOnly: alreadySubmitted } },
-          scripts
-        )
+        response = await sendTabMessageWithRetry(tab.id, { type: msgType, payload: preparedPost }, scripts)
 
         if (response?.needsNavigation && response.targetUrl) {
-          const latestCp = (await getJobCheckpoints())[platform] || checkpoint
-          const stepName = latestCp.step || 'init'
-          const submittedNow = (latestCp.completedSteps || []).includes('submitted')
-          pushLog({
-            platform,
-            step: 'recover',
-            level: 'warn',
-            message: submittedNow
-              ? `Trang vừa tải lại sau bước Đăng (lần ${attempt}/4) — đang quay về kiểm chứng bài thay vì đăng trùng...`
-              : `Trang bị chuyển hướng ở bước "${stepName}" (lần ${attempt}/4) — đang quay lại đúng trang để làm tiếp...`
-          })
-          // Nếu bị văng trước lúc bấm Đăng thì reset các bước DOM vì hộp thoại đã đóng khi điều hướng
-          if (!submittedNow) await saveJobCheckpoint(platform, { step: 'navigated', resetSteps: true })
-          await navigateTabAndWait(tab.id, response.targetUrl, 2800)
+          pushLog({ platform, step: 'recover', level: 'warn', message: `Phát hiện trang lệch/tải lại (lần ${attempt}/3), tự quay lại đúng trang...` })
+          await navigateTabAndWait(tab.id, response.targetUrl, 2600)
           continue
         }
         break
       } catch (err) {
         const recoverable = /message port closed|tab_closed|receiving end|no content script/i.test(err.message || '')
-        if (recoverable && attempt < 4) {
-          const latestCp = (await getJobCheckpoints())[platform] || checkpoint
-          const submittedNow = (latestCp.completedSteps || []).includes('submitted')
-          pushLog({
-            platform,
-            step: 'recover',
-            level: 'warn',
-            message: submittedNow
-              ? `Tab ${platform} tải lại sau khi đã bấm Đăng — tự nối lại kiểm chứng kết quả (lần ${attempt + 1}/4)...`
-              : `Tab ${platform} vừa tải lại ở bước "${latestCp.step || 'init'}" — đang tự nối lại tiếp tục (lần ${attempt + 1}/4)...`
-          })
-          await new Promise((r) => setTimeout(r, 2200))
+        if (recoverable && attempt < 3) {
+          pushLog({ platform, step: 'recover', level: 'warn', message: `Tab ${platform} vừa tải lại giữa chừng, đang tự nối lại (lần ${attempt + 1}/3)...` })
+          await new Promise((r) => setTimeout(r, 2000))
           continue
         }
         throw err
@@ -668,8 +683,11 @@ async function executeWithRecovery(platform, postData, senderTabUrl) {
 
     if (platform === 'tiktok' && response.pendingReview && preparedPost.postId) {
       await enqueuePendingVerification({
-        postId: preparedPost.postId, platform: 'tiktok', privacy: preparedPost.privacy,
-        titleProbe: response.titleProbe || preparedPost.title.slice(0, 40), account: response.account || ''
+        postId: preparedPost.postId,
+        platform: 'tiktok',
+        privacy: preparedPost.privacy,
+        titleProbe: response.titleProbe || preparedPost.title.slice(0, 40),
+        account: response.account || ''
       })
     } else if (response.postUrl) {
       pushLog({ platform, step: 'done', level: 'success', message: `✅ Đã đăng ${platform} thành công!` })
@@ -679,102 +697,58 @@ async function executeWithRecovery(platform, postData, senderTabUrl) {
     pushLog({ platform, step: 'error', level: 'error', message: `Lỗi ${platform}: ${err.message}` })
     return { ok: false, error: err.message }
   } finally {
-    await clearJobCheckpoint(platform).catch(() => {})
     activeJobs.delete(platform)
     ensureKeepAlive()
   }
 }
 
 // =========================================================================
-// CÀO BÀI VIRAL ĐA TỪ KHÓA (TÁCH FB TRANG CHỦ vs THƯỚC PHIM • TIKTOK TÌM KIẾM CUỘN SÂU)
+// CÀO BÀI VIRAL PROGRESSIVE (FB BÀI >= 1K • FB REELS >= 10K • TIKTOK >= 1M)
 // =========================================================================
 
 function buildTopicSources(options = {}) {
-  const topicKey = options.topic || 'all'
+  const topicKey = String(options.topic || 'all').toLowerCase()
   const customTopic = String(options.customTopic || '').trim()
-  const preset = VIRAL_TOPIC_PRESETS[topicKey] || VIRAL_TOPIC_PRESETS.all
-  const isAll = topicKey === 'all' && !customTopic
+  const expandedFb = Array.isArray(options.fbKeywords) ? options.fbKeywords.filter(Boolean) : []
+  const expandedTt = Array.isArray(options.ttKeywords) ? options.ttKeywords.filter(Boolean) : []
 
-  if (isAll) {
-    return {
-      isAll: true,
-      label: '',
-      fbFeedSources: preset.fbFeedSources.map((url) => ({ url, keyword: '', sourceKind: 'feed' })),
-      fbReelSources: preset.fbReelSources.map((url) => ({ url, keyword: '', sourceKind: 'reels' })),
-      ttSources: preset.ttSources.map((url) => ({ url, keyword: '' })),
-      ttExploreTab: ''
-    }
+  if (topicKey === 'all' && !customTopic && !expandedFb.length && !expandedTt.length) {
+    return VIRAL_TOPIC_PRESETS.all
   }
 
-  const label = options.topicLabel || (topicKey === 'custom' ? customTopic : (preset.label || customTopic))
-  const aiFbKws = Array.isArray(options.fbKeywords) ? options.fbKeywords.map((k) => String(k || '').trim()).filter(Boolean) : []
-  const aiTtKws = Array.isArray(options.ttKeywords) ? options.ttKeywords.map((k) => String(k || '').trim()).filter(Boolean) : []
+  const preset = VIRAL_TOPIC_PRESETS[topicKey] || {}
+  const label = customTopic || options.topicLabel || preset.label || ''
+  const fbQueries = expandedFb.length ? expandedFb : [customTopic || preset.fbQuery || label].filter(Boolean)
+  const ttQueries = expandedTt.length ? expandedTt : [customTopic || preset.ttQuery || label].filter(Boolean)
 
-  const fbKeywords = Array.from(new Set([
-    ...aiFbKws,
-    ...(customTopic ? [customTopic, `${customTopic} review`, `${customTopic} việt nam`, `${customTopic} viral`] : []),
-    ...(preset.fbKeywords || [])
-  ])).slice(0, 8)
-
-  const ttKeywords = Array.from(new Set([
-    ...aiTtKws,
-    ...(customTopic ? [customTopic, `${customTopic} edit`, `${customTopic} review`, `${customTopic} viral`] : []),
-    ...(preset.ttKeywords || [])
-  ])).slice(0, 8)
-
-  // TUYỆT ĐỐI KHÔNG rơi về trang chủ hay /explore không có từ khóa khi đã chọn chủ đề!
-  const fbFeedSources = fbKeywords.map((kw) => ({
-    url: `https://www.facebook.com/search/posts/?q=${encodeURIComponent(kw)}`,
-    keyword: kw,
-    sourceKind: 'feed'
-  }))
-
-  const fbReelSources = fbKeywords.map((kw) => ({
-    url: `https://www.facebook.com/search/videos/?q=${encodeURIComponent(kw)}`,
-    keyword: kw,
-    sourceKind: 'reels'
-  }))
-
-  const ttSources = []
-  for (const kw of ttKeywords) {
-    ttSources.push({ url: `https://www.tiktok.com/search/video?q=${encodeURIComponent(kw)}`, keyword: kw })
-  }
-  // Bổ sung tab Top cho 2 từ khóa đầu nếu vẫn cần thêm
-  for (const kw of ttKeywords.slice(0, 2)) {
-    ttSources.push({ url: `https://www.tiktok.com/search?q=${encodeURIComponent(kw)}`, keyword: kw })
-  }
-
-  return {
-    isAll: false,
-    label,
-    fbFeedSources,
-    fbReelSources,
-    ttSources,
-    ttExploreTab: preset.ttExploreTab || ''
-  }
+  const fbFeedSources = fbQueries.map((q) => `https://www.facebook.com/search/posts/?q=${encodeURIComponent(q)}`)
+  const fbReelSources = [
+    ...fbQueries.map((q) => `https://www.facebook.com/search/videos/?q=${encodeURIComponent(q)}`),
+    'https://www.facebook.com/reel/'
+  ]
+  const ttSources = [
+    ...ttQueries.map((q) => `https://www.tiktok.com/search/video?q=${encodeURIComponent(q)}`),
+    'https://www.tiktok.com/explore'
+  ]
+  return { label, fbFeedSources, fbReelSources, ttSources, ttExploreTab: preset.ttExploreTab || '' }
 }
 
-async function scrapeFacebookViralStream(tabKey, sources, targetCount, minLikes, initialExcludeUrls, topicCfg, labelPrefix) {
-  if (!sources.length || targetCount <= 0) return { ok: true, posts: [], timedOut: false }
-  const SLIDING_IDLE_MS = 4 * 60 * 1000
+async function scrapeFacebookViralStream(tabKey, sources, targetCount, minLikes, initialExcludeUrls, topicCfg, sourceLabel) {
+  const SLIDING_IDLE_MS = 5 * 60 * 1000
   const scripts = ['vision-engine.js', 'content-media.js', 'content-facebook.js']
   const config = await getVisionConfig()
+  const list = Array.isArray(sources) && sources.length ? sources : ['https://www.facebook.com/']
 
   const allPosts = []
   const seenUrls = new Set(initialExcludeUrls.map((u) => String(u).trim().toLowerCase()))
-  const seenContentKeys = new Set()
   let lastFoundAt = Date.now()
+  let sourceIdx = 0
 
-  for (let i = 0; i < sources.length && allPosts.length < targetCount && Date.now() - lastFoundAt < SLIDING_IDLE_MS; i++) {
-    const src = sources[i]
-    pushLog({
-      platform: 'facebook',
-      step: 'scrape_viral',
-      level: 'info',
-      message: `📘 ${labelPrefix}: đang tìm (${i + 1}/${sources.length})${src.keyword ? ` từ khóa "${src.keyword}"` : ''}...`
-    })
+  while (allPosts.length < targetCount && Date.now() - lastFoundAt < SLIDING_IDLE_MS && sourceIdx < list.length * 2) {
+    const sourceUrl = list[sourceIdx % list.length]
+    sourceIdx++
     try {
-      const tab = await openOrReuseScraperTab(tabKey, src.url, 2800)
+      const tab = await openOrReuseScraperTab(tabKey, sourceUrl, 2800)
       chrome.tabs.sendMessage(tab.id, { type: 'VISION_SET_CONFIG', config }).catch(() => {})
       const res = await sendTabMessageWithRetry(
         tab.id,
@@ -787,56 +761,53 @@ async function scrapeFacebookViralStream(tabKey, sources, targetCount, minLikes,
             idleTimeoutMs: SLIDING_IDLE_MS,
             lastFoundAt,
             totalAlreadyFound: allPosts.length,
-            topicLabel: topicCfg.label,
-            sourceKind: src.sourceKind,
-            searchKeyword: src.keyword,
+            topicLabel: topicCfg.label || sourceLabel,
+            sourceKind: tabKey === 'fbReels' ? 'reels' : 'feed',
             excludeUrls: Array.from(seenUrls)
           }
         },
         scripts
       )
-      if (res?.error === 'FACEBOOK_LOGIN_REQUIRED') return { ok: false, error: res.error, posts: allPosts, timedOut: false }
+      if (res?.error === 'FACEBOOK_LOGIN_REQUIRED') {
+        return { ok: false, error: res.error, posts: allPosts, timedOut: false }
+      }
       if (res?.lastFoundAt && res.lastFoundAt > lastFoundAt) lastFoundAt = res.lastFoundAt
       for (const p of res?.posts || []) {
         if (allPosts.length >= targetCount) break
-        const urlKey = String(p.postUrl || '').trim().toLowerCase()
-        const contentKey = `${String(p.title || '').toLowerCase().slice(0, 45)}|${p.likesCount || 0}`
-        if (urlKey && !seenUrls.has(urlKey) && !seenContentKeys.has(contentKey)) {
-          seenUrls.add(urlKey)
-          seenContentKeys.add(contentKey)
+        const key = String(p.postUrl || '').trim().toLowerCase()
+        if (key && !seenUrls.has(key)) {
+          seenUrls.add(key)
           allPosts.push(p)
           lastFoundAt = Date.now()
         }
       }
       if (res?.timedOut) break
-    } catch (_) { await new Promise((r) => setTimeout(r, 1500)) }
+    } catch (_) {
+      await new Promise((r) => setTimeout(r, 1500))
+    }
   }
   return { ok: true, posts: allPosts, timedOut: allPosts.length < targetCount && Date.now() - lastFoundAt >= SLIDING_IDLE_MS }
 }
 
 async function scrapeTikTokViralStream(sources, targetCount, minLikes, initialExcludeUrls, topicCfg) {
-  if (!sources.length || targetCount <= 0) return { ok: true, posts: [], timedOut: false }
-  const SLIDING_IDLE_MS = 4 * 60 * 1000
+  const SLIDING_IDLE_MS = 5 * 60 * 1000
   const scripts = ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
   const config = await getVisionConfig()
   const cursors = await getScrapeCursors()
   let categoryIndex = cursors.tiktokRunCount || 0
   await saveScrapeCursors({ tiktokRunCount: categoryIndex + 2 })
 
+  const list = Array.isArray(sources) && sources.length ? sources : ['https://www.tiktok.com/explore']
   const allPosts = []
   const seenUrls = new Set(initialExcludeUrls.map((u) => String(u).trim().toLowerCase()))
   let lastFoundAt = Date.now()
+  let sourceIdx = 0
 
-  for (let i = 0; i < sources.length && allPosts.length < targetCount && Date.now() - lastFoundAt < SLIDING_IDLE_MS; i++) {
-    const src = sources[i]
-    pushLog({
-      platform: 'tiktok',
-      step: 'scrape_viral',
-      level: 'info',
-      message: `🎵 TikTok: đang tìm (${i + 1}/${sources.length})${src.keyword ? ` từ khóa "${src.keyword}"` : ''}...`
-    })
+  while (allPosts.length < targetCount && Date.now() - lastFoundAt < SLIDING_IDLE_MS && sourceIdx < list.length * 2) {
+    const sourceUrl = list[sourceIdx % list.length]
+    sourceIdx++
     try {
-      const tab = await openOrReuseScraperTab('ttViral', src.url, 3200)
+      const tab = await openOrReuseScraperTab('ttViral', sourceUrl, 3000)
       chrome.tabs.sendMessage(tab.id, { type: 'VISION_SET_CONFIG', config }).catch(() => {})
       const res = await sendTabMessageWithRetry(
         tab.id,
@@ -845,14 +816,13 @@ async function scrapeTikTokViralStream(sources, targetCount, minLikes, initialEx
           options: {
             targetCount: targetCount - allPosts.length,
             minLikes,
-            maxRoundsOnPage: 18,
+            maxRoundsOnPage: 16,
             idleTimeoutMs: SLIDING_IDLE_MS,
             lastFoundAt,
             totalAlreadyFound: allPosts.length,
-            categoryIndex: topicCfg.isAll ? categoryIndex++ : 0,
-            preferredExploreTab: topicCfg.isAll ? '' : topicCfg.ttExploreTab,
-            topicLabel: topicCfg.label,
-            searchKeyword: src.keyword,
+            categoryIndex: categoryIndex++,
+            preferredExploreTab: topicCfg.ttExploreTab || '',
+            topicLabel: topicCfg.label || '',
             excludeUrls: Array.from(seenUrls)
           }
         },
@@ -862,15 +832,24 @@ async function scrapeTikTokViralStream(sources, targetCount, minLikes, initialEx
       for (const p of res?.posts || []) {
         if (allPosts.length >= targetCount) break
         const key = String(p.postUrl || '').trim().toLowerCase()
-        if (key && !seenUrls.has(key)) { seenUrls.add(key); allPosts.push(p); lastFoundAt = Date.now() }
+        if (key && !seenUrls.has(key)) {
+          seenUrls.add(key)
+          allPosts.push(p)
+          lastFoundAt = Date.now()
+        }
       }
       if (res?.timedOut) break
-    } catch (_) { await new Promise((r) => setTimeout(r, 1500)) }
+    } catch (_) {
+      await new Promise((r) => setTimeout(r, 1500))
+    }
   }
   return { ok: true, posts: allPosts, timedOut: allPosts.length < targetCount && Date.now() - lastFoundAt >= SLIDING_IDLE_MS }
 }
 
-  if (activeJobs.has('scrape_viral')) return { ok: false, error: 'VIRAL_SCRAPE_ALREADY_RUNNING', posts: [], facebookPosts: [], tiktokPosts: [] }
+async function scrapeBothViralPlatforms(options = {}) {
+  if (activeJobs.has('scrape_viral')) {
+    return { ok: false, error: 'VIRAL_SCRAPE_ALREADY_RUNNING', posts: [], facebookPosts: [], tiktokPosts: [] }
+  }
   activeJobs.set('scrape_viral', { platform: 'both', startedAt: new Date().toISOString(), step: 'scraping' })
   ensureKeepAlive()
   try {
@@ -885,7 +864,9 @@ async function scrapeTikTokViralStream(sources, targetCount, minLikes, initialEx
     const topicCfg = buildTopicSources(options)
 
     pushLog({
-      platform: 'system', step: 'scrape_both', level: 'info',
+      platform: 'system',
+      step: 'scrape_both',
+      level: 'info',
       message: `🔥 Cào Viral (${topicCfg.label || 'Tất cả'} • FB bài ≥${fbFeedMinLikes.toLocaleString('vi-VN')} • FB Reels ≥${fbReelMinLikes.toLocaleString('vi-VN')} • TikTok ≥${ttMinLikes.toLocaleString('vi-VN')})...`
     })
 
@@ -919,15 +900,90 @@ async function scrapeTikTokViralStream(sources, targetCount, minLikes, initialEx
     const combined = [...facebookPosts, ...tiktokPosts]
 
     pushLog({
-      platform: 'system', step: 'scrape_done', level: combined.length > 0 ? 'success' : 'warn',
+      platform: 'system',
+      step: 'scrape_done',
+      level: combined.length > 0 ? 'success' : 'warn',
       message: `✅ Hoàn tất cào Viral → FB Bài viết: ${(fbFeedRes?.posts || []).length} • FB Reels: ${(fbReelsRes?.posts || []).length} • TikTok: ${tiktokPosts.length}`
     })
-    return { ok: true, facebookPosts, tiktokPosts, posts: combined, streamed: true }
+    return {
+      ok: true,
+      facebookPosts,
+      tiktokPosts,
+      posts: combined,
+      streamed: true,
+      timedOut: {
+        facebook: Boolean(fbFeedRes?.timedOut || fbReelsRes?.timedOut),
+        tiktok: Boolean(ttRes?.timedOut)
+      }
+    }
   } finally {
     activeJobs.delete('scrape_viral')
     ensureKeepAlive()
+  }
+}
 
+// =========================================================================
+// CÀO 5 HỘI NHÓM FACEBOOK & 4 TÁC VỤ TỰ ĐỘNG HÓA MỚI
+// =========================================================================
 
+async function scrapeFacebookGroupsJob(options = {}) {
+  if (activeJobs.has('scrape_groups')) return { ok: false, error: 'GROUP_SCRAPE_ALREADY_RUNNING', groups: [] }
+  activeJobs.set('scrape_groups', { platform: 'facebook', startedAt: new Date().toISOString(), step: 'scraping_groups' })
+  ensureKeepAlive()
+  try {
+    const targetCount = Number(options.count) || 5
+    const customKeyword = String(options.keyword || '').trim()
+    const seenUrls = [...(options.excludeUrls || [])]
+    const seenNames = [...(options.excludeNames || [])]
+    const scripts = ['vision-engine.js', 'content-media.js', 'content-facebook.js']
+    const config = await getVisionConfig()
+    const cursors = await getScrapeCursors()
+    const runIdx = cursors.groupRunCount || 0
+    await saveScrapeCursors({ groupRunCount: runIdx + 1 })
+
+    const kw1 = GROUP_SEARCH_KEYWORDS[runIdx % GROUP_SEARCH_KEYWORDS.length]
+    const kw2 = GROUP_SEARCH_KEYWORDS[(runIdx + 1) % GROUP_SEARCH_KEYWORDS.length]
+    const candidateUrls = customKeyword
+      ? [{ url: `https://www.facebook.com/search/groups/?q=${encodeURIComponent(customKeyword)}`, label: customKeyword }]
+      : [
+          { url: `https://www.facebook.com/search/groups/?q=${encodeURIComponent(kw1)}`, label: kw1 },
+          { url: `https://www.facebook.com/search/groups/?q=${encodeURIComponent(kw2)}`, label: kw2 },
+          { url: 'https://www.facebook.com/groups/discover/', label: 'Khám phá Facebook' }
+        ]
+
+    const collected = []
+    for (const src of candidateUrls) {
+      if (collected.length >= targetCount) break
+      const tab = await openOrReuseScraperTab('fbGroups', src.url, 2800)
+      chrome.tabs.sendMessage(tab.id, { type: 'VISION_SET_CONFIG', config }).catch(() => {})
+      const res = await sendTabMessageWithRetry(tab.id, {
+        type: 'FB_SCRAPE_GROUPS',
+        options: {
+          targetCount: targetCount - collected.length,
+          excludeUrls: seenUrls,
+          excludeNames: seenNames,
+          category: customKeyword || src.label
+        }
+      }, scripts)
+      if (res?.error === 'FACEBOOK_LOGIN_REQUIRED') return { ok: false, error: res.error, groups: collected }
+      for (const g of res?.groups || []) {
+        if (collected.length >= targetCount) break
+        seenUrls.push(g.groupUrl)
+        seenNames.push(g.groupName)
+        collected.push(g)
+      }
+    }
+    pushLog({ platform: 'facebook', step: 'scrape_groups_done', level: collected.length ? 'success' : 'warn', message: `✅ Đã lấy ${collected.length}/${targetCount} hội nhóm Facebook mới.` })
+    return { ok: true, groups: collected }
+  } catch (err) {
+    return { ok: false, error: err.message, groups: [] }
+  } finally {
+    activeJobs.delete('scrape_groups')
+    ensureKeepAlive()
+  }
+}
+
+async function runAutoWatchTask(options = {}) {
   const platform = String(options.platform || 'tiktok').toLowerCase()
   const repeatCount = Math.max(1, Math.min(50, Number(options.repeatCount) || 5))
   const dwellSeconds = Math.max(3, Math.min(120, Number(options.dwellSeconds) || 8))
@@ -939,7 +995,11 @@ async function scrapeTikTokViralStream(sources, targetCount, minLikes, initialEx
   let watched = 0
   for (let i = 1; i <= repeatCount; i++) {
     const tab = await openOrReuseScraperTab(tabKey, targetUrl, 2200)
-    await sendTabMessageWithRetry(tab.id, { type: platform === 'facebook' ? 'FB_WATCH_ITEM' : 'TT_WATCH_ITEM', options: { dwellSeconds, stepIndex: i, total: repeatCount } }, scripts).catch(() => {})
+    await sendTabMessageWithRetry(
+      tab.id,
+      { type: platform === 'facebook' ? 'FB_WATCH_ITEM' : 'TT_WATCH_ITEM', options: { dwellSeconds, stepIndex: i, total: repeatCount } },
+      scripts
+    ).catch(() => {})
     watched++
     pushLog({ platform, step: 'auto_watch', level: 'info', message: `👁️ Đã xem xong lượt ${watched}/${repeatCount}.` })
   }
@@ -972,7 +1032,7 @@ async function runScrapeChannelProfiles(options = {}) {
     const isFb = /facebook\.com/i.test(url)
     const platform = isFb ? 'facebook' : 'tiktok'
     const scripts = isFb ? ['vision-engine.js', 'content-media.js', 'content-facebook.js'] : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
-    pushLog({ platform, step: 'scan_channel', level: 'info', message: `🕵️ Đang soi kênh ${i + 1}/${urls.length}: ${url.slice(0, 55)}...` })
+    pushLog({ platform, step: 'scan_channel', level: 'info', message: `🕵️ Đang soi kênh ${i + 1}/${urls.length}...` })
     try {
       const tab = await openOrReuseScraperTab(isFb ? 'fbFeed' : 'ttViral', url, 3000)
       const res = await sendTabMessageWithRetry(tab.id, { type: isFb ? 'FB_SCRAPE_CHANNEL' : 'TT_SCRAPE_CHANNEL', options: { channelUrl: url } }, scripts)
@@ -1016,97 +1076,37 @@ async function runSurfAndCollect(options = {}) {
   return { ok: true, platform, durationMinutes, posts: res?.posts || [] }
 }
 
-
-
-async function scrapeFacebookGroupsJob(options = {}) {
-  if (activeJobs.has('scrape_groups')) return { ok: false, error: 'GROUP_SCRAPE_ALREADY_RUNNING', groups: [] }
-  activeJobs.set('scrape_groups', { platform: 'facebook', startedAt: new Date().toISOString(), step: 'scraping_groups' })
-  ensureKeepAlive()
-  try {
-    const targetCount = Number(options.count) || 5
-    const customKeyword = String(options.keyword || '').trim()
-    const seenUrls = [...(options.excludeUrls || [])]
-    const seenNames = [...(options.excludeNames || [])]
-    const scripts = ['vision-engine.js', 'content-media.js', 'content-facebook.js']
-    const config = await getVisionConfig()
-    const cursors = await getScrapeCursors()
-    const runIdx = cursors.groupRunCount || 0
-    await saveScrapeCursors({ groupRunCount: runIdx + 1 })
-
-    const kw1 = GROUP_SEARCH_KEYWORDS[runIdx % GROUP_SEARCH_KEYWORDS.length]
-    const kw2 = GROUP_SEARCH_KEYWORDS[(runIdx + 1) % GROUP_SEARCH_KEYWORDS.length]
-    const candidateUrls = customKeyword
-      ? [{ url: `https://www.facebook.com/search/groups/?q=${encodeURIComponent(customKeyword)}`, label: customKeyword }]
-      : [
-          { url: `https://www.facebook.com/search/groups/?q=${encodeURIComponent(kw1)}`, label: kw1 },
-          { url: `https://www.facebook.com/search/groups/?q=${encodeURIComponent(kw2)}`, label: kw2 },
-          { url: 'https://www.facebook.com/groups/discover/', label: 'Khám phá Facebook' }
-        ]
-
-    const collected = []
-    for (const src of candidateUrls) {
-      if (collected.length >= targetCount) break
-      const tab = await openOrReuseScraperTab('fbGroups', src.url, 2800)
-      chrome.tabs.sendMessage(tab.id, { type: 'VISION_SET_CONFIG', config }).catch(() => {})
-      const res = await sendTabMessageWithRetry(tab.id, {
-        type: 'FB_SCRAPE_GROUPS',
-        options: { targetCount: targetCount - collected.length, excludeUrls: seenUrls, excludeNames: seenNames, category: customKeyword || src.label }
-      }, scripts)
-      if (res?.error === 'FACEBOOK_LOGIN_REQUIRED') return { ok: false, error: res.error, groups: collected }
-      for (const g of res?.groups || []) {
-        if (collected.length >= targetCount) break
-        seenUrls.push(g.groupUrl); seenNames.push(g.groupName); collected.push(g)
-      }
-    }
-    pushLog({ platform: 'facebook', step: 'scrape_groups_done', level: collected.length ? 'success' : 'warn', message: `✅ Đã lấy ${collected.length}/${targetCount} hội nhóm Facebook mới.` })
-    return { ok: true, groups: collected }
-  } catch (err) {
-    return { ok: false, error: err.message, groups: [] }
-  } finally {
-    activeJobs.delete('scrape_groups')
-    ensureKeepAlive()
-  }
-}
+// =========================================================================
+// ĐIỀU PHỐI LỆNH TỪ ADMIN / POPUP / CONTENT SCRIPTS
+// =========================================================================
 
 async function dispatchCommand(message, sender = {}) {
   const type = message?.type
   switch (type) {
-    case 'GET_LEARNED_KNOWLEDGE': {
-      const all = await getAllLearnedKnowledge()
-      return { ok: true, rule: all[message.stepKey] || null }
-    }
-    case 'SAVE_LEARNED_KNOWLEDGE':
-      return { ok: true, rule: await saveLearnedKnowledgeEntry(message.stepKey, message.rule) }
-    case 'INVALIDATE_LEARNED_KNOWLEDGE':
-      await invalidateLearnedKnowledgeEntry(message.stepKey)
-      return { ok: true }
-    case 'AI_SELF_HEAL':
-      return await handleAiSelfHeal(message.payload || {}, sender?.tab)
-    case 'SW_SLEEP': {
-      const ms = Math.min(15000, Math.max(0, Number(message.ms) || 0))
-      await new Promise((resolve) => setTimeout(resolve, ms))
-      return { ok: true }
-    }
-    case 'OPEN_SINGLE_TAB':
-      return await openUrlInSingleViewerTab(message.url)
-    case 'AUTO_WATCH_TASK': return await runAutoWatchTask(message)
-    case 'SCRAPE_POST_COMMENTS': return await runScrapePostComments(message)
-    case 'SCRAPE_CHANNEL_PROFILES': return await runScrapeChannelProfiles(message)
-    case 'SURF_AND_COLLECT': return await runSurfAndCollect(message)
     case 'PING': {
       const [vision, pending] = await Promise.all([getVisionConfig(), getPendingVerifications()])
-      return { ok: true, installed: true, version: getExtensionVersion(), visionEnabled: true, pacingMode: vision.pacingMode, pendingVerificationsCount: pending.length }
+      return {
+        ok: true,
+        installed: true,
+        version: getExtensionVersion(),
+        visionEnabled: true,
+        pacingMode: vision.pacingMode,
+        pendingVerificationsCount: pending.length
+      }
     }
     case 'CHECK_STATUS': {
       const [allTabs, vision, pending] = await Promise.all([chrome.tabs.query({}), getVisionConfig(), getPendingVerifications()])
       return {
-        ok: true, version: getExtensionVersion(),
+        ok: true,
+        version: getExtensionVersion(),
         tabs: {
           admin: allTabs.some((t) => t.url && /^http:\/\/(localhost|127\.0\.0\.1):5174/i.test(t.url)),
           facebook: allTabs.some((t) => t.url && /(^|\.)facebook\.com/i.test(t.url)),
           tiktok: allTabs.some((t) => t.url && /(^|\.)tiktok\.com/i.test(t.url))
         },
-        vision, activeJobs: Array.from(activeJobs.values()), pendingVerifications: pending
+        vision,
+        activeJobs: Array.from(activeJobs.values()),
+        pendingVerifications: pending
       }
     }
     case 'AUTO_POST': {
@@ -1118,109 +1118,71 @@ async function dispatchCommand(message, sender = {}) {
       return await scrapeBothViralPlatforms(message)
     case 'SCRAPE_FB_GROUPS':
       return await scrapeFacebookGroupsJob(message)
+    case 'AUTO_WATCH_TASK':
+      return await runAutoWatchTask(message)
+    case 'SCRAPE_POST_COMMENTS':
+      return await runScrapePostComments(message)
+    case 'SCRAPE_CHANNEL_PROFILES':
+      return await runScrapeChannelProfiles(message)
+    case 'SURF_AND_COLLECT':
+      return await runSurfAndCollect(message)
+    case 'OPEN_SINGLE_TAB':
+      return await openOrReuseSingleViewTab(message.url, message.platform)
+    case 'VISION_AI_ASSIST':
+    case 'VISION_AI_ANALYZE':
+      return await handleVisionAiAssist(message, sender)
+    case 'GET_LEARNED_KNOWLEDGE':
+      return { ok: true, knowledge: await getLearnedKnowledge() }
+    case 'SAVE_LEARNED_KNOWLEDGE':
+      return { ok: true, knowledge: await saveLearnedKnowledge(message.patch || {}) }
     case 'CHECK_PENDING_NOW': {
       await processPendingVerifications()
       return { ok: true, pending: await getPendingVerifications() }
     }
     case 'JOB_STEP_PROGRESS': {
-      const plat = message.platform || 'system'
-      const job = activeJobs.get(plat)
+      const job = activeJobs.get(message.platform)
       if (job) job.step = message.step
-      if (message.extra?.checkpointStep && ['facebook', 'tiktok'].includes(plat)) {
-        await saveJobCheckpoint(plat, {
-          step: message.step,
-          completedStep: message.extra.checkpointStep,
-          ...(Array.isArray(message.extra.existingPermalinks) ? { existingPermalinks: message.extra.existingPermalinks } : {})
-        }).catch(() => {})
-      }
-      pushLog({ platform: plat, step: message.step || 'step', level: message.level || 'info', message: message.message || '' })
+      pushLog({
+        platform: message.platform || 'system',
+        step: message.step || 'step',
+        level: message.level || 'info',
+        message: message.message || ''
+      })
       return { ok: true }
     }
-    case 'GET_VISION_CONFIG': return { ok: true, config: await getVisionConfig() }
-    case 'SAVE_VISION_CONFIG': return { ok: true, config: await saveVisionConfig(message.config || {}) }
+    case 'GET_VISION_CONFIG':
+      return { ok: true, config: await getVisionConfig() }
+    case 'SAVE_VISION_CONFIG':
+      return { ok: true, config: await saveVisionConfig(message.config || {}) }
     case 'INSPECT_TAB': {
       const platform = String(message.platform || 'tiktok').toLowerCase()
       const isFb = platform === 'facebook'
       const tab = isFb ? await findOrCreateFacebookPostTab() : await findOrCreateTikTokPostTab()
-      const scripts = isFb ? ['vision-engine.js', 'content-media.js', 'content-facebook.js'] : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
-      return { ok: true, platform, tabId: tab.id, url: tab.url, inspection: await sendTabMessageWithRetry(tab.id, { type: isFb ? 'FB_INSPECT_VISION' : 'TIKTOK_INSPECT_VISION' }, scripts) }
+      const scripts = isFb
+        ? ['vision-engine.js', 'content-media.js', 'content-facebook.js']
+        : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
+      return {
+        ok: true,
+        platform,
+        tabId: tab.id,
+        url: tab.url,
+        inspection: await sendTabMessageWithRetry(tab.id, { type: isFb ? 'FB_INSPECT_VISION' : 'TIKTOK_INSPECT_VISION' }, scripts)
+      }
     }
     case 'CANCEL_JOB': {
       activeJobs.clear()
-      await chrome.storage.local.remove(STORAGE_CHECKPOINTS_KEY).catch(() => {})
       ensureKeepAlive()
       return { ok: true }
     }
-    default: return { ok: false, error: 'UNKNOWN_COMMAND' }
+    default:
+      return { ok: false, error: 'UNKNOWN_COMMAND' }
   }
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || !message.type) return false
-  dispatchCommand(message, sender).then(sendResponse).catch((err) => sendResponse({ ok: false, error: err.message || String(err) }))
+  dispatchCommand(message, sender)
+    .then(sendResponse)
+    .catch((err) => sendResponse({ ok: false, error: err.message || String(err) }))
   return true
 })
-async function callAdminBackendViaBridge(path, method = 'POST', body = undefined) {
-  const activePort = Array.from(adminPorts)[0]
-  if (!activePort) return { ok: false, error: 'NO_ADMIN_BRIDGE' }
-  const fetchId = `bf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-  return await new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      pendingBridgeFetches.delete(fetchId)
-      resolve({ ok: false, error: 'BRIDGE_API_TIMEOUT' })
-    }, 30000)
-    pendingBridgeFetches.set(fetchId, {
-      resolve: (res) => { clearTimeout(timer); resolve(res) }
-    })
-    try { activePort.postMessage({ type: 'BRIDGE_API_FETCH', fetchId, path, method, body }) }
-    catch (err) { clearTimeout(timer); pendingBridgeFetches.delete(fetchId); resolve({ ok: false, error: err.message }) }
-  })
-}
-
-async function getAllLearnedKnowledge() {
-  const local = (await chrome.storage.local.get(STORAGE_KNOWLEDGE_KEY))?.[STORAGE_KNOWLEDGE_KEY] || {}
-  if (!knowledgeSyncedFromServer && adminPorts.size > 0) {
-    knowledgeSyncedFromServer = true
-    const remote = await callAdminBackendViaBridge('/api/admin/social/ai/knowledge', 'GET')
-    if (remote?.ok && remote.data?.knowledge && typeof remote.data.knowledge === 'object') {
-      const merged = { ...remote.data.knowledge, ...local }
-      await chrome.storage.local.set({ [STORAGE_KNOWLEDGE_KEY]: merged })
-      return merged
-    }
-  }
-  return local
-}
-
-async function saveLearnedKnowledgeEntry(stepKey, rule) {
-  const all = await getAllLearnedKnowledge()
-  all[stepKey] = { ...(all[stepKey] || {}), ...rule, hitCount: (all[stepKey]?.hitCount || 0) + 1 }
-  await chrome.storage.local.set({ [STORAGE_KNOWLEDGE_KEY]: all })
-  callAdminBackendViaBridge('/api/admin/social/ai/knowledge', 'POST', { knowledge: all }).catch(() => {})
-  pushLog({ platform: stepKey.split(':')[0] || 'ai', step: 'ai_learned', level: 'success', message: `🧠 AI đã ghi nhớ quy tắc mới cho "${stepKey}" (lần sau tự chạy, không hỏi lại!).` })
-  return all[stepKey]
-}
-
-async function invalidateLearnedKnowledgeEntry(stepKey) {
-  const all = await getAllLearnedKnowledge()
-  if (all[stepKey]) {
-    delete all[stepKey]
-    await chrome.storage.local.set({ [STORAGE_KNOWLEDGE_KEY]: all })
-    callAdminBackendViaBridge('/api/admin/social/ai/knowledge', 'POST', { knowledge: all }).catch(() => {})
-  }
-}
-
-async function handleAiSelfHeal(payload, senderTab) {
-  let screenshotBase64 = null
-  // Nếu tab đang hiển thị thì chụp thêm ảnh màn hình thật cho Vision qwen3.5:4b nhìn trực tiếp
-  if (senderTab?.active && senderTab.windowId) {
-    try {
-      screenshotBase64 = await chrome.tabs.captureVisibleTab(senderTab.windowId, { format: 'jpeg', quality: 60 })
-    } catch (_) {}
-  }
-  const res = await callAdminBackendViaBridge('/api/admin/social/ai/vision-assist', 'POST', {
-    ...payload,
-    screenshotBase64
-  })
-  if (res?.ok && res.data?.ok) return res.data
-  return { ok: false, error: res?.error || 'AI_VISION_UNAVAILABLE' }
-}

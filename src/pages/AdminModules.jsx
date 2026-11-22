@@ -26,6 +26,7 @@ import { AdminAfterSales } from './AdminOrderWorkflow'
 import DropdownMenu from '../components/ui/DropdownMenu'
 import ConfirmRemoval from '../components/ui/ConfirmRemoval'
 import { statusLabel, fieldLabel, categoryLabel, dateLabel, dateOnlyLabel } from '../services/vietnameseLabels'
+import AdminMembershipSettings from './AdminMembershipSettings'
 
 const statusOptions = ['Đang dùng', 'Nháp', 'Đang xử lý', 'Chờ duyệt', 'Đã xong', 'Đã duyệt', 'Tạm dừng']
 
@@ -300,6 +301,26 @@ function CrudModule({ module, csrfToken, readOnlyDelete = false }) {
   return <section className="admin-module-card admin-crud-module"><div className="admin-module-head"><div><p className="admin-eyebrow">VẬN HÀNH CỬA HÀNG</p><h2>{schema.title}</h2><p>{schema.description}</p></div><button type="button" onClick={() => setEditor({})}>+ Thêm</button></div><div className="admin-crud-insights"><div><small>Tổng bản ghi</small><b>{records.length}</b><span>Đồng bộ máy chủ</span></div><div><small>Đang hoạt động</small><b>{activeCount}</b><span>Đang xử lý / hoàn tất</span></div><div><small>Cần theo dõi</small><b>{pendingCount}</b><span>Nháp / chờ duyệt</span></div><div><small>{module === 'overtime' ? 'Tổng tiền phân bổ' : 'Cập nhật gần nhất'}</small><b>{module === 'overtime' ? new Intl.NumberFormat('vi-VN').format(payrollTotal) + ' ₫' : lastUpdated ? new Date(lastUpdated).toLocaleDateString('vi-VN') : '—'}</b><span>{module === 'overtime' ? 'Tăng ca + thưởng' : 'Thời gian hệ thống'}</span></div></div>{pendingDelete && <ConfirmRemoval name={pendingDelete.title} onConfirm={() => remove(pendingDelete)} onCancel={() => setPendingDelete(null)} />}{editor && <RecordEditor schema={schema} record={editor.id ? editor : null} onSave={save} onCancel={() => setEditor(null)} />}{selected && <section className="admin-detail-panel"><p className="admin-eyebrow">CHI TIẾT BẢN GHI</p><h3>{selected.title}</h3><button type="button" onClick={() => setSelected(null)}>Đóng</button><dl>{Object.entries({ ...selected.data, status: selected.status, createdAt: selected.createdAt, updatedAt: selected.updatedAt }).map(([key, value]) => <div key={key}><dt>{fieldLabel(key, schema)}</dt><dd>{key === 'status' ? statusLabel(value, true) : ['createdAt', 'updatedAt'].includes(key) ? dateLabel(value) : String(value ?? '—')}</dd></div>)}</dl></section>}<div className="admin-module-toolbar"><input className="admin-wide-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={'Tìm trong ' + schema.title.toLocaleLowerCase('vi') + '…'} /><span>{visible.length}/{records.length} mục</span></div>{error && <p role="alert">{error}</p>}{loading ? <p>Đang tải…</p> : <div className="admin-table-wrap"><table><thead><tr><th>Tên / mã</th>{schema.columns.map((column) => <th key={column}>{column}</th>)}<th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>{visible.map((record) => <tr key={record.id}><td><button className="admin-link-button" type="button" onClick={() => setSelected(record)}>{record.title}</button><small>#{record.id}</small></td>{schema.fields.map((field) => <td key={field.key}>{record.data?.[field.key] ?? '—'}</td>)}<td className="admin-status-cell">{statusLabel(record.status, true)}</td><td className="admin-product-actions"><button className="table-action" type="button" onClick={() => setEditor(record)}>Sửa</button>{!readOnlyDelete && <button className="table-action table-action--danger" type="button" onClick={() => setPendingDelete(record)}>Xóa</button>}</td></tr>)}</tbody></table>{visible.length === 0 && <p className="admin-empty">Chưa có bản ghi phù hợp.</p>}</div>}</section>
 }
 
+function SupportWorkspace({ csrfToken, role }) {
+  const [tab, setTab] = useState('tickets')
+  const canEditMembership = role === 'admin'
+  return <>
+    {canEditMembership && (
+      <div className="cskh-mode-switch" role="tablist" aria-label="Chế độ chăm sóc khách hàng">
+        <button type="button" role="tab" aria-selected={tab === 'tickets'} className={tab === 'tickets' ? 'is-active' : ''} onClick={() => setTab('tickets')}>
+          ☏ Quản lý yêu cầu CSKH
+        </button>
+        <button type="button" role="tab" aria-selected={tab === 'membership'} className={tab === 'membership' ? 'is-active' : ''} onClick={() => setTab('membership')}>
+          🏅 Cài đặt Thẻ Thành Viên
+        </button>
+      </div>
+    )}
+    {tab === 'membership' && canEditMembership
+      ? <AdminMembershipSettings csrfToken={csrfToken} />
+      : <CrudModule key="support" module="support" csrfToken={csrfToken} readOnlyDelete={role !== 'admin'} />}
+  </>
+}
+
 // Chức năng AdminModule: xử lý dữ liệu theo hợp đồng của hàm; kiểm tra đầu vào, nhánh lỗi và kết quả trước khi trả cho nơi gọi.
 export default function AdminModule({ module, csrfToken, onNavigate, language = 'vi', role = 'admin' }) {
   if (!canOpenModule(role, module)) return <p role="alert">Bạn không có quyền sử dụng chức năng này.</p>
@@ -321,6 +342,7 @@ export default function AdminModule({ module, csrfToken, onNavigate, language = 
   if (module === 'rewards-wheel') return <AdminVouchers csrfToken={csrfToken} />
   if (module === 'returns') return <AdminAfterSales csrfToken={csrfToken} role={role} />
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
+  if (module === 'support') return <SupportWorkspace csrfToken={csrfToken} role={role} />
   if (crudSchemas[module]) return <CrudModule key={module} module={module} csrfToken={csrfToken} readOnlyDelete={role !== 'admin' && module !== 'inventory'} />
   return <section className="admin-module-card"><h2>Mục chưa có dữ liệu</h2><p>Chức năng này chưa được cấu hình.</p></section>
 }

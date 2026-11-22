@@ -107,7 +107,7 @@ public sealed partial class StoreDb
             ("@recipient", draft.Recipient), ("@phone", draft.Phone), ("@address", draft.Address), ("@fulfillment", draft.Fulfillment),
             ("@region", draft.Region), ("@distance", draft.DistanceKm), ("@weight", draft.WeightKg), ("@subtotal", draft.Subtotal),
             ("@discount", draft.Discount), ("@goods", draft.GoodsTotal), ("@shipping", draft.ShippingFee), ("@total", draft.Total),
-            ("@vouchers", JsonSerializer.Serialize(draft.VoucherCodes)), ("@tier", draft.Tier), ("@points", LoyaltyPolicy.AwardPoints(draft.GoodsTotal, draft.Tier)),
+            ("@vouchers", JsonSerializer.Serialize(draft.VoucherCodes)), ("@tier", draft.Tier), ("@points", LoyaltyPolicy.AwardPoints(draft.GoodsTotal, draft.Tier, GetMembershipPolicy())),
             ("@now", now.ToString("O")), ("@method", draft.PaymentMethod), ("@schedule", draft.ScheduledAt))) insert.ExecuteNonQuery();
         ReserveCheckout(connection, transaction, id, draft.CustomerId, draft.Items, draft.VoucherCodes);
         using (var intent = CheckoutCommand(connection, transaction, """

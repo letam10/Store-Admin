@@ -2001,6 +2001,7 @@ public sealed partial class StoreDb
         cmd.CommandText = "SELECT id, username, email, points, paid_goods_total, spin_credits, created_at, ISNULL(phone, '') FROM customers ORDER BY points DESC, id ASC";
         using var reader = cmd.ExecuteReader();
         var list = new List<object>();
+        var policy = GetMembershipPolicy();
         while (reader.Read())
         {
             var pts = Convert.ToInt32(reader.GetValue(3));
@@ -2014,7 +2015,7 @@ public sealed partial class StoreDb
                 spinCredits = Convert.ToInt32(reader.GetValue(5)),
                 createdAt = reader.GetString(6),
                 phone = reader.GetString(7),
-                tier = pts >= 10000 ? "diamond" : pts >= 1000 ? "gold" : pts >= 100 ? "silver" : "bronze"
+                tier = LoyaltyPolicy.ResolveTier(pts, policy)
             });
         }
         return list;

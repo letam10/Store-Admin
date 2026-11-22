@@ -639,7 +639,7 @@ public static class AiStoreContext
                 returnRefund = "Tiền hàng; không hoàn phí giao ban đầu. Khách thanh toán cước gửi trả cho đơn vị vận chuyển",
                 exchange = "Đổi sang sản phẩm khác; bù/hoàn chênh lệch = giá hàng thay thế + cước giao thay thế - tiền hàng cũ. Nhận tại cửa hàng không có cước giao",
                 merchantFault = "Hoàn số tiền thực đã trả còn lại, miễn phí lỗi cửa hàng", feesFromOrderQuote = true },
-            loyalty = LoyaltyPolicy.Description,
+            loyalty = LoyaltyPolicy.ToDescription(db.GetMembershipPolicy()),
             adminReport = report,
             adminMultiPeriodStats,
             adminOrders,

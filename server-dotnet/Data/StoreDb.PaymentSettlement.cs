@@ -66,7 +66,7 @@ public sealed partial class StoreDb
         }
         if (state is "refunded_unmatched" or "unmatched_received" || (method != "bank_transfer" && state != "pending"))
             throw new InvalidOperationException("ACTION_NOT_ALLOWED");
-        points = LoyaltyPolicy.AwardPoints(goods, tier);
+        points = LoyaltyPolicy.AwardPoints(goods, tier, GetMembershipPolicy());
         if (method == "bank_transfer")
         {
             using var receipt = CheckoutCommand(connection, transaction, """
@@ -91,12 +91,12 @@ public sealed partial class StoreDb
             DELETE FROM customer_vouchers WHERE customer_id=@customer AND code IN (SELECT code FROM #used_vouchers);
             DROP TABLE #used_vouchers;
             UPDATE customers SET points=points+@points,
-              spin_credits=spin_credits+((paid_goods_total+CAST(@goods AS BIGINT))/100000-paid_goods_total/100000),
+              spin_credits=spin_credits+((paid_goods_total+CAST(@goods AS BIGINT))/@spinUnit-paid_goods_total/@spinUnit),
               paid_goods_total=paid_goods_total+@goods WHERE id=@customer;
             UPDATE customer_orders SET status='paid',paid_at=@paid,points_earned=@points,reward_policy_version=2 WHERE id=@id;
             UPDATE checkout_intents SET state='paid',stock_reserved=0,payment_reference=@reference,received_at=@received WHERE order_id=@id;
             """, ("@id", id), ("@customer", customerId), ("@points", points), ("@goods", goods), ("@paid", received.ToString("O")),
-            ("@reference", reference), ("@received", received))) consume.ExecuteNonQuery();
+            ("@reference", reference), ("@received", received), ("@spinUnit", Math.Max(1, GetMembershipPolicy().GoodsPerSpin)))) consume.ExecuteNonQuery();
         QueueNotification(connection, transaction, "invoice:customer:" + id, "invoice.customer", new { orderId = id });
         QueueAdminNotifications(connection, transaction, "invoice:admin:" + id, "invoice.admin", new { orderId = id });
         QueueAdminEvent(connection, transaction, "order:paid:" + id, "order:paid", new { orderId = id, pointsEarned = points });

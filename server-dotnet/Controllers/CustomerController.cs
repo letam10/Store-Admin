@@ -561,10 +561,10 @@ public sealed partial class CustomerController(StoreDb db, IConfiguration config
         raw = Request.Cookies[Cookie] ?? string.Empty; var current = Current(); customer = current ?? default; return current is not null && raw.Length > 0;
     }
     // Chức năng Tier: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.
-    private static string Tier(int points) => points >= 10000 ? "diamond" : points >= 1000 ? "gold" : points >= 100 ? "silver" : "bronze";
+    private string Tier(int points) => LoyaltyPolicy.ResolveTier(points, db.GetMembershipPolicy());
     // Chức năng Account: nhận dữ liệu đầu vào, kiểm tra nghiệp vụ và trả về kết quả cho nơi gọi.
-    private static object Account((long Id, string Username, string Email, int Points, int SpinCredits) c, string csrf) => new { id = c.Id, username = c.Username, email = c.Email, points = c.Points, tier = Tier(c.Points), spinCredits = c.SpinCredits, csrfToken = csrf };
-    private static object AccountEx((long Id, string Username, string Email, int Points, int SpinCredits) c, string googleSub, int totpEnabled, string csrf)
+    private object Account((long Id, string Username, string Email, int Points, int SpinCredits) c, string csrf) => new { id = c.Id, username = c.Username, email = c.Email, points = c.Points, tier = Tier(c.Points), spinCredits = c.SpinCredits, csrfToken = csrf };
+    private object AccountEx((long Id, string Username, string Email, int Points, int SpinCredits) c, string googleSub, int totpEnabled, string csrf)
     {
         var methods = new List<string> { "password" };
         if (!string.IsNullOrEmpty(googleSub)) methods.Add("google");
@@ -669,7 +669,8 @@ public sealed partial class CustomerController(StoreDb db, IConfiguration config
             }
         }
 
-        int tierRate = tier switch { "diamond" => 5, "gold" => 2, "silver" => 1, _ => 0 };
+        var membershipPolicy = db.GetMembershipPolicy();
+        int tierRate = LoyaltyPolicy.DiscountPercent(tier, membershipPolicy);
         if (tierRate > 0)
         {
             int tierDiscount = (int)((long)remainingGoods * tierRate / 100);
