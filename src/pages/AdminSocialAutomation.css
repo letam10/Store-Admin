@@ -1,11 +1,9 @@
 /*
   FILE NOTE
-  - Mục đích: Phong cách giao diện v3.5.1 cho Tự động hóa MXH:
-    1. Bố cục Viral 2 cột song song chuẩn trái (Facebook) — phải (TikTok) với ảnh lớn 84px, hashtag chip, full metrics.
-    2. Giao diện 5 Panel tự động hóa gọn đẹp (segmented pills, preset chips, 2-column grid).
-    3. Đồng bộ 100% Light Mode & Dark Mode (#0c2017 / #102a1e).
+  - Mục đích: Stylesheet cho giao diện Quản lý Tự động hóa Mạng xã hội (AdminSocialAutomation).
+  - Nâng cấp: Phóng to ảnh bài Viral gấp đôi (168px × 168px, mobile 112px × 112px), đồng bộ màu sắc và viền bo.
   - Liên kết trực tiếp: src/pages/AdminSocialAutomation.jsx, src/pages/AdminSocialPowerPanels.jsx
-  - Vùng ảnh hưởng khi sửa: Toàn bộ giao diện hiển thị của module quản trị mạng xã hội trên cả theme sáng và theme tối.
+  - Vùng ảnh hưởng khi sửa: Bố cục lưới, kích thước ảnh thumbnail và màu sắc hiển thị của bài viral.
 */
 
 .admin-social-workspace { display: flex; flex-direction: column; gap: 18px; min-width: 0; width: 100%; }
@@ -119,7 +117,8 @@
 .social-table-shell--compact { max-height: 580px; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
 
 .viral-card-cell { display: flex; gap: 12px; align-items: flex-start; }
-.viral-thumb-lg { width: 84px; height: 84px; object-fit: cover; border-radius: 10px; flex-shrink: 0; border: 1px solid rgba(134, 239, 172, 0.25); background: #0b1d16; transition: transform 0.2s ease; }
+.viral-thumb-lg { width: 168px; height: 168px; object-fit: cover; border-radius: 12px; flex-shrink: 0; border: 1px solid rgba(134, 239, 172, 0.28); background: #0b1d16; transition: transform 0.2s ease; }
+@media (max-width: 720px) { .viral-thumb-lg { width: 112px; height: 112px; } }
 .viral-thumb-lg:hover { transform: scale(1.06); }
 .viral-thumb-lg--fb, .viral-thumb-lg--tt { display: grid; place-items: center; font-size: 28px; }
 .viral-card-meta { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }

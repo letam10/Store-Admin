@@ -2,11 +2,11 @@
   FILE NOTE
   - Mục đích: Content Script OmniVision v3.5.1 cho Facebook Desktop 2026.
   - Nâng cấp:
-    1. Đăng bài lên Trang cá nhân (/me) hoặc Nhóm Facebook được chọn, hỗ trợ chọn đối tượng Công khai / Chỉ mình tôi cả khi mở dialog phụ lẫn trượt trong cùng hộp thoại Tạo bài viết + Mắt Vision qwen3.5:4b cứu cánh.
-    2. Cào Viral tách chuẩn: Bài viết / Tìm kiếm (số like + bình luận + chia sẻ ở đáy bài, >= 1K) và Thước phim Reels (số like + bình luận + chia sẻ ở cột dọc bên phải, >= 5K).
-    3. Kiên trì cuộn 12–28 lần / 2–3 phút chống thoát sớm khi mạng chậm, độ trễ ngẫu nhiên giống người thật, hỗ trợ lướt đúng thời gian cài đặt.
+    1. Quét tìm khung Tạo bài viết rộng toàn trang, cuộn mượt và chờ DOM ổn định trước khi mở.
+    2. Cải tiến bóc tách like/comment/share không sót bài có khung bình luận, nhận diện permalink dạng pfbid/album/HTML 2026.
+    3. Hỗ trợ dừng tức thì ABORT_SCRAPE và lướt mượt từng bước FB_SURF_STEP.
   - Liên kết trực tiếp: extension/vision-engine.js, extension/content-media.js, extension/background.js
-  - Vùng ảnh hưởng khi sửa: Toàn bộ tương tác tự động với Facebook desktop (đăng bài cá nhân/nhóm, cào bài viral/reels, xem video, cào nhóm).
+  - Vùng ảnh hưởng khi sửa: Toàn bộ tương tác tự động với Facebook desktop (đăng bài cá nhân/nhóm, cào bài viral/reels, xem video, cào nhóm, lướt feed).
 */
 
 ;(() => {
@@ -24,6 +24,8 @@
 
   const V = () => globalThis.OmniVision
   const M = () => globalThis.OmniCartMedia
+
+  let scrapeAborted = false
 
   const handleMessage = (message, sender, sendResponse) => {
     if (!message?.type) return false
@@ -61,6 +63,15 @@
     }
     if (message.type === 'FB_SCRAPE_CHANNEL') {
       scrapeFacebookChannelInfo(message.options || {}).then(sendResponse).catch((e) => sendResponse({ ok: false }))
+      return true
+    }
+    if (message.type === 'ABORT_SCRAPE') {
+      scrapeAborted = true
+      sendResponse({ ok: true })
+      return false
+    }
+    if (message.type === 'FB_SURF_STEP') {
+      surfOneFacebookStep(message.options || {}).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e.message, posts: [] }))
       return true
     }
     return false
@@ -158,18 +169,22 @@
   }
 
   function findComposerTrigger() {
-    const scope = document.querySelector('[role="main"]') || document.body
     let best = null, bestScore = -Infinity
-    for (const el of V().queryAllDeep(scope, 'span, div[role="button"], button')) {
-      if (!V().isReallyVisible(el, { minWidth: 60, minHeight: 16 })) continue
+    // Quét rộng toàn bộ document.body để không bị kẹt ở [role="main"] ẩn cũ sau khi chuyển trang SPA
+    for (const el of V().queryAllDeep(document.body, 'span, div[role="button"], button, div[tabindex="0"]')) {
+      if (!V().isReallyVisible(el, { minWidth: 50, minHeight: 14 })) continue
       if (isInsideFixedTopBanner(el) || el.closest('[role="dialog"], [role="article"]')) continue
       const label = V().normalizeText(`${el.innerText || el.textContent || ''} ${el.getAttribute('aria-label') || ''}`)
-      if (!label || label.length > 90 || EXCLUDE_NOTE_RE.test(label) || !COMPOSER_TEXT_RE.test(label)) continue
+      if (!label || label.length > 100 || EXCLUDE_NOTE_RE.test(label) || !COMPOSER_TEXT_RE.test(label)) continue
       const clickable = el.closest('[role="button"], button, [tabindex="0"]') || el
-      if (isInsideFixedTopBanner(clickable)) continue
+      if (isInsideFixedTopBanner(clickable) || clickable.closest('[role="dialog"], [role="article"]')) continue
       const cRect = clickable.getBoundingClientRect()
-      if (cRect.width < 120 || cRect.height < 24 || cRect.height > 105) continue
-      const score = 60 + (clickable.getAttribute('role') === 'button' ? 30 : 0) + (cRect.width >= 240 ? 25 : 0) + (cRect.left > window.innerWidth * 0.25 ? 20 : 0) + (label.length < 36 ? 20 : 0)
+      if (cRect.width < 110 || cRect.height < 22 || cRect.height > 120) continue
+      const score = 70 +
+        (clickable.getAttribute('role') === 'button' ? 35 : 0) +
+        (cRect.width >= 220 ? 30 : 0) +
+        (label.length < 40 ? 25 : 0) +
+        (cRect.top >= 0 && cRect.top < window.innerHeight ? 20 : 0)
       if (score > bestScore) { bestScore = score; best = clickable }
     }
     return best
@@ -478,7 +493,8 @@
       return { ...verified, visionTrace: trace }
     }
 
-    if (window.scrollY > 80) await V().smoothScrollToTop()
+    await V().smoothScrollToTop()
+    await M().waitFor(() => Boolean(findComposerTrigger() || findComposerDialog()), 7000, 300)
     if (!payload?.imageDataUrl) return { ok: false, error: 'PRODUCT_IMAGE_REQUIRED', visionTrace: trace }
     if (!fullText) return { ok: false, error: 'POST_TEXT_REQUIRED', visionTrace: trace }
 
@@ -496,7 +512,12 @@
         let trigger = (openTry === 1 && learnedTriggerRule) ? V().findByLearnedRule(learnedTriggerRule) : null
         const usedLearned = Boolean(trigger)
         if (!trigger) trigger = findComposerTrigger()
-        if (!trigger && openTry === 2) { window.scrollTo({ top: 450, behavior: 'auto' }); await V().sleep(500); trigger = findComposerTrigger() }
+        if (!trigger && openTry === 2) {
+          window.scrollTo({ top: 360, behavior: 'auto' })
+          await V().sleep(650)
+          trigger = findComposerTrigger()
+          if (!trigger) { await V().smoothScrollToTop(); trigger = findComposerTrigger() }
+        }
 
         if (trigger) {
           stepLog('open_composer', `Đang bấm khung tạo bài viết (lần ${openTry}/3)...`)
@@ -711,7 +732,25 @@
       } catch (_) {}
     }
     if (timeLinks.length > 0) await V().sleep(360)
-    return readLinks()[0] || null
+    const afterHover = readLinks()[0]
+    if (afterHover) return afterHover
+
+    // Dự phòng 2026: đọc link ảnh/album hoặc pfbid nhúng trong HTML thẻ bài viết
+    const anyMediaLink = Array.from(articleEl.querySelectorAll('a[href]'))
+      .map((a) => cleanFacebookUrl(a.href))
+      .find((u) => /facebook\.com\/(photo|watch|reel|videos|story\.php|permalink|groups\/[^/]+\/posts|[^/]+\/posts\/)/i.test(u))
+    if (anyMediaLink) return anyMediaLink
+
+    const html = articleEl.innerHTML || ''
+    const pfbid = html.match(/pfbid[0-9A-Za-z]{20,}/)?.[0]
+    const authorHref = articleEl.querySelector('h2 a[href], h3 a[href], h4 a[href], strong a[href]')?.href || ''
+    if (pfbid && authorHref) {
+      const base = cleanFacebookUrl(authorHref).split('?')[0].replace(/\/+$/, '')
+      return `${base}/posts/${pfbid}`
+    }
+    const fbid = html.match(/(?:story_fbid|top_level_post_id|post_id|mf_story_key)["':=\s]+(\d{8,22})/i)?.[1]
+    if (fbid) return `https://www.facebook.com/permalink.php?story_fbid=${fbid}`
+    return null
   }
 
   async function findNewlyPublishedArticleWithHover(textProbe, existingPermalinks) {
@@ -806,55 +845,44 @@
       }
     }
 
-    // 2. Đọc chuỗi tổng hợp trong nửa dưới bài (VD: "2,3K", "29 bình luận", "38 lượt chia sẻ")
-    const bottomNumbers = []
+    // 2. Quét thanh tương tác (không giới hạn 140px từ đáy vì bên dưới có thể có ô bình luận!)
+    const rowCandidates = []
     for (const el of article.querySelectorAll('[role="button"], button, span, a')) {
-      if (el.closest('[role="article"]') !== article && article.getAttribute('role') === 'article') continue
+      if (el.closest('form, [role="textbox"], [contenteditable="true"]')) continue
       const r = el.getBoundingClientRect()
-      if (r.width === 0 || r.height === 0 || r.top < aRect.top + aRect.height * 0.5) continue
+      if (r.width === 0 || r.height === 0 || r.top < aRect.top + 80) continue
       const txt = V().normalizeText(el.innerText || el.textContent || '')
       const aria = V().normalizeText(el.getAttribute('aria-label') || '')
 
-      if (/\d+\s*(?:k|m|tr)?\s*(?:bình luận|comments?)/i.test(txt)) comments = Math.max(comments, V().parseHumanCount(txt))
-      if (/\d+\s*(?:k|m|tr)?\s*(?:lượt chia sẻ|chia sẻ|shares?)/i.test(txt)) shares = Math.max(shares, V().parseHumanCount(txt))
+      if (/^\d+(?:[.,]\d+)?\s*(?:k|n|m|tr)?\s*(?:bình luận|comments?)$/i.test(txt)) comments = Math.max(comments, V().parseHumanCount(txt))
+      if (/^\d+(?:[.,]\d+)?\s*(?:k|n|m|tr)?\s*(?:lượt chia sẻ|chia sẻ|shares?)$/i.test(txt)) shares = Math.max(shares, V().parseHumanCount(txt))
 
       if (/^(thích|like|bỏ thích|unlike|bày tỏ cảm xúc|react)$/i.test(aria)) {
-        const near = V().normalizeText(`${txt} ${el.nextElementSibling?.innerText || ''} ${el.parentElement?.innerText?.slice(0, 36) || ''}`)
+        const near = V().normalizeText(`${txt} ${el.nextElementSibling?.innerText || ''} ${el.parentElement?.innerText?.slice(0, 42) || ''}`)
         if (!/lượt xem|views?/i.test(near)) likes = Math.max(likes, V().parseHumanCount(near))
         continue
       }
-      if (/bình luận|comment/i.test(aria)) {
-        const near = V().normalizeText(`${txt} ${el.nextElementSibling?.innerText || ''}`)
-        comments = Math.max(comments, V().parseHumanCount(near))
-        continue
-      }
-      if (/chia sẻ|share|gửi/i.test(aria)) {
-        const near = V().normalizeText(`${txt} ${el.nextElementSibling?.innerText || ''}`)
-        shares = Math.max(shares, V().parseHumanCount(near))
-        continue
-      }
-
-      // 3 số đứng ngang hàng đáy bài viết (Ảnh 6: [👍 2,3K] [💬 29] [↗ 38])
-      if (!el.children.length && /^\d+(?:[.,]\d+)?\s*(k|n|nghìn|m|tr|triệu)?$/i.test(txt)) {
+      if (!el.children.length && /^\d+(?:[.,]\d+)?\s*(?:k|n|nghìn|m|tr|triệu)?$/i.test(txt)) {
         const val = V().parseHumanCount(txt)
-        if (val > 0 && r.bottom >= aRect.bottom - 140) {
-          bottomNumbers.push({ val, x: r.left, y: r.top })
+        if (val > 0 && r.height <= 36 && r.width <= 90) {
+          rowCandidates.push({ val, x: r.left, y: Math.round(r.top) })
         }
       }
     }
 
-    if (bottomNumbers.length > 0) {
-      // Nhóm các số cùng hàng ngang dưới cùng (cách nhau <= 22px theo chiều dọc)
-      bottomNumbers.sort((a, b) => b.y - a.y)
-      const baseY = bottomNumbers[0].y
-      const row = bottomNumbers.filter((n) => Math.abs(n.y - baseY) <= 22).sort((a, b) => a.x - b.x)
-      const uniq = []
-      for (const n of row) {
-        if (!uniq.length || Math.abs(n.x - uniq[uniq.length - 1].x) > 18) uniq.push(n)
+    // Gom theo từng hàng ngang y (sai số <= 18px) để tìm đúng hàng [👍 2,3K] [💬 29] [↗ 38]
+    if (rowCandidates.length > 0 && (likes === 0 || comments === 0)) {
+      const bands = []
+      for (const item of rowCandidates) {
+        let band = bands.find((b) => Math.abs(b.y - item.y) <= 18)
+        if (!band) { band = { y: item.y, items: [] }; bands.push(band) }
+        if (!band.items.some((x) => Math.abs(x.x - item.x) <= 16)) band.items.push(item)
       }
-      if (likes === 0 && uniq[0]) likes = uniq[0].val
-      if (comments === 0 && uniq[1]) comments = uniq[1].val
-      if (shares === 0 && uniq[2]) shares = uniq[2].val
+      bands.sort((a, b) => (b.items.length - a.items.length) || (b.y - a.y))
+      const bestRow = bands[0]?.items.sort((a, b) => a.x - b.x) || []
+      if (likes === 0 && bestRow[0]) likes = bestRow[0].val
+      if (comments === 0 && bestRow[1]) comments = bestRow[1].val
+      if (shares === 0 && bestRow[2]) shares = bestRow[2].val
     }
     return { likes, comments, shares }
   }
@@ -950,6 +978,7 @@
   }
 
   async function scrapeFacebookViralPosts(options = {}) {
+    scrapeAborted = false
     const targetCount = Number(options.targetCount) || 10
     const sourceKind = options.sourceKind || (/\/(reel|watch|search\/videos)/i.test(location.pathname) ? 'reels' : 'feed')
     const minLikes = Number(options.minLikes) || (sourceKind === 'reels' ? 5000 : 1000)
@@ -978,6 +1007,7 @@
     if (/\/reel\b/i.test(location.pathname)) {
       let stuckCount = 0
       for (let round = 0; round < maxRoundsOnPage; round++) {
+        if (scrapeAborted) break
         if (!strictDurationMs && collected.length >= targetCount) break
         if (strictDurationMs && Date.now() - startedAt >= strictDurationMs) break
         if (Date.now() - startedAt >= perSourceMaxMs) break
@@ -1025,6 +1055,7 @@
     // Chế độ Bài viết / Tìm kiếm Facebook (kiên trì cuộn 12–28 lần khi mạng chậm!)
     let stagnantScrolls = 0, lastScrollHeight = 0
     for (let round = 0; round < maxRoundsOnPage; round++) {
+      if (scrapeAborted) break
       if (!strictDurationMs && collected.length >= targetCount) break
       if (strictDurationMs && Date.now() - startedAt >= strictDurationMs) break
       if (Date.now() - startedAt >= perSourceMaxMs) break
@@ -1235,5 +1266,49 @@
         avatarUrl, followersCount, totalLikesCount: 0, sampleTitles
       }
     }
+  }
+
+  async function surfOneFacebookStep(options = {}) {
+    scrapeAborted = false
+    const minLikes = Number(options.minLikes) || 300
+    const seenUrls = new Set((options.excludeUrls || []).map((u) => cleanFacebookUrl(u).toLowerCase()))
+    const found = []
+
+    if (/\/reel\b/i.test(location.pathname)) {
+      const curUrl = cleanFacebookUrl(location.href)
+      const reel = extractActiveReelPost2026()
+      if (reel && reel.likes >= minLikes && !seenUrls.has(reel.postUrl.toLowerCase())) {
+        found.push({
+          id: `fb-surf-${Date.now()}`, title: V().truncateClean(reel.caption, 115), platform: 'facebook',
+          category: options.topicLabel || 'Thước phim (Reels)', postUrl: reel.postUrl,
+          summary: V().truncateClean(reel.caption, 220), likesCount: reel.likes, commentsCount: reel.comments, sharesCount: reel.shares,
+          trendingTopic: extractHashtagsFromText(reel.caption) || 'Thước phim (Reels)',
+          thumbnailUrl: reel.thumbnailUrl || '', authorName: reel.authorName || '', authorUrl: reel.authorUrl || '', createdAt: new Date().toISOString()
+        })
+      }
+      await advanceToNextFacebookReel(curUrl)
+      return { ok: true, posts: found }
+    }
+
+    for (const article of collectFeedArticleCards()) {
+      const metrics = extractFeedPostMetrics2026(article)
+      if (metrics.likes < minLikes) continue
+      const postUrl = await hoverAndExtractPostPermalink(article)
+      if (!postUrl || seenUrls.has(cleanFacebookUrl(postUrl).toLowerCase())) continue
+      seenUrls.add(cleanFacebookUrl(postUrl).toLowerCase())
+      const msgEl = article.querySelector('div[data-ad-preview="message"], div[data-ad-comet-preview="message"]') ||
+        Array.from(article.querySelectorAll('div[dir="auto"]')).find((d) => V().normalizeText(d.innerText).length >= 8)
+      const rawText = V().normalizeText(msgEl?.innerText || '')
+      const { authorName, authorUrl, thumbnailUrl } = extractArticleMediaAndAuthor(article)
+      found.push({
+        id: `fb-surf-${Date.now()}-${found.length}`, title: V().truncateClean(rawText || authorName || 'Bài Facebook', 115),
+        platform: 'facebook', category: options.topicLabel || 'Trang chủ', postUrl,
+        summary: V().truncateClean(rawText || authorName, 220), likesCount: metrics.likes, commentsCount: metrics.comments, sharesCount: metrics.shares,
+        trendingTopic: extractHashtagsFromText(rawText) || 'Trang chủ',
+        thumbnailUrl: thumbnailUrl || '', authorName: authorName || '', authorUrl: authorUrl || '', createdAt: new Date().toISOString()
+      })
+    }
+    await V().scrollPageDownForFeed(980)
+    return { ok: true, posts: found }
   }
 })()

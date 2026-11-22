@@ -1,10 +1,7 @@
 /*
   FILE NOTE
-  - Mục đích: Lõi nhận thức thị giác & mô phỏng hành vi người thật chạy ngầm 24/7 (OmniVision Engine v3.5.0).
-  - Nâng cấp:
-    1. Chống short-circuit SW_SLEEP: chỉ kết thúc sớm khi Service Worker xác nhận đã ngủ đủ >= 85% thời gian.
-    2. Hệ thống delay ngẫu nhiên như người thật (Gaussian + jitter đa dạng cho click, gõ phím, cuộn, đọc bài, xem video).
-    3. Kết nối trọn vẹn Vision AI (qwen3.5:4b) qua AI_SELF_HEAL để tự phân tích giao diện & tự học selector khi FB/TikTok thay đổi DOM.
+  - Mục đích: Lõi nhận thức thị giác & mô phỏng hành vi người thật chạy ngầm 24/7 (OmniVision Engine v3.5.1).
+  - Nâng cấp: Mở rộng smoothScrollToTop, cuộn mượt từng nấc scrollPageDownForFeed, ưu tiên từ khóa goal và tăng maxItems trong buildRichInteractiveMap/askSelfHealingAI.
   - Liên kết trực tiếp: extension/background.js, extension/content-facebook.js, extension/content-tiktok.js
   - Vùng ảnh hưởng khi sửa: Khả năng nhận thức thị giác, tự sửa lỗi DOM và độ trễ hành vi người thật trên Facebook và TikTok.
 */
@@ -88,15 +85,19 @@
   }
 
   async function smoothScrollToTop() {
-    if (window.scrollY <= 40) return
     try {
       window.scrollTo({ top: 0, behavior: 'auto' })
       if (document.scrollingElement) document.scrollingElement.scrollTop = 0
+      document.documentElement.scrollTop = 0
+      document.body.scrollTop = 0
+      for (const el of document.querySelectorAll('[role="main"], main, div')) {
+        if (el.scrollTop > 0 && el.clientHeight > 300) el.scrollTop = 0
+      }
       window.dispatchEvent(new Event('scroll'))
     } catch (_) {
       try { window.scrollTo(0, 0) } catch (_) {}
     }
-    await humanDelay(420, 820)
+    await humanDelay(450, 850)
   }
 
   function normalizeText(value) {
@@ -407,34 +408,41 @@
     await humanDelay(450, 820)
   }
 
-  async function scrollPageDownForFeed(deltaY = 1150, containerHint = null) {
-    const stepY = Math.round(deltaY * (0.8 + Math.random() * 0.42))
+  async function scrollPageDownForFeed(deltaY = 1050, containerHint = null) {
+    const totalY = Math.round(deltaY * (0.78 + Math.random() * 0.48))
+    const steps = randomGaussianBetween(6, 10)
+    const stepBase = totalY / steps
+
     const candidates = []
     if (containerHint) candidates.push(getScrollableAncestor(containerHint))
-    candidates.push(document.scrollingElement || document.documentElement)
-    candidates.push(document.documentElement)
-    candidates.push(document.body)
-
+    candidates.push(document.scrollingElement || document.documentElement, document.documentElement, document.body)
     for (const el of document.querySelectorAll('main, [role="main"], [id*="main-content"], [class*="DivBodyContainer"], [class*="SearchMain"]')) {
       if (el.scrollHeight > el.clientHeight + 80) candidates.push(el)
     }
+    const scrollers = Array.from(new Set(candidates.filter(Boolean)))
 
-    const visited = new Set()
-    for (const scroller of candidates) {
-      if (!scroller || visited.has(scroller)) continue
-      visited.add(scroller)
+    for (let s = 0; s < steps; s++) {
+      const piece = Math.round(stepBase * (0.72 + Math.random() * 0.56))
+      for (const scroller of scrollers) {
+        try {
+          scroller.scrollTop += piece
+          scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
+          scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: piece, deltaMode: 0, bubbles: true, cancelable: true }))
+        } catch (_) {}
+      }
       try {
-        scroller.scrollTop += stepY
-        scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
-        scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: stepY, deltaMode: 0, bubbles: true, cancelable: true }))
+        window.scrollBy({ top: piece, behavior: 'auto' })
+        window.dispatchEvent(new Event('scroll'))
       } catch (_) {}
+      await sleep(randomGaussianBetween(55, 135))
     }
-    try {
-      window.scrollBy({ top: stepY, behavior: 'auto' })
-      window.dispatchEvent(new Event('scroll'))
-      window.dispatchEvent(new WheelEvent('wheel', { deltaY: stepY, deltaMode: 0, bubbles: true, cancelable: true }))
-    } catch (_) {}
-    await sleep(randomGaussianBetween(320, 620))
+
+    // Thỉnh thoảng nhích ngược nhẹ lên giống người đang nhìn lại bài
+    if (Math.random() < 0.14) {
+      const back = -randomGaussianBetween(60, 150)
+      try { window.scrollBy({ top: back, behavior: 'auto' }) } catch (_) {}
+      await sleep(randomGaussianBetween(260, 520))
+    }
   }
 
   function findLabelElement(pattern, options = {}) {
@@ -761,10 +769,11 @@
     return parts.join(' ')
   }
 
-  function buildRichInteractiveMap(root = document, maxItems = 90) {
+  function buildRichInteractiveMap(root = document, maxItems = 110, goalHint = '') {
     currentMarkLookup = new Map()
     const selector = 'button,[role="button"],[role="tab"],[role="combobox"],[role="option"],[role="menuitem"],[role="radio"],[role="textbox"],[contenteditable="true"],input:not([type="hidden"]):not([type="file"]),textarea,select,a[href],div[class*="Select"],div[class*="Option"],div[class*="option"]'
     const allNodes = queryAllDeep(root, selector)
+    const goalWords = stripToMatchKey(goalHint).split(' ').filter((w) => w.length >= 3)
     const scoredNodes = []
 
     for (const el of allNodes) {
@@ -784,14 +793,19 @@
         el.closest('[role="listbox"], [role="menu"], [data-floating-ui-portal], [class*="Popover"], [class*="SelectList"], [class*="Dropdown"]') ||
         ['option', 'menuitem', 'radio'].includes(role)
       )
-      const inView = isInViewport(rect)
+      const combined = `${text} ${ariaLabel}`
+      const combinedKey = stripToMatchKey(combined)
       let priority = 0
-      if (inPortal) priority += 120
-      if (inDialog) priority += 80
-      if (inView) priority += 50
-      if (/mọi người|chỉ mình|bạn bè|công khai|đối tượng|quyền riêng tư|xong|lưu|đăng|post|everyone|only|private|done|save/i.test(`${text} ${ariaLabel}`)) priority += 100
-      if (/nhãn ai|ai label/i.test(`${text} ${ariaLabel}`)) priority -= 80
-      if (el.querySelectorAll('*').length > 10) priority -= 30
+      if (inPortal) priority += 130
+      if (inDialog) priority += 85
+      if (isInViewport(rect)) priority += 45
+      if (/bạn đang nghĩ gì|tạo bài viết|viết gì|what's on your mind|mọi người|chỉ mình|bạn bè|công khai|đối tượng|quyền riêng tư|xong|lưu|đăng|post|everyone|only|private|done|save/i.test(combined)) priority += 120
+      if (goalWords.length > 0) {
+        const hitCount = goalWords.filter((w) => combinedKey.includes(w)).length
+        priority += hitCount * 35
+      }
+      if (/nhãn ai|ai label|chia sẻ suy nghĩ/i.test(combined)) priority -= 120
+      if (el.querySelectorAll('*').length > 10) priority -= 25
 
       scoredNodes.push({ el, rect, text, ariaLabel, dataE2e, tag, role, inDialog, inPortal, priority })
     }
@@ -934,7 +948,7 @@
 
   async function askSelfHealingAI({ platform, stepKey, goal, root = document, errorReason = '' }) {
     reportStep(platform, 'ai_heal', `🧠 Đang nhờ Mắt Vision qwen3.5:4b phân tích "${stepKey}"...`, 'warn')
-    const elements = buildRichInteractiveMap(root, 75)
+    const elements = buildRichInteractiveMap(root, 95, goal)
     try {
       const res = await new Promise((resolve) => {
         chrome.runtime.sendMessage({

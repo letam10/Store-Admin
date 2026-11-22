@@ -1,13 +1,13 @@
 /*
   FILE NOTE
-  - Mục đích: Service Worker nền (Manifest V3) v3.5.1 — Đầy đủ, ổn định 24/7.
-  - Khắc phục triệt để:
-    1. Bổ sung SW_SLEEP chuẩn thời gian thật + AI_SELF_HEAL + GET/SAVE/INVALIDATE_LEARNED_KNOWLEDGE + TEST_VISION_AI.
-    2. Đăng bài SONG SONG độc lập Facebook & TikTok (không khóa chéo nhau), hỗ trợ đăng Trang cá nhân hoặc Nhóm Facebook.
-    3. Cào Viral chuẩn ngưỡng mới: FB Bài viết >= 1K, FB Thước phim >= 5K, TikTok >= 1M, cuộn kiên trì 10–30 lần / 2–3 phút, bắn progressive VIRAL_BATCH_READY.
-    4. Lướt FB/TikTok chạy ĐÚNG thời gian (phút) và xem video tự động với độ trễ ngẫu nhiên như người thật.
-  - Liên kết trực tiếp: extension/vision-engine.js, extension/content-facebook.js, extension/content-tiktok.js, extension/content-admin-bridge.js
-  - Vùng ảnh hưởng khi sửa: Luồng điều phối Service Worker, đăng bài nền tảng mạng xã hội, cào dữ liệu viral và kết nối AI local.
+  - Mục đích: Service Worker điều phối ngầm OmniVision v3.5.1 cho Chrome Extension Manifest V3.
+  - Nâng cấp:
+    1. Quản lý cờ dừng riêng cho từng nền tảng (viralStopFlags, surfStopFlags) hỗ trợ nút ⏹ Dừng FB / ⏹ Dừng TikTok / ⏹ Dừng lướt.
+    2. Cập nhật buildTopicSources hỗ trợ ttSourceMode ('explore' vs 'search').
+    3. Luồng cào bài viral chạy kiên trì đến khi đủ mục tiêu hoặc có lệnh dừng.
+    4. Sửa triệt để runSurfAndCollect chạy đúng số phút cài đặt theo đồng hồ thật, lướt mượt từng bước.
+  - Liên kết trực tiếp: extension/manifest.json, extension/vision-engine.js, extension/content-facebook.js, extension/content-tiktok.js
+  - Vùng ảnh hưởng khi sửa: Toàn bộ điều phối ngầm các tác vụ đăng bài, cào viral, xem video, lướt feed, cầu nối API với Store-Admin Web API.
 */
 
 const FB_POST_HOME_URL = 'https://www.facebook.com/me'
@@ -91,6 +91,8 @@ const activeJobs = new Map()
 const recentLogs = []
 const scraperTabIds = { fbFeed: null, fbReels: null, ttViral: null, fbGroups: null }
 const singleViewTabIds = { facebook: null, tiktok: null }
+const viralStopFlags = { facebook: false, tiktok: false }
+const surfStopFlags = { facebook: false, tiktok: false }
 const bridgeApiWaiters = new Map()
 let keepAliveTimer = null
 let verificationCheckInFlight = false
@@ -721,32 +723,37 @@ async function executeWithRecovery(platform, postData, senderTabUrl) {
 function buildTopicSources(options = {}) {
   const topicKey = String(options.topic || 'all').toLowerCase()
   const customTopic = String(options.customTopic || '').trim()
+  const ttSourceMode = String(options.ttSourceMode || (topicKey === 'all' && !customTopic ? 'explore' : 'search')).toLowerCase()
   const expandedFb = Array.isArray(options.fbKeywords) ? options.fbKeywords.filter(Boolean) : []
   const expandedTt = Array.isArray(options.ttKeywords) ? options.ttKeywords.filter(Boolean) : []
-
-  if (topicKey === 'all' && !customTopic && !expandedFb.length && !expandedTt.length) {
-    return VIRAL_TOPIC_PRESETS.all
-  }
 
   const preset = VIRAL_TOPIC_PRESETS[topicKey] || {}
   const label = customTopic || options.topicLabel || preset.label || ''
   const fbQueries = expandedFb.length ? expandedFb : [customTopic || preset.fbQuery || label].filter(Boolean)
   const ttQueries = expandedTt.length ? expandedTt : [customTopic || preset.ttQuery || label].filter(Boolean)
 
-  const fbFeedSources = [
-    ...fbQueries.map((q) => `https://www.facebook.com/search/top/?q=${encodeURIComponent(q)}`),
-    ...fbQueries.map((q) => `https://www.facebook.com/search/posts/?q=${encodeURIComponent(q)}`)
-  ]
-  const fbReelSources = [
-    ...fbQueries.map((q) => `https://www.facebook.com/search/videos/?q=${encodeURIComponent(q)}`),
-    'https://www.facebook.com/reel/'
-  ]
-  const ttSources = [
-    ...ttQueries.map((q) => `https://www.tiktok.com/search/video?q=${encodeURIComponent(q)}`),
-    ...ttQueries.map((q) => `https://www.tiktok.com/search?q=${encodeURIComponent(q)}`),
-    'https://www.tiktok.com/explore'
-  ]
-  return { label, fbFeedSources, fbReelSources, ttSources, ttExploreTab: preset.ttExploreTab || '' }
+  const fbFeedSources = fbQueries.length
+    ? [
+        ...fbQueries.map((q) => `https://www.facebook.com/search/top/?q=${encodeURIComponent(q)}`),
+        ...fbQueries.map((q) => `https://www.facebook.com/search/posts/?q=${encodeURIComponent(q)}`),
+        'https://www.facebook.com/'
+      ]
+    : VIRAL_TOPIC_PRESETS.all.fbFeedSources
+
+  const fbReelSources = fbQueries.length
+    ? [...fbQueries.map((q) => `https://www.facebook.com/search/videos/?q=${encodeURIComponent(q)}`), 'https://www.facebook.com/reel/', 'https://www.facebook.com/watch/']
+    : VIRAL_TOPIC_PRESETS.all.fbReelSources
+
+  const ttSources = ttSourceMode === 'explore'
+    ? ['https://www.tiktok.com/explore', 'https://www.tiktok.com/foryou']
+    : (ttQueries.length
+      ? [
+          ...ttQueries.map((q) => `https://www.tiktok.com/search/video?q=${encodeURIComponent(q)}`),
+          ...ttQueries.map((q) => `https://www.tiktok.com/search?q=${encodeURIComponent(q)}`)
+        ]
+      : ['https://www.tiktok.com/explore'])
+
+  return { label, fbFeedSources, fbReelSources, ttSources, ttExploreTab: preset.ttExploreTab || '', ttSourceMode }
 }
 
 async function scrapeFacebookViralStream(tabKey, sources, targetCount, minLikes, initialExcludeUrls, topicCfg, sourceLabel, emitBatch) {
@@ -760,8 +767,9 @@ async function scrapeFacebookViralStream(tabKey, sources, targetCount, minLikes,
   let lastFoundAt = Date.now()
   let sourceIdx = 0
 
-  while (allPosts.length < targetCount && Date.now() - lastFoundAt < SLIDING_IDLE_MS && sourceIdx < Math.min(list.length, 6)) {
-    const sourceUrl = list[sourceIdx++]
+  while (allPosts.length < targetCount && !viralStopFlags.facebook) {
+    const sourceUrl = list[sourceIdx % list.length]
+    sourceIdx++
     try {
       const tab = await openOrReuseScraperTab(tabKey, sourceUrl, 3400)
       chrome.tabs.sendMessage(tab.id, { type: 'VISION_SET_CONFIG', config }).catch(() => {})
@@ -801,7 +809,6 @@ async function scrapeFacebookViralStream(tabKey, sources, targetCount, minLikes,
         }
       }
       if (fresh.length > 0 && typeof emitBatch === 'function') emitBatch('facebook', sourceLabel, fresh)
-      if (res?.timedOut) break
     } catch (_) {
       await new Promise((r) => setTimeout(r, randomBetween(1800, 3200)))
     }
@@ -823,8 +830,9 @@ async function scrapeTikTokViralStream(sources, targetCount, minLikes, initialEx
   let lastFoundAt = Date.now()
   let sourceIdx = 0
 
-  while (allPosts.length < targetCount && Date.now() - lastFoundAt < SLIDING_IDLE_MS && sourceIdx < Math.min(list.length, 6)) {
-    const sourceUrl = list[sourceIdx++]
+  while (allPosts.length < targetCount && !viralStopFlags.tiktok) {
+    const sourceUrl = list[sourceIdx % list.length]
+    sourceIdx++
     try {
       const tab = await openOrReuseScraperTab('ttViral', sourceUrl, 3600)
       chrome.tabs.sendMessage(tab.id, { type: 'VISION_SET_CONFIG', config }).catch(() => {})
@@ -862,7 +870,6 @@ async function scrapeTikTokViralStream(sources, targetCount, minLikes, initialEx
         }
       }
       if (fresh.length > 0 && typeof emitBatch === 'function') emitBatch('tiktok', 'TikTok', fresh)
-      if (res?.timedOut) break
     } catch (_) {
       await new Promise((r) => setTimeout(r, randomBetween(1800, 3200)))
     }
@@ -900,6 +907,9 @@ async function scrapeBothViralPlatforms(options = {}) {
         })
       }
     }
+
+    if (targetPlatform !== 'tiktok') viralStopFlags.facebook = false
+    if (targetPlatform !== 'facebook') viralStopFlags.tiktok = false
 
     const fbFeedPromise = (targetPlatform !== 'tiktok' && (fbSourceMode === 'feed' || fbSourceMode === 'both'))
       ? scrapeFacebookViralStream('fbFeed', topicCfg.fbFeedSources, fbSourceMode === 'feed' ? fbTarget : Math.ceil(fbTarget / 2), fbFeedMinLikes, excludeUrls, topicCfg, 'FB Bài viết', emitBatch)
@@ -1065,47 +1075,45 @@ async function runScrapeChannelProfiles(options = {}) {
 }
 
 async function runSurfAndCollect(options = {}) {
-  const jobKey = `surf:${options.platform || 'tiktok'}`
-  activeJobs.set(jobKey, { platform: options.platform || 'tiktok', startedAt: new Date().toISOString(), step: 'surf' })
+  const platform = String(options.platform || 'tiktok').toLowerCase()
+  const isFb = platform === 'facebook'
+  const jobKey = `surf:${platform}`
+  surfStopFlags[platform] = false
+  activeJobs.set(jobKey, { platform, startedAt: new Date().toISOString(), step: 'surf' })
   ensureKeepAlive()
+
   try {
-    const platform = String(options.platform || 'tiktok').toLowerCase()
-    const durationMinutes = Math.max(1, Math.min(30, Number(options.durationMinutes) || 2))
+    const durationMinutes = Math.max(1, Math.min(30, Number(options.durationMinutes) || 3))
     const targetTopic = String(options.topic || '').trim()
-    const isFb = platform === 'facebook'
+    const ttSourceMode = String(options.ttSourceMode || (targetTopic ? 'search' : 'explore')).toLowerCase()
     const scripts = isFb ? ['vision-engine.js', 'content-media.js', 'content-facebook.js'] : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
     const startUrl = isFb
       ? (options.fbMode === 'reels' ? 'https://www.facebook.com/reel/' : (targetTopic ? `https://www.facebook.com/search/top/?q=${encodeURIComponent(targetTopic)}` : 'https://www.facebook.com/'))
-      : (targetTopic ? `https://www.tiktok.com/search/video?q=${encodeURIComponent(targetTopic)}` : 'https://www.tiktok.com/explore')
+      : (ttSourceMode === 'explore' ? 'https://www.tiktok.com/explore' : `https://www.tiktok.com/search/video?q=${encodeURIComponent(targetTopic || 'xu hướng')}`)
 
     const totalMs = durationMinutes * 60 * 1000
-    const endAt = Date.now() + totalMs
+    const startedAt = Date.now()
+    const endAt = startedAt + totalMs
     const collected = []
     const seenUrls = new Set()
+    let stepIndex = 0
+    let sameCountSteps = 0
+    let lastCardCount = 0
 
     pushLog({ platform, step: 'surf', level: 'info', message: `🧭 Bắt đầu lướt ${platform.toUpperCase()} trong đúng ${durationMinutes} phút...` })
-    let tab = await openOrReuseScraperTab(isFb ? 'fbFeed' : 'ttViral', startUrl, 3400)
+    const tab = await openOrReuseScraperTab(isFb ? 'fbFeed' : 'ttViral', startUrl, 3400)
 
-    while (Date.now() < endAt) {
-      const remainingMs = endAt - Date.now()
-      const sliceMs = Math.min(remainingMs, 55000)
+    while (Date.now() < endAt && !surfStopFlags[platform]) {
+      stepIndex++
+      const switchExplore = !isFb && sameCountSteps >= 4
+      if (switchExplore) sameCountSteps = 0
+
       try {
         const res = await sendTabMessageWithRetry(
           tab.id,
           {
-            type: isFb ? 'FB_SCRAPE_VIRAL' : 'TIKTOK_SCRAPE_VIRAL',
-            options: {
-              targetCount: 150,
-              minLikes: isFb ? 300 : 5000,
-              minRoundsOnPage: 12,
-              maxRoundsOnPage: 24,
-              perSourceMaxMs: sliceMs,
-              strictDurationMs: sliceMs,
-              idleTimeoutMs: sliceMs + 10000,
-              topicLabel: targetTopic,
-              sourceKind: options.fbMode === 'reels' ? 'reels' : 'feed',
-              excludeUrls: Array.from(seenUrls)
-            }
+            type: isFb ? 'FB_SURF_STEP' : 'TT_SURF_STEP',
+            options: { minLikes: isFb ? 300 : 5000, topicLabel: targetTopic, excludeUrls: Array.from(seenUrls), stepIndex, switchExplore }
           },
           scripts
         )
@@ -1113,17 +1121,29 @@ async function runSurfAndCollect(options = {}) {
           const key = String(p.postUrl || '').trim().toLowerCase()
           if (key && !seenUrls.has(key)) { seenUrls.add(key); collected.push(p) }
         }
+        if (typeof res?.cardCount === 'number') {
+          if (res.cardCount <= lastCardCount) sameCountSteps++
+          else { sameCountSteps = 0; lastCardCount = res.cardCount }
+        }
       } catch (_) {}
 
-      const leftSec = Math.max(0, Math.round((endAt - Date.now()) / 1000))
-      if (leftSec > 5) {
-        pushLog({ platform, step: 'surf', level: 'info', message: `🧭 Đã thu thập ${collected.length} bài — còn ${Math.floor(leftSec / 60)}p ${leftSec % 60}s...` })
-        await new Promise((r) => setTimeout(r, randomBetween(1400, 3000)))
-      }
+      if (Date.now() >= endAt || surfStopFlags[platform]) break
+
+      // Delay ngẫu nhiên giống người thật (2,6s → 6,8s; thỉnh thoảng dừng đọc bài 7–10s)
+      const waitMs = Math.random() < 0.2 ? randomBetween(6800, 10200) : randomBetween(2600, 6400)
+      const clampedWait = Math.min(waitMs, Math.max(500, endAt - Date.now()))
+      const elapsedSec = Math.round((Date.now() - startedAt) / 1000)
+      const totalSec = durationMinutes * 60
+      pushLog({
+        platform, step: 'surf', level: 'info',
+        message: `🧭 Lướt lượt #${stepIndex} (${Math.floor(elapsedSec / 60)}p${String(elapsedSec % 60).padStart(2, '0')}s / ${Math.floor(totalSec / 60)}p00s) · Đã gặp ${collected.length} bài`
+      })
+      await new Promise((r) => setTimeout(r, clampedWait))
     }
 
-    pushLog({ platform, step: 'done', level: 'success', message: `✅ Lướt xong đủ ${durationMinutes} phút — thu thập ${collected.length} bài.` })
-    return { ok: true, platform, durationMinutes, posts: collected }
+    const stoppedManual = surfStopFlags[platform]
+    pushLog({ platform, step: 'done', level: 'success', message: stoppedManual ? `⏹ Đã dừng lướt — thu thập ${collected.length} bài.` : `✅ Đã lướt đủ ${durationMinutes} phút — thu thập ${collected.length} bài.` })
+    return { ok: true, platform, durationMinutes, posts: collected, stoppedManual }
   } finally {
     activeJobs.delete(jobKey)
     ensureKeepAlive()
@@ -1178,6 +1198,28 @@ async function dispatchCommand(message, sender = {}) {
       return await runScrapeChannelProfiles(message)
     case 'SURF_AND_COLLECT':
       return await runSurfAndCollect(message)
+    case 'STOP_VIRAL_PLATFORM': {
+      const p = String(message.platform || 'all').toLowerCase()
+      if (p === 'facebook' || p === 'all') {
+        viralStopFlags.facebook = true
+        for (const key of ['fbFeed', 'fbReels']) {
+          if (scraperTabIds[key]) chrome.tabs.sendMessage(scraperTabIds[key], { type: 'ABORT_SCRAPE' }).catch(() => {})
+        }
+        pushLog({ platform: 'facebook', step: 'stop', level: 'warn', message: '⏹ Đã dừng cào bài Viral Facebook theo yêu cầu.' })
+      }
+      if (p === 'tiktok' || p === 'all') {
+        viralStopFlags.tiktok = true
+        if (scraperTabIds.ttViral) chrome.tabs.sendMessage(scraperTabIds.ttViral, { type: 'ABORT_SCRAPE' }).catch(() => {})
+        pushLog({ platform: 'tiktok', step: 'stop', level: 'warn', message: '⏹ Đã dừng cào bài Viral TikTok theo yêu cầu.' })
+      }
+      return { ok: true }
+    }
+    case 'STOP_SURF': {
+      const p = String(message.platform || 'all').toLowerCase()
+      if (p === 'facebook' || p === 'all') surfStopFlags.facebook = true
+      if (p === 'tiktok' || p === 'all') surfStopFlags.tiktok = true
+      return { ok: true }
+    }
     case 'OPEN_SINGLE_TAB':
       return await openOrReuseSingleViewTab(message.url, message.platform)
     case 'AI_SELF_HEAL':

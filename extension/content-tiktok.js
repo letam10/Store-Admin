@@ -2,11 +2,10 @@
   FILE NOTE
   - Mục đích: Content Script OmniVision v3.5.1 cho TikTok Studio & TikTok Web 2026.
   - Nâng cấp:
-    1. Sửa triệt để chọn Đối tượng (Mọi người / Chỉ mình bạn): cuộn nút vào giữa màn hình trước khi mở menu, KHÔNG cuộn làm đóng popover, dự phòng bàn phím + Mắt Vision qwen3.5:4b cứu cánh.
-    2. Cào Viral TikTok (mặc định >= 1M tim) kiên trì cuộn 12–28 lần / 2–3 phút, chờ tải khi mạng chậm thay vì vội chuyển từ khóa sau 1 lần lướt; đọc đủ tim, bình luận, chia sẻ, hashtag, ảnh bìa lớn và tác giả.
-    3. Hỗ trợ lướt theo đúng số phút cài đặt (strictDurationMs) và xem video với độ trễ ngẫu nhiên như người thật.
+    1. Hỗ trợ cờ dừng cào ABORT_SCRAPE và lướt mượt từng bước TT_SURF_STEP.
+    2. Cải tiến cào video viral và chuyển danh mục khám phá mượt mà.
   - Liên kết trực tiếp: extension/vision-engine.js, extension/content-media.js, extension/background.js
-  - Vùng ảnh hưởng khi sửa: Tương tác với TikTok Studio (đăng bài ảnh, chọn quyền riêng tư, theo dõi duyệt bài) và TikTok Web (cào video viral, xem video).
+  - Vùng ảnh hưởng khi sửa: Toàn bộ tương tác tự động với TikTok Studio và TikTok Web (cào video viral, xem video, lướt feed).
 */
 
 ;(() => {
@@ -26,6 +25,8 @@
 
   const V = () => globalThis.OmniVision
   const M = () => globalThis.OmniCartMedia
+
+  let scrapeAborted = false
 
   const handleMessage = (message, sender, sendResponse) => {
     if (!message?.type) return false
@@ -63,6 +64,15 @@
     }
     if (message.type === 'TT_SCRAPE_CHANNEL') {
       scrapeTikTokChannelProfile(message.options || {}).then(sendResponse).catch((e) => sendResponse({ ok: false }))
+      return true
+    }
+    if (message.type === 'ABORT_SCRAPE') {
+      scrapeAborted = true
+      sendResponse({ ok: true })
+      return false
+    }
+    if (message.type === 'TT_SURF_STEP') {
+      surfOneTikTokStep(message.options || {}).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e.message, posts: [] }))
       return true
     }
     return false
@@ -878,6 +888,7 @@
 
   // Kiên trì cuộn 12–28 lần (2–3 phút), chờ tải khi mạng chậm, không bao giờ nhảy từ khóa sau 1 lần lướt!
   async function scrapeTikTokViralPosts(options = {}) {
+    scrapeAborted = false
     const targetCount = Number(options.targetCount) || 10
     const minLikes = Number(options.minLikes) || 1000000
     const minRoundsOnPage = Number(options.minRoundsOnPage) || 12
@@ -904,6 +915,7 @@
     const cardSelector = 'div[data-e2e="explore-item"], div[data-e2e="search_video-item"], div[data-e2e="search_top-item"], div[data-e2e="recommend-list-item-container"], article[data-e2e="recommend-list-item-container"], div[class*="DivItemContainer"], article[data-e2e]'
 
     for (let round = 0; round < maxRoundsOnPage; round++) {
+      if (scrapeAborted) break
       if (!strictDurationMs && collected.length >= targetCount) break
       if (strictDurationMs && Date.now() - startedAt >= strictDurationMs) break
       if (Date.now() - startedAt >= perSourceMaxMs) break
@@ -1082,5 +1094,47 @@
         bio, avatarUrl, followersCount, totalLikesCount, sampleTitles
       }
     }
+  }
+
+  async function surfOneTikTokStep(options = {}) {
+    scrapeAborted = false
+    const minLikes = Number(options.minLikes) || 5000
+    const seenUrls = new Set((options.excludeUrls || []).map((u) => String(u).trim().toLowerCase()))
+    const cardSelector = 'div[data-e2e="explore-item"], div[data-e2e="search_video-item"], div[data-e2e="search_top-item"], div[data-e2e="recommend-list-item-container"], article[data-e2e="recommend-list-item-container"], div[class*="DivItemContainer"], article[data-e2e]'
+    const cards = Array.from(document.querySelectorAll(cardSelector))
+    const found = []
+
+    for (const card of cards) {
+      if (card.querySelector('[data-e2e*="live"], a[href*="/live"]')) continue
+      const linkEl = card.querySelector('a[href*="/video/"], a[href*="/photo/"]')
+      const postUrl = linkEl ? cleanTikTokPostUrl(linkEl.href) : null
+      if (!postUrl || !isRealTikTokPostUrl(postUrl) || seenUrls.has(postUrl.toLowerCase())) continue
+      const metrics = extractTikTokCardMetrics(card)
+      if (metrics.likes < minLikes) continue
+      seenUrls.add(postUrl.toLowerCase())
+
+      const imgAlt = V().normalizeText(card.querySelector('img[alt]')?.getAttribute('alt') || '')
+      const descEl = card.querySelector('[data-e2e="explore-card-desc"], [data-e2e="search-card-desc"], [data-e2e="video-desc"], a[title], h1')
+      const descTxt = V().normalizeText(descEl?.getAttribute?.('title') || descEl?.innerText || '')
+      const authorMatch = postUrl.match(/tiktok\.com\/(@[A-Za-z0-9._-]+)\//i)
+      const author = authorMatch ? authorMatch[1] : '@creator'
+      const bestCaption = (imgAlt.length > descTxt.length && !/avatar/i.test(imgAlt)) ? imgAlt : (descTxt || `Video TikTok của ${author}`)
+      const cardImgs = Array.from(card.querySelectorAll('img[src]')).filter((i) => !/avatar/i.test(i.alt || '') && i.naturalWidth >= 80)
+      found.push({
+        id: `tt-surf-${Date.now()}-${found.length}`, title: V().truncateClean(bestCaption, 115), platform: 'tiktok',
+        category: options.topicLabel || 'Video TikTok', postUrl, summary: V().truncateClean(bestCaption, 220),
+        likesCount: metrics.likes, commentsCount: metrics.comments, sharesCount: metrics.shares,
+        trendingTopic: extractHashtagsFromText(bestCaption) || 'Video TikTok',
+        thumbnailUrl: cardImgs[0]?.src || card.querySelector('img[src]')?.src || '',
+        authorName: author, authorUrl: `https://www.tiktok.com/${author}`, createdAt: new Date().toISOString()
+      })
+    }
+
+    const lastCard = cards[cards.length - 1]
+    await V().scrollPageDownForFeed(980, lastCard)
+    if (options.switchExplore && location.pathname.includes('/explore')) {
+      await clickExploreCategoryPill(Number(options.stepIndex) || 1)
+    }
+    return { ok: true, posts: found, cardCount: cards.length }
   }
 })()

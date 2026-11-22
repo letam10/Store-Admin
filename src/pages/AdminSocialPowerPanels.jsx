@@ -1,9 +1,11 @@
 /*
   FILE NOTE
-  - Mục đích: Bộ 5 Panel tự động hóa + Panel Ý tưởng bán hàng & Nhận diện ảnh sản phẩm v3.5.1.
-  - Thiết kế gọn gàng: tiêu đề ngắn dễ hiểu, không dòng mô tả thừa, giao diện nút chọn nhanh trực quan & chuẩn ngưỡng (FB Bài ≥ 1K, FB Reels ≥ 5K, TikTok ≥ 1M).
-  - Liên kết trực tiếp: src/pages/AdminSocialAutomation.jsx, src/pages/AdminSocialAutomation.css, src/api/chat.js
-  - Vùng ảnh hưởng khi sửa: 5 panel tác vụ tự động, panel ý tưởng bán hàng và panel tạo sản phẩm từ ảnh.
+  - Mục đích: Bộ 5 Panel Tự động hóa MXH v3.5.1 (AdminSocialPowerPanels).
+  - Nâng cấp:
+    1. Trong customViralCfg thêm ttSourceMode: 'explore' và dropdown Nguồn TikTok (Khám phá / Từ khóa).
+    2. Trong surfCfg thêm ttSourceMode: 'explore', hiển thị tùy chọn Nguồn TikTok và ô tìm kiếm khi chọn search, thêm nút ⏹ Dừng lướt tức thì khi surfBusy.
+  - Liên kết trực tiếp: src/pages/AdminSocialAutomation.jsx, src/pages/AdminSocialAutomation.css
+  - Vùng ảnh hưởng khi sửa: Giao diện Panel Lấy bài Viral tùy chỉnh và Panel Lướt theo thời gian thực tế.
 */
 import { useEffect, useState } from 'react'
 import { apiJson } from '../api/chat'
@@ -203,7 +205,7 @@ export function AutomationSuitePanels({ csrfToken, sendExtensionMessage, viralPo
   const [cmtResult, setCmtResult] = useState(null)
 
   const [customViralCfg, setCustomViralCfg] = useState({
-    platform: 'both', fbSourceMode: 'both', fbFeedMinLikes: 1000, fbReelMinLikes: 5000,
+    platform: 'both', fbSourceMode: 'both', ttSourceMode: 'explore', fbFeedMinLikes: 1000, fbReelMinLikes: 5000,
     tiktokMinLikes: 1000000, fbCount: 10, tiktokCount: 10, topic: 'all', customTopic: ''
   })
 
@@ -212,7 +214,7 @@ export function AutomationSuitePanels({ csrfToken, sendExtensionMessage, viralPo
   const [channelBusy, setChannelBusy] = useState(false)
   const [channelResults, setChannelResults] = useState(null)
 
-  const [surfCfg, setSurfCfg] = useState({ platform: 'tiktok', fbMode: 'feed', durationMinutes: 3, topic: '' })
+  const [surfCfg, setSurfCfg] = useState({ platform: 'tiktok', fbMode: 'feed', ttSourceMode: 'explore', durationMinutes: 3, topic: '' })
   const [surfBusy, setSurfBusy] = useState(false)
   const [surfResult, setSurfResult] = useState(null)
 
@@ -352,14 +354,26 @@ export function AutomationSuitePanels({ csrfToken, sendExtensionMessage, viralPo
               ? <select className="social-select" value={surfCfg.fbMode} onChange={e => setSurfCfg({ ...surfCfg, fbMode: e.target.value })}><option value="feed">Trang chủ (Bài viết)</option><option value="reels">Thước phim (Reels)</option></select>
               : <input className="social-input" value={surfCfg.topic} onChange={e => setSurfCfg({ ...surfCfg, topic: e.target.value })} placeholder="Trống = mọi top..." />}
           </div>
+          {surfCfg.platform === 'tiktok' && (
+            <div className="social-field">
+              <label>Nguồn TikTok</label>
+              <select className="social-select" value={surfCfg.ttSourceMode} onChange={e => setSurfCfg({ ...surfCfg, ttSourceMode: e.target.value })}>
+                <option value="explore">🧭 Mục Khám phá</option>
+                <option value="search">🔎 Tìm theo từ khóa</option>
+              </select>
+            </div>
+          )}
           {surfCfg.platform === 'facebook' && (
             <div className="social-field auto-span-2">
               <label>Chủ đề lọc</label>
               <input className="social-input" value={surfCfg.topic} onChange={e => setSurfCfg({ ...surfCfg, topic: e.target.value })} placeholder="Trống = mọi top..." />
             </div>
           )}
-          <div className="auto-actions auto-span-2">
+          <div className="auto-actions auto-span-2" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button type="submit" className="social-btn-trigger" disabled={surfBusy}>{surfBusy ? `⏳ Đang lướt ${surfCfg.durationMinutes} phút...` : '🧭 Bắt đầu lướt'}</button>
+            {surfBusy && (
+              <button type="button" className="social-action-btn social-action-btn--danger" onClick={() => sendExtensionMessage('STOP_SURF', { platform: surfCfg.platform })}>⏹ Dừng lướt</button>
+            )}
           </div>
         </form>
         {surfResult && (
@@ -402,6 +416,7 @@ export function AutomationSuitePanels({ csrfToken, sendExtensionMessage, viralPo
           <div className="social-field"><label>FB Bài viết (≥ Like)</label><input type="number" min="100" className="social-input" value={customViralCfg.fbFeedMinLikes} onChange={e => setCustomViralCfg({ ...customViralCfg, fbFeedMinLikes: Number(e.target.value) })} /></div>
           <div className="social-field"><label>FB Thước phim (≥ Like)</label><input type="number" min="500" className="social-input" value={customViralCfg.fbReelMinLikes} onChange={e => setCustomViralCfg({ ...customViralCfg, fbReelMinLikes: Number(e.target.value) })} /></div>
           <div className="social-field"><label>TikTok (≥ Tim)</label><input type="number" min="1000" className="social-input" value={customViralCfg.tiktokMinLikes} onChange={e => setCustomViralCfg({ ...customViralCfg, tiktokMinLikes: Number(e.target.value) })} /></div>
+          <div className="social-field"><label>Nguồn TikTok</label><select className="social-select" value={customViralCfg.ttSourceMode} onChange={e => setCustomViralCfg({ ...customViralCfg, ttSourceMode: e.target.value })}><option value="explore">🧭 Khám phá</option><option value="search">🔎 Từ khóa</option></select></div>
           <div className="social-field"><label>Số bài / kênh</label><input type="number" min="1" max="40" className="social-input" value={customViralCfg.fbCount} onChange={e => setCustomViralCfg({ ...customViralCfg, fbCount: Number(e.target.value), tiktokCount: Number(e.target.value) })} /></div>
           <div className="social-field"><label>Chủ đề / Từ khóa</label><input className="social-input" value={customViralCfg.customTopic} onChange={e => setCustomViralCfg({ ...customViralCfg, customTopic: e.target.value, topic: e.target.value.trim() ? 'custom' : 'all' })} placeholder="Trống = tất cả..." /></div>
           <div className="auto-actions" style={{ alignSelf: 'end' }}>

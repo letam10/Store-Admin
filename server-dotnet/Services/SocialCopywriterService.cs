@@ -2,7 +2,7 @@
   FILE NOTE
   - Mục đích: Dịch vụ AI Local qwen3.5:4b cho Tự động hóa MXH v3.5.1:
     1. Viết bài sạch tự nhiên (loại bỏ sạch ký hiệu Markdown ** thừa trên FB/TikTok).
-    2. Mắt Vision AI cứu cánh giao diện (DiagnoseExtensionUiAsync): timeout 45s, nhận ảnh chụp + bản đồ DOM + dự phòng thông minh theo nhãn tiếng Việt nếu Ollama bận.
+    2. Mắt Vision AI cứu cánh giao diện (DiagnoseExtensionUiAsync): timeout 45s, format json chuẩn, nhận diện nút "bạn đang nghĩ gì", đối tượng bài viết và lưu/xong.
     3. Mở rộng từ khóa đa dạng, phân loại xu hướng & lọc trùng bài Viral, tạo ý tưởng bán hàng, nhận diện ảnh sản phẩm, phân tích bình luận & lọc kênh.
   - Liên kết trực tiếp: server-dotnet/Controllers/AdminSocialController.cs, server-dotnet/Models/SocialCampaign.cs
   - Vùng ảnh hưởng khi sửa: Backend xử lý AI cho tạo bài viết, mở rộng từ khóa, phân loại viral, chẩn đoán vision UI cho extension.
@@ -318,7 +318,8 @@ public sealed class SocialCopywriterService(IConfiguration configuration)
                 messages = new[] { userMessage },
                 stream = false,
                 think = false,
-                options = new { temperature = 0.15, num_predict = 500 }
+                format = "json",
+                options = new { temperature = 0.12, num_predict = 500 }
             };
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
@@ -358,7 +359,8 @@ public sealed class SocialCopywriterService(IConfiguration configuration)
         var fallbackEl = elements.FirstOrDefault(e =>
         {
             var t = $"{e.Text} {e.AriaLabel}".ToLowerInvariant();
-            if (t.Contains("nhãn ai") || t.Contains("ai label")) return false;
+            if (t.Contains("nhãn ai") || t.Contains("ai label") || t.Contains("chia sẻ suy nghĩ")) return false;
+            if (goalLower.Contains("bạn đang nghĩ gì") || goalLower.Contains("tạo bài viết")) return t.Contains("bạn đang nghĩ gì") || t.Contains("what's on your mind") || t.Contains("bạn viết gì");
             if (goalLower.Contains("chỉ mình")) return t.Contains("chỉ mình") || t.Contains("only me") || t.Contains("only you") || t.Contains("công khai") || t.Contains("bạn bè");
             if (goalLower.Contains("mọi người") || goalLower.Contains("công khai")) return t.Contains("mọi người") || t.Contains("công khai") || t.Contains("everyone") || t.Contains("public");
             return false;

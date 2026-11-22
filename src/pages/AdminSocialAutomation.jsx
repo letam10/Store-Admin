@@ -1,12 +1,12 @@
 /*
   FILE NOTE
-  - Mục đích: Module Quản trị Đăng bài Tự động MXH v3.5.1.
+  - Mục đích: Trang quản trị Tự động hóa Mạng xã hội v3.5.1 (AdminSocialAutomation).
   - Nâng cấp:
-    1. Đăng SONG SONG độc lập Facebook & TikTok (postingBusy tách riêng từng nền tảng — đang đăng FB vẫn bấm đăng TikTok được ngay!).
-    2. Cấu hình Kênh đăng & Quyền riêng tư hoạt động chuẩn xác, đồng bộ tự động xuống Soạn bài AI & Bộ lập lịch; Soạn bài AI hỗ trợ rõ "👤 Trang cá nhân (Mặc định)" hoặc chọn Nhóm Facebook cụ thể.
-    3. Bảng bài Viral chia 2 cột song song: Facebook BÊN TRÁI (Bài ≥1K • Reels ≥5K) và TikTok BÊN PHẢI (≥1M Tim), ảnh đại diện lớn 84px, hiển thị đầy đủ lượt thích/tim, bình luận, chia sẻ, hashtag, phân loại xu hướng chính xác và mở 1 tab duy nhất.
+    1. Bổ sung chọn nguồn cào TikTok (Khám phá / Từ khóa) và 2 nút ⏹ Dừng FB & ⏹ Dừng TikTok độc lập.
+    2. Cập nhật state scrapingPlatformBusy và hàm handleStopViralPlatform.
+    3. Hỗ trợ truyền ttSourceMode vào lệnh FETCH_REAL_VIRAL cho Chrome Extension.
   - Liên kết trực tiếp: src/pages/AdminSocialPowerPanels.jsx, src/pages/AdminSocialAutomation.css, src/pages/socialPrivacy.js, src/api/chat.js
-  - Vùng ảnh hưởng khi sửa: Giao diện quản trị mạng xã hội, luồng soạn bài AI, bảng theo dõi bài viral, danh sách nhóm và nhật ký đăng bài.
+  - Vùng ảnh hưởng khi sửa: Toàn bộ giao diện tab Quản lý MXH, bảng bài viral song song 2 cột, luồng gọi extension cào bài và dừng tác vụ.
 */
 
 import { useEffect, useState, useMemo, useRef } from 'react'
@@ -87,6 +87,8 @@ export default function AdminSocialAutomation({ csrfToken }) {
   const [viralPosts, setViralPosts] = useState([])
   const [viralTopic, setViralTopic] = useState('all')
   const [fbSourceMode, setFbSourceMode] = useState('both')
+  const [ttSourceMode, setTtSourceMode] = useState('explore')
+  const [scrapingPlatformBusy, setScrapingPlatformBusy] = useState({ facebook: false, tiktok: false })
   const [viralFilterTopic, setViralFilterTopic] = useState('all')
   const [viralFbKindFilter, setViralFbKindFilter] = useState('all')
   const [viralSearch, setViralSearch] = useState('')
@@ -617,18 +619,27 @@ export default function AdminSocialAutomation({ csrfToken }) {
     return () => { disposed = true; clearInterval(timer) }
   }, [settings.isActive, settings.mode, settings.channels, extensionConnected, batchPosting, postingBusy.facebook, postingBusy.tiktok])
 
+  const handleStopViralPlatform = async (platform) => {
+    await sendExtensionMessage('STOP_VIRAL_PLATFORM', { platform })
+    setScrapingPlatformBusy((cur) => ({ ...cur, [platform]: false }))
+    showNotice(`⏹ Đã gửi lệnh dừng cào ${platform === 'facebook' ? 'Facebook' : 'TikTok'}.`, 'info')
+  }
+
   // Cào Viral (FB Bài ≥ 1K • FB Reels ≥ 5K • TikTok ≥ 1M)
   const handleScrapeRealViralThroughExtension = async (overrideCfg = null) => {
     if (scrapingViralBusy) return
     const activeTopic = overrideCfg?.topic || viralTopic
     const activeCustomTopic = (overrideCfg?.customTopic !== undefined ? overrideCfg.customTopic : customViralTopic).trim()
     const activeFbSource = overrideCfg?.fbSourceMode || fbSourceMode
+    const activeTtSource = overrideCfg?.ttSourceMode || ttSourceMode
+    const targetPlat = overrideCfg?.platform || 'both'
 
     if (activeTopic === 'custom' && !activeCustomTopic) {
       return showNotice('Vui lòng nhập từ khóa chủ đề muốn cào.', 'error')
     }
     try {
       setScrapingViralBusy(true)
+      setScrapingPlatformBusy({ facebook: targetPlat !== 'tiktok', tiktok: targetPlat !== 'facebook' })
       const topicLabel = activeTopic === 'custom'
         ? activeCustomTopic
         : (VIRAL_TOPICS.find(([k]) => k === activeTopic)?.[1]?.replace(/^[^\p{L}\p{N}]+/u, '').trim() || '')
@@ -655,6 +666,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
         fbReelMinLikes: overrideCfg?.fbReelMinLikes ?? 5000,
         tiktokMinLikes: overrideCfg?.tiktokMinLikes ?? 1000000,
         fbSourceMode: activeFbSource,
+        ttSourceMode: activeTtSource,
         topic: activeTopic,
         customTopic: activeCustomTopic,
         topicLabel, fbKeywords, ttKeywords,
@@ -668,7 +680,10 @@ export default function AdminSocialAutomation({ csrfToken }) {
       showNotice(totalNew > 0 ? `✅ Hoàn tất cào Viral (+${totalNew} bài mới)!` : '✅ Đã đồng bộ xong danh sách bài Viral.')
       setActiveSubTab('groups')
     } catch (err) { showNotice(err.message || 'Lỗi cào bài viral.', 'error') }
-    finally { setScrapingViralBusy(false) }
+    finally {
+      setScrapingViralBusy(false)
+      setScrapingPlatformBusy({ facebook: false, tiktok: false })
+    }
   }
 
   const handleAiCleanExistingViral = async () => {
@@ -1167,6 +1182,10 @@ export default function AdminSocialAutomation({ csrfToken }) {
                   <option value="feed">🏠 FB: Bài viết (≥1K)</option>
                   <option value="reels">🎬 FB: Thước phim (≥5K)</option>
                 </select>
+                <select id="viral-tt-source-select" aria-label="Nguồn cào TikTok" className="social-sort-select" value={ttSourceMode} onChange={e => setTtSourceMode(e.target.value)}>
+                  <option value="explore">🧭 TikTok: Khám phá</option>
+                  <option value="search">🔎 TikTok: Từ khóa</option>
+                </select>
                 <select id="viral-topic-select" aria-label="Chủ đề cào bài viral" className="social-sort-select" value={viralTopic} onChange={e => setViralTopic(e.target.value)}>
                   {VIRAL_TOPICS.map(([val, label]) => <option key={val} value={val}>{label}</option>)}
                 </select>
@@ -1220,6 +1239,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
                       <option value="name_asc">A → Z</option>
                     </select>
                     <span className="social-viral-count">{facebookViralAll.length} bài</span>
+                    <button type="button" className="social-action-btn social-action-btn--danger" style={{ padding: '4px 9px' }} disabled={!scrapingPlatformBusy.facebook && !scrapingViralBusy} onClick={() => handleStopViralPlatform('facebook')}>⏹ Dừng FB</button>
                   </div>
                 </div>
                 <div className="social-table-shell social-table-shell--compact">
@@ -1275,6 +1295,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
                       <option value="name_asc">A → Z</option>
                     </select>
                     <span className="social-viral-count">{tiktokViralAll.length} bài</span>
+                    <button type="button" className="social-action-btn social-action-btn--danger" style={{ padding: '4px 9px' }} disabled={!scrapingPlatformBusy.tiktok && !scrapingViralBusy} onClick={() => handleStopViralPlatform('tiktok')}>⏹ Dừng TikTok</button>
                   </div>
                 </div>
                 <div className="social-table-shell social-table-shell--compact">
