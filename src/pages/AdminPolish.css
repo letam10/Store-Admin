@@ -1265,37 +1265,15 @@ select option,
   }
 }
 
-/* Card bao bên ngoài giao diện đăng nhập (Hiệu ứng viền LED 7 màu chạy đuổi) */
+/* Card bao bên ngoài giao diện đăng nhập (Hiệu ứng viền LED 7 màu chạy đuổi ở viền ngoài) */
 .admin-login-card {
   position: relative !important;
   z-index: 1 !important;
   width: min(440px, 94vw) !important;
   padding: 26px 32px 34px !important;
-  border: 3px solid transparent !important;
+  border: 1px solid rgba(226, 232, 240, 0.9) !important;
   border-radius: 24px !important;
-  background-image: 
-    linear-gradient(rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.96)),
-    conic-gradient(
-      from var(--admin-rainbow-angle),
-      #ff0055 0%,
-      #ff7700 7.1%,
-      #ffee00 14.3%,
-      #00ff66 21.4%,
-      #00d4ff 28.6%,
-      #0066ff 35.7%,
-      #9900ff 42.9%,
-      #ff0055 50%,
-      #ff7700 57.1%,
-      #ffee00 64.3%,
-      #00ff66 71.4%,
-      #00d4ff 78.6%,
-      #0066ff 85.7%,
-      #9900ff 92.9%,
-      #ff0055 100%
-    ) !important;
-  background-origin: border-box !important;
-  background-clip: padding-box, border-box !important;
-  animation: adminRainbowLedChase 3.2s linear infinite !important;
+  background: rgba(255, 255, 255, 0.96) !important;
   box-shadow: 0 24px 60px rgba(18, 50, 35, 0.12), 0 4px 16px rgba(0, 0, 0, 0.03) !important;
   backdrop-filter: blur(20px) !important;
   display: flex !important;
@@ -1303,34 +1281,61 @@ select option,
   box-sizing: border-box !important;
 }
 
-.admin-login-card::before {
+.admin-login-card::before,
+.admin-login-card::after {
   content: '' !important;
   position: absolute !important;
-  inset: -4px !important;
-  border-radius: 28px !important;
+  inset: -8px !important;
+  border-radius: 32px !important;
+  padding: 2px !important;
   background: conic-gradient(
     from var(--admin-rainbow-angle),
-    #ff0055 0%,
-    #ff7700 7.1%,
-    #ffee00 14.3%,
-    #00ff66 21.4%,
-    #00d4ff 28.6%,
-    #0066ff 35.7%,
-    #9900ff 42.9%,
-    #ff0055 50%,
-    #ff7700 57.1%,
-    #ffee00 64.3%,
-    #00ff66 71.4%,
-    #00d4ff 78.6%,
-    #0066ff 85.7%,
-    #9900ff 92.9%,
-    #ff0055 100%
+    transparent 0deg,
+    #ff0055 8deg,
+    #ff1a75 22deg,
+    transparent 36deg,
+    transparent 51.4deg,
+    #ff7700 59.4deg,
+    #ff9100 73.4deg,
+    transparent 87.4deg,
+    transparent 102.8deg,
+    #ffee00 110.8deg,
+    #ffea00 124.8deg,
+    transparent 138.8deg,
+    transparent 154.3deg,
+    #00ff66 162.3deg,
+    #10b981 176.3deg,
+    transparent 190.3deg,
+    transparent 205.7deg,
+    #00f0ff 213.7deg,
+    #06b6d4 227.7deg,
+    transparent 241.7deg,
+    transparent 257.1deg,
+    #3b82f6 265.1deg,
+    #2563eb 279.1deg,
+    transparent 293.1deg,
+    transparent 308.6deg,
+    #a855f7 316.6deg,
+    #c084fc 330.6deg,
+    transparent 344.6deg,
+    transparent 360deg
   ) !important;
-  filter: blur(14px) !important;
-  opacity: 0.5 !important;
-  z-index: -1 !important;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0) !important;
+  -webkit-mask-composite: xor !important;
+  mask-composite: exclude !important;
   pointer-events: none !important;
-  animation: adminRainbowLedChase 3.2s linear infinite !important;
+  animation: adminRainbowLedChase 3s linear infinite !important;
+}
+
+.admin-login-card::before {
+  filter: blur(6px) !important;
+  opacity: 0.7 !important;
+  z-index: -1 !important;
+}
+
+.admin-login-card::after {
+  z-index: 2 !important;
+  opacity: 1 !important;
 }
 
 .admin-login-card__preferences {
@@ -1617,32 +1622,14 @@ html[data-admin-theme="dark"] .admin-login:not(.admin-login-card .admin-login) {
 }
 
 html[data-admin-theme="dark"] .admin-login-card {
-  background-image: 
-    linear-gradient(rgba(14, 28, 20, 0.97), rgba(14, 28, 20, 0.97)),
-    conic-gradient(
-      from var(--admin-rainbow-angle),
-      #ff0055 0%,
-      #ff7700 7.1%,
-      #ffee00 14.3%,
-      #00ff66 21.4%,
-      #00d4ff 28.6%,
-      #0066ff 35.7%,
-      #9900ff 42.9%,
-      #ff0055 50%,
-      #ff7700 57.1%,
-      #ffee00 64.3%,
-      #00ff66 71.4%,
-      #00d4ff 78.6%,
-      #0066ff 85.7%,
-      #9900ff 92.9%,
-      #ff0055 100%
-    ) !important;
+  background: rgba(14, 28, 20, 0.97) !important;
+  border-color: rgba(74, 222, 128, 0.22) !important;
   box-shadow: 0 28px 70px rgba(0, 0, 0, 0.75), 0 0 40px rgba(0, 0, 0, 0.5) !important;
 }
 
 html[data-admin-theme="dark"] .admin-login-card::before {
-  opacity: 0.72 !important;
-  filter: blur(18px) !important;
+  opacity: 0.85 !important;
+  filter: blur(8px) !important;
 }
 
 html[data-admin-theme="dark"] .admin-login-card .admin-login {
