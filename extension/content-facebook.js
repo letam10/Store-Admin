@@ -1,8 +1,12 @@
 /*
   FILE NOTE
-  - Mục đích: Content Script OmniVision v3.3.0 cho Facebook Desktop 2026 (Chạy ngầm tab + Checkpoint phục hồi bước + tách cào Viral Trang chủ vs Thước phim).
-  - Liên kết trực tiếp: vision-engine.js, background.js, content-admin-bridge.js
-  - Vùng ảnh hưởng khi sửa: Luồng tự động đăng bài Facebook và cào bài viết/thước phim viral từ Facebook.
+  - Mục đích: Content Script OmniVision v3.5.1 cho Facebook Desktop 2026.
+  - Nâng cấp:
+    1. Đăng bài lên Trang cá nhân (/me) hoặc Nhóm Facebook được chọn, hỗ trợ chọn đối tượng Công khai / Chỉ mình tôi cả khi mở dialog phụ lẫn trượt trong cùng hộp thoại Tạo bài viết + Mắt Vision qwen3.5:4b cứu cánh.
+    2. Cào Viral tách chuẩn: Bài viết / Tìm kiếm (số like + bình luận + chia sẻ ở đáy bài, >= 1K) và Thước phim Reels (số like + bình luận + chia sẻ ở cột dọc bên phải, >= 5K).
+    3. Kiên trì cuộn 12–28 lần / 2–3 phút chống thoát sớm khi mạng chậm, độ trễ ngẫu nhiên giống người thật, hỗ trợ lướt đúng thời gian cài đặt.
+  - Liên kết trực tiếp: extension/vision-engine.js, extension/content-media.js, extension/background.js
+  - Vùng ảnh hưởng khi sửa: Toàn bộ tương tác tự động với Facebook desktop (đăng bài cá nhân/nhóm, cào bài viral/reels, xem video, cào nhóm).
 */
 
 ;(() => {
@@ -10,7 +14,7 @@
     try { window.__OMNICART_FB_CLEANUP__() } catch (_) {}
   }
 
-  const COMPOSER_TEXT_RE = /bạn đang nghĩ gì|what's on your mind|viết gì đó|write something|tạo bài viết|create a post/i
+  const COMPOSER_TEXT_RE = /bạn đang nghĩ gì|what's on your mind|viết gì đó|write something|tạo bài viết|create a post|bạn viết gì đi/i
   const EXCLUDE_NOTE_RE = /chia sẻ suy nghĩ|share a thought|ghi chú|note/i
   const PHOTO_BTN_RE = /ảnh\/video|photo\/video|thêm ảnh|add photo/i
   const ONLY_ME_RE = /chỉ mình tôi|only me/i
@@ -28,10 +32,7 @@
       sendResponse({ ok: true })
       return false
     }
-    if (message.type === 'FB_INSPECT_VISION') {
-      sendResponse(inspectFacebookScreen())
-      return false
-    }
+    if (message.type === 'FB_INSPECT_VISION') { sendResponse(inspectFacebookScreen()); return false }
     if (message.type === 'FB_EXECUTE_POST') {
       executeFacebookPost(message.payload, message.checkpoint || {})
         .then(sendResponse)
@@ -77,6 +78,10 @@
     return hasPassword && !hasBanner && !findComposerTrigger()
   }
 
+  function isGroupPostPage() {
+    return /^\/groups\/[^/?#]+/i.test(location.pathname) && !/^\/groups\/(feed|discover|joins)/i.test(location.pathname)
+  }
+
   function isNonProfilePage() {
     const p = location.pathname.replace(/\/+$/, '') || '/'
     if (p === '/' || p === '/home.php') return true
@@ -102,7 +107,7 @@
     if (leftLink) {
       stepLog('nav', 'Đang mở Trang cá nhân...')
       await V().humanClick(leftLink)
-      if (await M().waitFor(() => !isNonProfilePage(), 8000)) { await V().humanDelay(1000, 1600); return true }
+      if (await M().waitFor(() => !isNonProfilePage(), 9000)) { await V().humanDelay(1000, 1700); return true }
     }
 
     const bannerBtns = Array.from(document.querySelectorAll('[role="banner"] [role="button"], [role="banner"] button'))
@@ -114,7 +119,7 @@
 
     stepLog('nav', 'Đang bấm Avatar góc trên phải để về Trang cá nhân...')
     await V().humanClick(avatarBtn, { skipScroll: true })
-    await V().humanDelay(650, 1050)
+    await V().humanDelay(700, 1150)
 
     const profileMenuLink = Array.from(document.querySelectorAll('[role="dialog"] a[href], [role="menu"] a[href], a[href*="/me"]'))
       .find((a) => {
@@ -152,52 +157,36 @@
     return Boolean(!el || el.closest('[role="banner"], [role="navigation"], header'))
   }
 
-  // Tìm chính xác thanh "Bạn đang nghĩ gì?" (bỏ qua bóng ghi chú "Chia sẻ suy nghĩ..." trên avatar!)
   function findComposerTrigger() {
     const scope = document.querySelector('[role="main"]') || document.body
     let best = null, bestScore = -Infinity
-
     for (const el of V().queryAllDeep(scope, 'span, div[role="button"], button')) {
       if (!V().isReallyVisible(el, { minWidth: 60, minHeight: 16 })) continue
       if (isInsideFixedTopBanner(el) || el.closest('[role="dialog"], [role="article"]')) continue
-
       const label = V().normalizeText(`${el.innerText || el.textContent || ''} ${el.getAttribute('aria-label') || ''}`)
       if (!label || label.length > 90 || EXCLUDE_NOTE_RE.test(label) || !COMPOSER_TEXT_RE.test(label)) continue
-
-      // Ưu tiên node lá hoặc nút trực tiếp
       const clickable = el.closest('[role="button"], button, [tabindex="0"]') || el
       if (isInsideFixedTopBanner(clickable)) continue
       const cRect = clickable.getBoundingClientRect()
       if (cRect.width < 120 || cRect.height < 24 || cRect.height > 105) continue
-
-      const score = 60 +
-        (clickable.getAttribute('role') === 'button' ? 30 : 0) +
-        (cRect.width >= 240 ? 25 : 0) +
-        (cRect.left > window.innerWidth * 0.25 ? 20 : 0) +
-        (label.length < 36 ? 20 : 0)
+      const score = 60 + (clickable.getAttribute('role') === 'button' ? 30 : 0) + (cRect.width >= 240 ? 25 : 0) + (cRect.left > window.innerWidth * 0.25 ? 20 : 0) + (label.length < 36 ? 20 : 0)
       if (score > bestScore) { bestScore = score; best = clickable }
     }
     return best
   }
 
-  function findProfilePhotoShortcut() {
-    const scope = document.querySelector('[role="main"]') || document.body
-    return V().queryAllDeep(scope, '[role="button"], button').find((el) => {
-      if (!V().isReallyVisible(el, { minWidth: 60, minHeight: 24 })) return false
-      if (isInsideFixedTopBanner(el) || el.closest('[role="dialog"], [role="article"]')) return false
-      const label = V().normalizeText(`${el.innerText || el.textContent || ''} ${el.getAttribute('aria-label') || ''}`)
-      return label.length <= 35 && PHOTO_BTN_RE.test(label)
-    }) || null
-  }
-
+  // Hỗ trợ cả dialog riêng lẫn chế độ trượt ngay trong hộp thoại Tạo bài viết (Facebook 2026)
   function findAudienceSubDialog() {
     const dialogs = V().queryAllDeep(document, 'div[role="dialog"]')
       .filter((d) => V().isReallyVisible(d, { minWidth: 280, minHeight: 200 }))
     for (let i = dialogs.length - 1; i >= 0; i--) {
-      const headText = V().normalizeText(dialogs[i].innerText || dialogs[i].textContent).slice(0, 320)
+      const dlg = dialogs[i]
+      const headText = V().normalizeText(dlg.innerText || dlg.textContent).slice(0, 380)
       if (/đối tượng của bài viết|ai có thể xem bài viết|post audience|who can see your post/i.test(headText)) {
-        return dialogs[i]
+        return dlg
       }
+      const radios = V().queryAllDeep(dlg, '[role="radio"]').filter((r) => V().isReallyVisible(r, { minWidth: 20, minHeight: 16 }))
+      if (radios.length >= 2 && /công khai|public|bạn bè|friends/i.test(headText)) return dlg
     }
     return null
   }
@@ -263,28 +252,28 @@
 
   function findAudienceButton(dialog) {
     const scope = dialog || document.body
-    const dRect = dialog ? dialog.getBoundingClientRect() : { top: 0, bottom: window.innerHeight, left: 0, right: window.innerWidth }
+    const dRect = dialog ? dialog.getBoundingClientRect() : { top: 0, bottom: window.innerHeight }
 
-    // Ưu tiên 1: Nút có aria-label quyền riêng tư ngay phần đầu hộp thoại Tạo bài viết
     for (const btn of V().queryAllDeep(scope, '[role="button"], button, [tabindex="0"]')) {
       if (btn.closest('[contenteditable="true"], [role="textbox"]')) continue
       if (!V().isReallyVisible(btn, { minWidth: 28, minHeight: 16, checkAriaHidden: false })) continue
       const r = btn.getBoundingClientRect()
-      if (dialog && (r.top < dRect.top + 30 || r.top > dRect.top + 280)) continue
+      if (dialog && (r.top < dRect.top + 35 || r.top > dRect.top + 260)) continue
       const aria = V().normalizeText(btn.getAttribute('aria-label'))
       const vis = V().normalizeText(btn.innerText || btn.textContent)
       if (/nhãn ai|ai label|^(đóng|close|đăng|post|chỉnh sửa ảnh)/i.test(`${vis} ${aria}`)) continue
-      if (/chỉnh sửa quyền riêng tư|edit privacy|chia sẻ với|sharing with|đối tượng|audience/i.test(aria)) return btn
+      if (/chỉnh sửa quyền riêng tư|edit privacy|chia sẻ với|sharing with|đối tượng|audience/i.test(aria) || AUDIENCE_EXACT_RE.test(vis)) {
+        return btn
+      }
     }
 
-    // Ưu tiên 2: Nhãn văn bản chính xác Công khai / Bạn bè / Chỉ mình tôi
-    for (const el of V().queryAllDeep(scope, 'span, div, button')) {
+    for (const el of V().queryAllDeep(scope, 'span, div')) {
       if (el.closest('[contenteditable="true"], [role="textbox"]')) continue
       if (!V().isReallyVisible(el, { minWidth: 18, minHeight: 10, checkAriaHidden: false })) continue
       const txt = V().normalizeText(el.innerText || el.textContent)
-      if (!txt || txt.length > 42 || !AUDIENCE_EXACT_RE.test(txt) || /nhãn ai|ai label/i.test(txt)) continue
+      if (!txt || txt.length > 40 || !AUDIENCE_EXACT_RE.test(txt) || /nhãn ai|ai label/i.test(txt)) continue
       const r = el.getBoundingClientRect()
-      if (dialog && (r.top < dRect.top + 30 || r.top > dRect.top + 300)) continue
+      if (dialog && (r.top < dRect.top + 35 || r.top > dRect.top + 260)) continue
       return el.closest('[role="button"], button, [tabindex="0"]') || el
     }
     return null
@@ -303,7 +292,7 @@
     let best = null, bestDiff = 0
     for (const el of [container, ...Array.from(container.querySelectorAll('div'))]) {
       const diff = (el.scrollHeight || 0) - (el.clientHeight || 0)
-      if (diff > 20 && el.clientHeight > 100 && /(auto|scroll|overlay)/.test(window.getComputedStyle(el).overflowY || '') && diff > bestDiff) {
+      if (diff > 16 && el.clientHeight > 90 && /(auto|scroll|overlay)/.test(window.getComputedStyle(el).overflowY || '') && diff > bestDiff) {
         bestDiff = diff
         best = el
       }
@@ -312,6 +301,7 @@
   }
 
   async function applyAudiencePrivacy(dialog, requestedPrivacy, stepLog) {
+    if (isGroupPostPage()) return requestedPrivacy
     const targetLabel = requestedPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Công khai'
     const targetPattern = requestedPrivacy === 'only_me' ? ONLY_ME_RE : PUBLIC_RE
     const oppositePattern = requestedPrivacy === 'only_me' ? PUBLIC_RE : ONLY_ME_RE
@@ -319,43 +309,39 @@
     for (let attempt = 1; attempt <= 3; attempt++) {
       const curDialog = findComposerDialog() || dialog
       const audienceBtn = findAudienceButton(curDialog)
-      if (!audienceBtn) { await V().sleep(550); continue }
+      if (!audienceBtn) { await V().sleep(650); continue }
 
       if (parsePrivacyFromText(`${audienceBtn.innerText || ''} ${audienceBtn.getAttribute('aria-label') || ''}`) === requestedPrivacy) {
         return requestedPrivacy
       }
 
-      stepLog('privacy', `Đang chọn đối tượng "${targetLabel}" (lần ${attempt}/3)...`)
+      stepLog('privacy', `Đang mở bảng đối tượng để chọn "${targetLabel}" (lần ${attempt}/3)...`)
       await V().humanClick(audienceBtn, { skipScroll: true })
-      await M().waitFor(() => Boolean(findAudienceSubDialog()), 6500)
-      await V().humanDelay(450, 800)
+      await M().waitFor(() => Boolean(findAudienceSubDialog()), 6500, 220)
+      await V().humanDelay(550, 950)
 
-      const subDialog = findAudienceSubDialog()
+      let subDialog = findAudienceSubDialog()
       if (!subDialog) continue
 
-      // Nếu có nút "Xem thêm" thì bấm mở rộng danh sách đối tượng trước
       const seeMoreBtn = V().queryAllDeep(subDialog, '[role="button"], button, span').find((el) =>
-        V().isReallyVisible(el, { minWidth: 30, minHeight: 16 }) && /^(xem thêm|see more)$/i.test(V().normalizeText(el.innerText || el.textContent))
+        V().isReallyVisible(el, { minWidth: 28, minHeight: 16 }) && /^(xem thêm|see more)$/i.test(V().normalizeText(el.innerText || el.textContent))
       )
       if (seeMoreBtn) {
         await V().humanClick(seeMoreBtn.closest('[role="button"], button') || seeMoreBtn, { skipScroll: true })
-        await V().humanDelay(450, 750)
+        await V().humanDelay(550, 900)
+        subDialog = findAudienceSubDialog() || subDialog
       }
 
       const scroller = findScrollableBoxInside(subDialog)
-
-      // Tìm đúng hàng radio riêng lẻ (KHÔNG chọn thẻ cha chứa cả Công khai lẫn Chỉ mình tôi!)
       const findOptionRow = () => {
         const candidates = []
         for (const el of V().queryAllDeep(subDialog, '[role="radio"], [role="listitem"], [role="menuitem"], [role="button"]')) {
           if (el === audienceBtn) continue
           const txt = V().normalizeText(el.innerText || el.textContent)
-          if (!txt || txt.length > 140 || !targetPattern.test(txt)) continue
-          if (oppositePattern.test(txt)) continue // loại bỏ container chứa nhiều option!
+          if (!txt || txt.length > 150 || !targetPattern.test(txt) || oppositePattern.test(txt)) continue
           candidates.push(el)
         }
         if (candidates.length > 0) {
-          // Ưu tiên [role="radio"] hoặc phần tử cụ thể nhất (text ngắn nhất)
           candidates.sort((a, b) => {
             const rDiff = (b.getAttribute('role') === 'radio' ? 1 : 0) - (a.getAttribute('role') === 'radio' ? 1 : 0)
             if (rDiff !== 0) return rDiff
@@ -372,14 +358,14 @@
         return null
       }
 
-      if (scroller) scroller.scrollTop = 0
+      if (scroller) { scroller.scrollTop = 0; await V().sleep(260) }
       let optionEl = findOptionRow()
 
-      for (let step = 0; step < 8 && (!optionEl || !V().isReallyVisible(optionEl, { minWidth: 30, minHeight: 16 })); step++) {
+      for (let step = 0; step < 10 && (!optionEl || !V().isReallyVisible(optionEl, { minWidth: 28, minHeight: 16 })); step++) {
         if (!scroller) break
-        scroller.scrollTop += 220
+        scroller.scrollTop += 200
         scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
-        await V().sleep(260)
+        await V().sleep(340)
         optionEl = findOptionRow()
       }
 
@@ -387,39 +373,57 @@
         if (scroller) {
           const sRect = scroller.getBoundingClientRect()
           const oRect = optionEl.getBoundingClientRect()
-          if (oRect.bottom > sRect.bottom - 10 || oRect.top < sRect.top + 10) {
-            scroller.scrollTop += (oRect.top - sRect.top) - 80
-            await V().sleep(200)
+          if (oRect.bottom > sRect.bottom - 12 || oRect.top < sRect.top + 12) {
+            scroller.scrollTop += (oRect.top - sRect.top) - 90
+            await V().sleep(260)
           }
         }
         await V().humanClick(optionEl, { skipScroll: true })
-        await V().humanDelay(450, 800)
+        await V().humanDelay(550, 920)
 
         const innerRadio = optionEl.querySelector?.('[role="radio"], input[type="radio"]') || optionEl
         if (innerRadio?.getAttribute?.('aria-checked') === 'false' || innerRadio?.checked === false) {
           await V().humanClick(innerRadio, { skipScroll: true })
-          await V().humanDelay(400, 700)
+          await V().humanDelay(450, 800)
         }
 
-        // Bấm nút Xong / Lưu (ưu tiên nút có màu xanh ở cuối hộp thoại)
         const confirmBtn = V().queryAllDeep(subDialog, '[role="button"], button').find((btn) =>
           V().isReallyVisible(btn, { minWidth: 48, minHeight: 28 }) && !V().isElementDisabled(btn) &&
           /^(xong|done|lưu|save|cập nhật|update)$/i.test(V().normalizeText(btn.innerText || btn.textContent))
         )
         if (confirmBtn) {
           await V().humanClick(confirmBtn, { skipScroll: true })
-          await V().humanDelay(650, 1100)
+          await V().humanDelay(750, 1250)
         }
       } else {
-        V().dispatchEscape()
-        await V().humanDelay(450, 750)
+        const aiPick = await V().askSelfHealingAI({
+          platform: 'facebook',
+          stepKey: `facebook:audience_option_${requestedPrivacy}`,
+          goal: `Trong bảng Đối tượng của bài viết đang mở trên Facebook, hãy bấm chọn mục "${targetLabel}" (hoặc cuộn xuống nếu bị che), sau đó bấm nút Xong/Lưu.`,
+          root: subDialog,
+          errorReason: `Không thấy nút chọn "${targetLabel}" trong danh sách đối tượng`
+        })
+        if (aiPick.ok && aiPick.action === 'scroll_down' && scroller) {
+          scroller.scrollTop += 320
+          await V().sleep(400)
+        } else if (aiPick.ok && aiPick.element) {
+          await V().humanClick(aiPick.element, { skipScroll: true })
+          await V().humanDelay(600, 1000)
+          const doneBtn = V().queryAllDeep(subDialog, '[role="button"], button').find((btn) =>
+            V().isReallyVisible(btn) && !V().isElementDisabled(btn) && /^(xong|done|lưu|save)$/i.test(V().normalizeText(btn.innerText))
+          )
+          if (doneBtn) await V().humanClick(doneBtn, { skipScroll: true })
+        } else {
+          V().dispatchEscape()
+        }
+        await V().humanDelay(550, 900)
       }
 
       const confirmed = await M().waitFor(() => {
         if (findAudienceSubDialog()) return false
         const btn = findAudienceButton(findComposerDialog() || dialog)
         return Boolean(btn && parsePrivacyFromText(`${btn.innerText || ''} ${btn.getAttribute('aria-label') || ''}`) === requestedPrivacy)
-      }, 6500)
+      }, 6500, 260)
 
       if (confirmed) return requestedPrivacy
     }
@@ -432,14 +436,10 @@
     const dlg = findComposerDialog()
     const audBtn = dlg ? findAudienceButton(dlg) : null
     return {
-      url: location.href,
-      health: V().inspectPageHealth(),
-      loggedIn: !isLoginOrCheckpointScreen(),
-      isNonProfilePage: isNonProfilePage(),
-      scrollY: Math.round(window.scrollY),
-      accountName: detectLoggedInAccountName(dlg),
-      hasComposerTrigger: Boolean(findComposerTrigger()),
-      hasOpenComposerDialog: Boolean(dlg),
+      url: location.href, health: V().inspectPageHealth(),
+      loggedIn: !isLoginOrCheckpointScreen(), isNonProfilePage: isNonProfilePage(),
+      scrollY: Math.round(window.scrollY), accountName: detectLoggedInAccountName(dlg),
+      hasComposerTrigger: Boolean(findComposerTrigger()), hasOpenComposerDialog: Boolean(dlg),
       audienceButtonText: audBtn ? V().normalizeText(audBtn.innerText || audBtn.getAttribute('aria-label')) : null
     }
   }
@@ -457,6 +457,7 @@
     if (isLoginOrCheckpointScreen()) return { ok: false, error: 'FACEBOOK_LOGIN_REQUIRED', visionTrace: trace }
 
     const requestedPrivacy = String(payload.privacy || 'only_me').toLowerCase()
+    const targetGroupUrl = String(payload.targetGroupUrl || '').trim()
     const rawTitle = V().formatPostText(payload.title || '', 260)
     const rawContent = payload.content || payload.description || payload.caption || payload.body || ''
     const rawHashtags = payload.hashtags || payload.tags || ''
@@ -464,18 +465,15 @@
       ? rawContent : [rawTitle, rawContent].filter(Boolean).join('\n\n')
     const fullText = V().composeBodyAndHashtags(bodyWithoutDupTitle, rawHashtags, 6000)
 
-    // Đảm bảo đang ở Trang cá nhân
-    if (isNonProfilePage()) {
+    if (!targetGroupUrl && isNonProfilePage()) {
       const moved = await navigateToProfileViaTopRightAvatar(stepLog)
       if (!moved && isNonProfilePage()) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
     }
 
-    // CHECKPOINT: Nếu trước đó ĐÃ BẤM ĐĂNG rồi mới tải lại/văng trang -> chỉ kiểm chứng, KHÔNG đăng trùng!
     if (checkpoint.verifyOnly) {
       stepLog('verify', 'Phục hồi từ Checkpoint sau bước Đăng — đang xác nhận bài mới...')
       const prevSet = new Set(checkpoint.existingPermalinks || [])
-      const authorName = detectLoggedInAccountName(null)
-      const verified = await waitForFacebookPublishConfirmation(fullText, prevSet, requestedPrivacy, authorName, stepLog)
+      const verified = await waitForFacebookPublishConfirmation(fullText, prevSet, requestedPrivacy, detectLoggedInAccountName(null), stepLog)
       V().clearHud(4000)
       return { ...verified, visionTrace: trace }
     }
@@ -484,62 +482,39 @@
     if (!payload?.imageDataUrl) return { ok: false, error: 'PRODUCT_IMAGE_REQUIRED', visionTrace: trace }
     if (!fullText) return { ok: false, error: 'POST_TEXT_REQUIRED', visionTrace: trace }
 
-    await V().humanDelay(450, 900)
+    await V().humanDelay(550, 1100)
     const existingPermalinksList = collectPostPermalinks()
     const existingPermalinks = new Set(existingPermalinksList)
-    stepLog('navigated', 'Đã ở Trang cá nhân, chuẩn bị mở khung tạo bài...', 'info', { checkpointStep: 'navigated', existingPermalinks: existingPermalinksList.slice(0, 25) })
+    stepLog('navigated', targetGroupUrl ? 'Đã vào Hội nhóm mục tiêu, chuẩn bị mở khung tạo bài...' : 'Đã ở Trang cá nhân, chuẩn bị mở khung tạo bài...', 'info', {
+      checkpointStep: 'navigated', existingPermalinks: existingPermalinksList.slice(0, 25)
+    })
 
-    // Bước 1: CHỈ bấm khung "Bạn đang nghĩ gì?" để mở trực tiếp hộp thoại "Tạo bài viết" (KHÔNG bấm Ảnh/video ngoài trang cá nhân!)
     let dialog = findComposerDialog()
     if (!dialog) {
       const learnedTriggerRule = await V().getLearnedRule('facebook:composer_trigger')
       for (let openTry = 1; openTry <= 3 && !dialog; openTry++) {
         let trigger = (openTry === 1 && learnedTriggerRule) ? V().findByLearnedRule(learnedTriggerRule) : null
-        let usedLearned = Boolean(trigger)
+        const usedLearned = Boolean(trigger)
         if (!trigger) trigger = findComposerTrigger()
-
-        if (!trigger && openTry === 2) {
-          window.scrollTo({ top: 480, behavior: 'auto' })
-          await V().sleep(400)
-          trigger = findComposerTrigger()
-        }
+        if (!trigger && openTry === 2) { window.scrollTo({ top: 450, behavior: 'auto' }); await V().sleep(500); trigger = findComposerTrigger() }
 
         if (trigger) {
-          stepLog('open_composer', `Đang bấm vào khung "Bạn đang nghĩ gì?" (lần ${openTry}/3)...`)
+          stepLog('open_composer', `Đang bấm khung tạo bài viết (lần ${openTry}/3)...`)
           await V().humanClick(trigger)
-          const opened = await M().waitFor(() => Boolean(findComposerDialog()), 7000)
-          if (opened) {
-            dialog = findComposerDialog()
-            break
-          }
+          if (await M().waitFor(() => Boolean(findComposerDialog()), 7500)) { dialog = findComposerDialog(); break }
           if (usedLearned) await V().invalidateLearnedRule('facebook:composer_trigger')
         }
 
-        // Lần 3 vẫn không mở được -> Gọi AI Local qwen3.5:4b nhìn màn hình phán đoán & tự học!
         if (openTry === 3 && !dialog) {
           const aiRes = await V().askSelfHealingAI({
-            platform: 'facebook',
-            stepKey: 'facebook:composer_trigger',
-            goal: 'Tìm và bấm vào ô "Bạn đang nghĩ gì?" để mở hộp thoại "Tạo bài viết" trên Facebook (tuyệt đối KHÔNG bấm nút Ảnh/video).',
-            errorReason: 'Không tìm thấy hoặc không mở được hộp thoại Tạo bài viết khi bấm "Bạn đang nghĩ gì?"'
+            platform: 'facebook', stepKey: 'facebook:composer_trigger',
+            goal: 'Tìm và bấm vào ô "Bạn đang nghĩ gì?" hoặc "Bạn viết gì đi..." để mở hộp thoại "Tạo bài viết".',
+            errorReason: 'Không mở được hộp thoại Tạo bài viết'
           })
-          if (aiRes.ok && aiRes.action === 'navigate_target') {
-            return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
-          }
-          if (aiRes.ok && aiRes.action === 'dismiss_popup') {
-            if (aiRes.element) await V().humanClick(aiRes.element, { skipScroll: true })
-            else V().dispatchEscape()
-            await V().sleep(600)
-            const retryTrig = findComposerTrigger()
-            if (retryTrig) {
-              await V().humanClick(retryTrig)
-              if (await M().waitFor(() => Boolean(findComposerDialog()), 7000)) dialog = findComposerDialog()
-            }
-          } else if (aiRes.ok && aiRes.element) {
+          if (aiRes.ok && aiRes.element) {
             await V().humanClick(aiRes.element, { skipScroll: aiRes.clickMode === 'skip_scroll' })
             if (await M().waitFor(() => Boolean(findComposerDialog()), 8000)) {
               dialog = findComposerDialog()
-              // Thành công thật -> Ghi nhớ kiến thức vĩnh viễn cho lần sau!
               await V().saveLearnedRule('facebook:composer_trigger', aiRes.element, aiRes.learnedRule || {})
             }
           }
@@ -547,29 +522,24 @@
       }
     }
 
-    if (!dialog) {
-      if (isNonProfilePage()) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
-      return { ok: false, error: 'FACEBOOK_COMPOSER_NOT_OPENED', visionTrace: trace }
-    }
+    if (!dialog) return { ok: false, error: 'FACEBOOK_COMPOSER_NOT_OPENED', visionTrace: trace }
 
     const authorName = detectLoggedInAccountName(dialog)
     stepLog('open_composer', 'Đã mở hộp thoại "Tạo bài viết".', 'info', { checkpointStep: 'composer_opened' })
     await V().humanReadPause()
 
-    // Bước 2: Đổi quyền riêng tư (nếu DOM đổi -> tự nhờ AI Local học & lưu lại!)
     let actualPrivacy = await applyAudiencePrivacy(findComposerDialog() || dialog, requestedPrivacy, stepLog)
     if (actualPrivacy !== requestedPrivacy) {
       const targetName = requestedPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Công khai'
       const aiPriv = await V().askSelfHealingAI({
-        platform: 'facebook',
-        stepKey: `facebook:privacy_${requestedPrivacy}`,
-        goal: `Mở nút chọn đối tượng bài viết (hiện đang là Công khai hoặc Bạn bè dưới tên người dùng) và chọn "${targetName}" rồi xác nhận Xong/Lưu.`,
+        platform: 'facebook', stepKey: `facebook:privacy_${requestedPrivacy}`,
+        goal: `Tìm và bấm vào nút chọn đối tượng bài viết ngay dưới tên tác giả (hiện chữ "Công khai" hoặc "Bạn bè", TUYỆT ĐỐI KHÔNG bấm nút "Nhãn AI đang tắt") để đổi sang "${targetName}".`,
         root: findComposerDialog() || document,
         errorReason: `Chưa xác nhận được quyền riêng tư "${targetName}"`
       })
       if (aiPriv.ok && aiPriv.element) {
         await V().humanClick(aiPriv.element, { skipScroll: true })
-        await V().sleep(700)
+        await V().humanDelay(750, 1200)
         actualPrivacy = await applyAudiencePrivacy(findComposerDialog() || dialog, requestedPrivacy, stepLog)
         if (actualPrivacy === requestedPrivacy) {
           await V().saveLearnedRule(`facebook:privacy_${requestedPrivacy}`, aiPriv.element, aiPriv.learnedRule || {})
@@ -580,9 +550,8 @@
       return { ok: false, error: requestedPrivacy === 'only_me' ? 'FACEBOOK_ONLY_ME_NOT_CONFIRMED' : 'FACEBOOK_PUBLIC_NOT_CONFIRMED', actualPrivacy, visionTrace: trace }
     }
     stepLog('privacy', `Đã xác nhận đối tượng: ${actualPrivacy === 'only_me' ? 'Chỉ mình tôi' : 'Công khai'}.`, 'info', { checkpointStep: 'privacy_set' })
-    await V().humanDelay(400, 750)
+    await V().humanDelay(550, 950)
 
-    // Bước 3: Nạp ảnh NGAY TRONG HỘP THOẠI "Tạo bài viết" (Ưu tiên Input ẩn -> Paste/Drop ảnh trực tiếp -> KHÔNG mở OS File Picker!)
     dialog = findComposerDialog() || dialog
     if (!hasExistingMediaInDialog(dialog)) {
       stepLog('upload_image', 'Đang nạp ảnh vào khung "Tạo bài viết"...')
@@ -590,16 +559,14 @@
       const imageFile = await M().createProductImageFile(payload.imageDataUrl, 'omnicart-fb-product.png')
       let previewOk = false
 
-      // Cách 1: Gắn thẳng vào input[type="file"] đã có sẵn trong hộp thoại (không cần bấm nút nào!)
-      const existingInput = await M().findImageInput(dialog, 1200, false)
+      const existingInput = await M().findImageInput(dialog, 1500, false)
       if (existingInput && M().attachFile(existingInput, imageFile)) {
         previewOk = await M().waitFor(() => {
           const d = findComposerDialog() || dialog
           return Boolean(V().findNewlyRenderedMedia(imageSnapshot, { root: d, minTop: 80, minWidth: 70, minHeight: 70 }) || hasExistingMediaInDialog(d))
-        }, 12000, 300)
+        }, 12000, 320)
       }
 
-      // Cách 2: Dán (Paste) & Kéo thả (Drop) thẳng File ảnh vào khung "Tạo bài viết" (không cần bấm nút Ảnh/video!)
       if (!previewOk) {
         const dropTarget = findComposerEditor(dialog) || dialog
         try {
@@ -612,14 +579,13 @@
         previewOk = await M().waitFor(() => {
           const d = findComposerDialog() || dialog
           return Boolean(V().findNewlyRenderedMedia(imageSnapshot, { root: d, minTop: 80, minWidth: 70, minHeight: 70 }) || hasExistingMediaInDialog(d))
-        }, 12000, 300)
+        }, 12000, 320)
       }
 
-      // Cách 3 (dự phòng cuối): Tìm input trong toàn trang sau khi bấm icon ảnh bên trong thanh "Thêm vào bài viết của bạn"
       if (!previewOk) {
         const photoIcon = findPhotoToolbarButtonInDialog(dialog)
-        if (photoIcon) { await V().humanClick(photoIcon, { skipScroll: true }); await V().sleep(600) }
-        const lateInput = await M().findImageInput(dialog, 4000, false) || await M().findImageInput(document, 2000, false)
+        if (photoIcon) { await V().humanClick(photoIcon, { skipScroll: true }); await V().sleep(700) }
+        const lateInput = await M().findImageInput(dialog, 4500, false) || await M().findImageInput(document, 2500, false)
         if (lateInput && M().attachFile(lateInput, imageFile)) {
           previewOk = await M().waitFor(() => {
             const d = findComposerDialog() || dialog
@@ -630,15 +596,11 @@
 
       if (!previewOk) return { ok: false, error: 'FACEBOOK_IMAGE_PREVIEW_NOT_CONFIRMED', visionTrace: trace }
       stepLog('upload_image', 'Đã nạp ảnh vào bài viết.', 'info', { checkpointStep: 'image_uploaded' })
-      await V().humanDelay(1000, 1700)
+      await V().humanDelay(1000, 1750)
     }
-    
-    // Bước 4: Điền chữ & hashtag (bỏ qua nếu nội dung đã khớp)
+
     dialog = findComposerDialog()
-    if (!dialog) {
-      if (isNonProfilePage()) return { ok: false, needsNavigation: true, targetUrl: 'https://www.facebook.com/me', visionTrace: trace }
-      return { ok: false, error: 'FACEBOOK_COMPOSER_CLOSED_UNEXPECTEDLY', visionTrace: trace }
-    }
+    if (!dialog) return { ok: false, error: 'FACEBOOK_COMPOSER_CLOSED_UNEXPECTEDLY', visionTrace: trace }
     const editorBox = findComposerEditor(dialog)
     if (!editorBox) return { ok: false, error: 'FACEBOOK_EDITOR_NOT_FOUND', visionTrace: trace }
 
@@ -646,7 +608,7 @@
       stepLog('fill_text', 'Đang điền nội dung & hashtag...')
       let typeResult = await V().smartTypeText(editorBox, fullText, { clearFirst: true, placeholderRe: COMPOSER_TEXT_RE })
       if (!typeResult.ok) {
-        await V().humanDelay(700, 1100)
+        await V().humanDelay(800, 1300)
         typeResult = await V().smartTypeText(editorBox, fullText, { clearFirst: true, placeholderRe: COMPOSER_TEXT_RE })
       }
       if (!typeResult.ok) return { ok: false, error: 'FACEBOOK_TEXT_NOT_INSERTED', visionTrace: trace }
@@ -654,7 +616,6 @@
     stepLog('fill_text', 'Đã điền xong nội dung.', 'info', { checkpointStep: 'text_filled' })
     await V().humanReviewPause()
 
-    // Bước 5: Bấm Đăng
     dialog = findComposerDialog()
     if (!dialog) return { ok: false, error: 'FACEBOOK_COMPOSER_CLOSED_BEFORE_SUBMIT', visionTrace: trace }
     let submitInfo = null
@@ -668,7 +629,7 @@
     stepLog('submit', 'Đang bấm Đăng bài...', 'info', { checkpointStep: 'submitted' })
     await V().humanClick(submitInfo.element, { skipScroll: true })
     if (submitInfo.kind === 'next') {
-      await V().humanDelay(750, 1250)
+      await V().humanDelay(850, 1350)
       let finalPostBtn = null
       await M().waitFor(() => {
         const d = findComposerDialog()
@@ -695,7 +656,7 @@
       const secondaryBtn = V().queryAllDeep(document, '[role="dialog"] [role="button"], [role="dialog"] button').find((btn) =>
         V().isReallyVisible(btn) && /^(không phải bây giờ|not now|đăng ngay|post now)$/i.test(V().normalizeText(btn.innerText || btn.textContent))
       )
-      if (secondaryBtn && !findComposerDialog()) { await V().humanClick(secondaryBtn, { skipScroll: true }); await V().humanDelay(550, 900) }
+      if (secondaryBtn && !findComposerDialog()) { await V().humanClick(secondaryBtn, { skipScroll: true }); await V().humanDelay(600, 1000) }
 
       const alertText = V().queryAllDeep(document, '[role="alert"], [role="dialog"] [role="status"]')
         .filter((el) => V().isReallyVisible(el)).map((el) => V().normalizeText(el.innerText || el.textContent)).join(' ')
@@ -723,7 +684,7 @@
           }
         }
       }
-      await V().sleep(750)
+      await V().sleep(800)
     }
     return { ok: false, error: 'FACEBOOK_POST_NOT_VERIFIED' }
   }
@@ -737,8 +698,8 @@
     const timeLinks = Array.from(articleEl.querySelectorAll('a[role="link"], a[tabindex="0"], a[href="#"], a[href*="?__cft__"]'))
       .filter((a) => {
         const txt = V().normalizeText(a.innerText || a.textContent || a.getAttribute('aria-label'))
-        return txt.length > 0 && txt.length <= 45 &&
-          /vừa xong|hôm qua|phút|giờ|ngày|tháng|yesterday|just now|min|hr|hrs|\d{1,2}:\d{2}|\b\d+[hdwm]\b/i.test(txt)
+        return txt.length > 0 && txt.length <= 50 &&
+          /vừa xong|hôm qua|phút|giờ|ngày|tháng|lúc|yesterday|just now|min|hr|hrs|\d{1,2}:\d{2}|\b\d+[hdwm]\b/i.test(txt)
       }).slice(0, 4)
 
     for (const a of timeLinks) {
@@ -749,7 +710,7 @@
         a.dispatchEvent(new FocusEvent('focus', { bubbles: true }))
       } catch (_) {}
     }
-    if (timeLinks.length > 0) await V().sleep(280)
+    if (timeLinks.length > 0) await V().sleep(360)
     return readLinks()[0] || null
   }
 
@@ -765,7 +726,7 @@
 
   function cleanFacebookUrl(raw) {
     try {
-      const u = new URL(raw)
+      const u = new URL(raw, location.origin)
       if (!/(^|\.)facebook\.com$/i.test(u.hostname)) return raw
       const reelMatch = u.pathname.match(/\/reel\/(\d+)/i)
       if (reelMatch) return `https://www.facebook.com/reel/${reelMatch[1]}`
@@ -779,7 +740,7 @@
 
   function collectPostPermalinks() {
     return Array.from(
-      document.querySelectorAll('a[href*="/posts/"], a[href*="/share/"], a[href*="permalink"], a[href*="story_fbid"], a[href*="/reel/"], a[href*="/videos/"], a[href*="/photo"], a[href*="/watch/?v="]')
+      document.querySelectorAll('a[href*="/posts/"], a[href*="/share/"], a[href*="permalink"], a[href*="story_fbid"], a[href*="story.php"], a[href*="/reel/"], a[href*="/videos/"], a[href*="/photo"], a[href*="/watch/?v="]')
     ).map((link) => cleanFacebookUrl(link.href))
   }
 
@@ -789,7 +750,7 @@
       if (!/(^|\.)facebook\.com$/i.test(url.hostname)) return false
       const p = url.pathname.toLowerCase()
       return (
-        /\/posts\//.test(p) || /\/permalink\//.test(p) || /\/permalink\.php/.test(p) ||
+        /\/posts\//.test(p) || /\/permalink\//.test(p) || /\/permalink\.php/.test(p) || /\/story\.php/.test(p) ||
         /\/share\/[prmv]\//.test(p) || /\/reel\/\d+/.test(p) || /\/videos\/\d+/.test(p) ||
         (/\/watch\/?/.test(p) && url.searchParams.has('v')) ||
         (/\/photo/.test(p) && url.searchParams.has('fbid')) ||
@@ -809,65 +770,92 @@
   }
 
   // =========================================================================
-  // CÀO BÀI VIRAL FACEBOOK: TÁCH RÕ TRANG CHỦ (FEED) VÀ THƯỚC PHIM (REELS)
+  // CÀO BÀI VIRAL FACEBOOK: BÀI VIẾT (ĐÁY BÀI >= 1K) & THƯỚC PHIM REELS (CẠNH PHẢI >= 5K)
   // =========================================================================
 
-  // Đọc chuẩn thanh dưới bài viết Facebook 2026: [👍 13,5K] [💬 57] [↗ 198]
-  async function extractFeedPostMetrics2026(article) {
-    let likes = 0, comments = 0, shares = 0
+  function extractHashtagsFromText(text) {
+    const matches = String(text || '').match(/#[\p{L}\p{N}_]{2,40}/gu) || []
+    return Array.from(new Set(matches)).slice(0, 6).join(' ')
+  }
 
-    // 1. Đọc từ aria-label chuẩn (Thích: 13,5K / 13.500 người...)
-    for (const el of article.querySelectorAll('[aria-label^="Thích:"], [aria-label^="Like:"], [aria-label*="cảm xúc"], [aria-label*="reaction"]')) {
+  function collectFeedArticleCards() {
+    const raw = Array.from(document.querySelectorAll('div[role="article"], article, div[data-pagelet^="FeedUnit"], div[role="feed"] > div[aria-posinset], div[role="feed"] > div'))
+    return raw.filter((el) => {
+      if (el.closest('[role="dialog"], [role="navigation"], [role="banner"]')) return false
+      if (el.getAttribute('aria-label') && /bình luận|comment/i.test(el.getAttribute('aria-label'))) return false
+      const r = el.getBoundingClientRect()
+      return r.width >= 320 && r.height >= 160
+    })
+  }
+
+  // Đọc chính xác thanh đáy bài viết Facebook 2026: [👍 2,3K] [💬 29] [↗ 38] hoặc hàng cảm xúc + bình luận + chia sẻ
+  function extractFeedPostMetrics2026(article) {
+    let likes = 0, comments = 0, shares = 0
+    const aRect = article.getBoundingClientRect()
+
+    // 1. Đọc từ aria-label rõ nghĩa
+    for (const el of article.querySelectorAll('[aria-label]')) {
       const aria = V().normalizeText(el.getAttribute('aria-label') || '')
-      if (/lượt xem|views?/i.test(aria)) continue
-      likes = Math.max(likes, V().parseHumanCount(aria), V().parseHumanCount(el.innerText || el.textContent))
+      if (!aria || /lượt xem|views?/i.test(aria)) continue
+      if (/^(thích:|like:|bày tỏ cảm xúc|xem ai đã bày tỏ|tất cả cảm xúc)/i.test(aria) || /\bngười đã thích|\breactions?\b/i.test(aria)) {
+        likes = Math.max(likes, V().parseHumanCount(aria), V().parseHumanCount(el.innerText || el.textContent))
+      } else if (/\bbình luận\b|\bcomments?\b/i.test(aria)) {
+        comments = Math.max(comments, V().parseHumanCount(aria), V().parseHumanCount(el.innerText || el.textContent))
+      } else if (/\bchia sẻ\b|\bshares?\b/i.test(aria)) {
+        shares = Math.max(shares, V().parseHumanCount(aria), V().parseHumanCount(el.innerText || el.textContent))
+      }
     }
 
-    // 2. Đọc trực tiếp thanh hành động dưới bài (Ảnh 1 & 2: 3 số đứng ngang hàng ở nửa dưới article!)
-    const aRect = article.getBoundingClientRect()
+    // 2. Đọc chuỗi tổng hợp trong nửa dưới bài (VD: "2,3K", "29 bình luận", "38 lượt chia sẻ")
     const bottomNumbers = []
-    for (const el of article.querySelectorAll('[role="button"], button, span')) {
+    for (const el of article.querySelectorAll('[role="button"], button, span, a')) {
+      if (el.closest('[role="article"]') !== article && article.getAttribute('role') === 'article') continue
       const r = el.getBoundingClientRect()
-      if (r.width === 0 || r.height === 0) continue
-      if (r.top < aRect.top + aRect.height * 0.55) continue
-      const aria = V().normalizeText(el.getAttribute('aria-label') || '')
+      if (r.width === 0 || r.height === 0 || r.top < aRect.top + aRect.height * 0.5) continue
       const txt = V().normalizeText(el.innerText || el.textContent || '')
+      const aria = V().normalizeText(el.getAttribute('aria-label') || '')
 
-      if (/^(thích|like|bỏ thích|unlike|bày tỏ cảm xúc|react)$/i.test(aria) || /tất cả cảm xúc|người đã thích|thích:|like:|reactions?/i.test(aria)) {
-        const near = V().normalizeText(`${aria} ${txt} ${el.nextElementSibling?.innerText || ''} ${el.parentElement?.innerText?.slice(0, 28) || ''}`)
+      if (/\d+\s*(?:k|m|tr)?\s*(?:bình luận|comments?)/i.test(txt)) comments = Math.max(comments, V().parseHumanCount(txt))
+      if (/\d+\s*(?:k|m|tr)?\s*(?:lượt chia sẻ|chia sẻ|shares?)/i.test(txt)) shares = Math.max(shares, V().parseHumanCount(txt))
+
+      if (/^(thích|like|bỏ thích|unlike|bày tỏ cảm xúc|react)$/i.test(aria)) {
+        const near = V().normalizeText(`${txt} ${el.nextElementSibling?.innerText || ''} ${el.parentElement?.innerText?.slice(0, 36) || ''}`)
         if (!/lượt xem|views?/i.test(near)) likes = Math.max(likes, V().parseHumanCount(near))
         continue
       }
-      if (/bình luận|viết bình luận|leave a comment|comment/i.test(aria)) {
-        const near = V().normalizeText(`${txt} ${el.nextElementSibling?.innerText || ''} ${aria}`)
+      if (/bình luận|comment/i.test(aria)) {
+        const near = V().normalizeText(`${txt} ${el.nextElementSibling?.innerText || ''}`)
         comments = Math.max(comments, V().parseHumanCount(near))
         continue
       }
       if (/chia sẻ|share|gửi/i.test(aria)) {
-        const near = V().normalizeText(`${txt} ${el.nextElementSibling?.innerText || ''} ${aria}`)
+        const near = V().normalizeText(`${txt} ${el.nextElementSibling?.innerText || ''}`)
         shares = Math.max(shares, V().parseHumanCount(near))
         continue
       }
-      if (/^\d+(?:[.,]\d+)?\s*(k|n|nghìn|m|tr|triệu)?$/i.test(txt) && !el.children.length) {
+
+      // 3 số đứng ngang hàng đáy bài viết (Ảnh 6: [👍 2,3K] [💬 29] [↗ 38])
+      if (!el.children.length && /^\d+(?:[.,]\d+)?\s*(k|n|nghìn|m|tr|triệu)?$/i.test(txt)) {
         const val = V().parseHumanCount(txt)
-        if (val > 0 && r.left < aRect.left + aRect.width * 0.72) {
-          bottomNumbers.push({ val, x: r.left })
+        if (val > 0 && r.bottom >= aRect.bottom - 140) {
+          bottomNumbers.push({ val, x: r.left, y: r.top })
         }
       }
     }
 
-    // Nếu nút không gắn aria-label số -> 3 số trái-sang-phải ở thanh dưới chính là [Like, Comment, Share]!
     if (bottomNumbers.length > 0) {
-      bottomNumbers.sort((a, b) => a.x - b.x)
-      const uniqueByX = []
-      for (const n of bottomNumbers) {
-        if (!uniqueByX.length || Math.abs(n.x - uniqueByX[uniqueByX.length - 1].x) > 18) uniqueByX.push(n)
+      // Nhóm các số cùng hàng ngang dưới cùng (cách nhau <= 22px theo chiều dọc)
+      bottomNumbers.sort((a, b) => b.y - a.y)
+      const baseY = bottomNumbers[0].y
+      const row = bottomNumbers.filter((n) => Math.abs(n.y - baseY) <= 22).sort((a, b) => a.x - b.x)
+      const uniq = []
+      for (const n of row) {
+        if (!uniq.length || Math.abs(n.x - uniq[uniq.length - 1].x) > 18) uniq.push(n)
       }
-      if (likes === 0 && uniqueByX[0]) likes = uniqueByX[0].val
-      if (comments === 0 && uniqueByX[1]) comments = uniqueByX[1].val
-      if (shares === 0 && uniqueByX[2]) shares = uniqueByX[2].val
+      if (likes === 0 && uniq[0]) likes = uniq[0].val
+      if (comments === 0 && uniq[1]) comments = uniq[1].val
+      if (shares === 0 && uniq[2]) shares = uniq[2].val
     }
-
     return { likes, comments, shares }
   }
 
@@ -880,19 +868,19 @@
     if (videoEl?.getAttribute('poster')) thumbnailUrl = videoEl.getAttribute('poster')
     if (!thumbnailUrl) {
       const imgs = Array.from(article.querySelectorAll('img[src]'))
-        .filter((img) => img.naturalWidth >= 100 && img.naturalHeight >= 100 && !/emoji|static\.xx/i.test(img.src))
+        .filter((img) => img.naturalWidth >= 100 && img.naturalHeight >= 100 && !/emoji|static\.xx|rsrc\.php/i.test(img.src))
         .sort((a, b) => (b.naturalWidth * b.naturalHeight) - (a.naturalWidth * a.naturalHeight))
       thumbnailUrl = imgs[0]?.src || article.querySelector('svg image')?.getAttribute('xlink:href') || ''
     }
     return { authorName, authorUrl, thumbnailUrl }
   }
 
+  // Đọc chính xác cột dọc bên phải của Thước phim (Reels) Facebook: [👍 10,7K] [💬 96] [↗ 372]
   function extractActiveReelPost2026() {
     if (!/\/reel\/\d+/i.test(location.pathname)) return null
     const postUrl = cleanFacebookUrl(location.href)
     let likes = 0, comments = 0, shares = 0
 
-    // Chỉ lấy nút nằm đúng trong khung hình hiện tại (loại bỏ Reel liền kề bị cache ở ngoài màn hình!)
     const buttons = Array.from(document.querySelectorAll('[role="button"], button')).filter((b) => {
       if (!V().isReallyVisible(b, { minWidth: 20, minHeight: 20 })) return false
       const r = b.getBoundingClientRect()
@@ -902,40 +890,48 @@
     for (const btn of buttons) {
       const aria = V().normalizeText(btn.getAttribute('aria-label') || '')
       const nearText = V().normalizeText(`${btn.innerText || ''} ${btn.nextElementSibling?.innerText || ''} ${btn.parentElement?.innerText || ''}`)
-      if (/^(thích|like|bỏ thích|unlike)$/i.test(aria) || /thích|like/i.test(aria)) {
-        if (nearText.length <= 32) likes = Math.max(likes, V().parseHumanCount(nearText))
-      } else if (/bình luận|comment/i.test(aria)) {
-        if (nearText.length <= 32) comments = Math.max(comments, V().parseHumanCount(nearText))
-      } else if (/chia sẻ|share/i.test(aria)) {
-        if (nearText.length <= 32) shares = Math.max(shares, V().parseHumanCount(nearText))
-      }
+      if (/thích|like/i.test(aria) && nearText.length <= 36) likes = Math.max(likes, V().parseHumanCount(nearText))
+      else if (/bình luận|comment/i.test(aria) && nearText.length <= 36) comments = Math.max(comments, V().parseHumanCount(nearText))
+      else if (/chia sẻ|share/i.test(aria) && nearText.length <= 36) shares = Math.max(shares, V().parseHumanCount(nearText))
+    }
+
+    if (likes === 0 || comments === 0) {
+      const rightNumbers = Array.from(document.querySelectorAll('span, div'))
+        .filter((el) => {
+          if (el.children.length > 0 || !V().isReallyVisible(el)) return false
+          const r = el.getBoundingClientRect()
+          return r.left > window.innerWidth * 0.85 && r.top > window.innerHeight * 0.35 && /^\d+(?:[.,]\d+)?\s*(?:k|n|nghìn|m|tr|triệu)?$/i.test(V().normalizeText(el.innerText || ''))
+        })
+        .map((el) => ({ val: V().parseHumanCount(el.innerText), top: el.getBoundingClientRect().top }))
+        .sort((a, b) => a.top - b.top)
+      if (likes === 0 && rightNumbers[0]) likes = rightNumbers[0].val
+      if (comments === 0 && rightNumbers[1]) comments = rightNumbers[1].val
+      if (shares === 0 && rightNumbers[2]) shares = rightNumbers[2].val
     }
 
     const bottomTexts = Array.from(document.querySelectorAll('span, a, div[dir="auto"]'))
       .filter((el) => {
         if (!V().isReallyVisible(el)) return false
         const r = el.getBoundingClientRect()
-        return r.top > window.innerHeight * 0.65 && r.bottom <= window.innerHeight && r.left > 160 && r.right < window.innerWidth * 0.84
+        return r.top > window.innerHeight * 0.62 && r.bottom <= window.innerHeight && r.left > 100 && r.right < window.innerWidth * 0.86
       })
       .map((el) => V().normalizeText(el.innerText || el.textContent))
-      .filter((t) => t.length >= 6 && t.length <= 260 && !/^(theo dõi|đang theo dõi|follow|following|âm thanh gốc|xem thêm|see more)$/i.test(t))
+      .filter((t) => t.length >= 4 && t.length <= 260 && !/^(theo dõi|đang theo dõi|follow|following|âm thanh gốc|xem thêm|see more)$/i.test(t))
 
     const bestCaption = bottomTexts.sort((a, b) => b.length - a.length)[0] || ''
-    if (likes === 0) {
-      const rightNumbers = Array.from(document.querySelectorAll('span, div'))
-        .filter((el) => {
-          if (!V().isReallyVisible(el)) return false
-          const r = el.getBoundingClientRect()
-          return r.left > window.innerWidth * 0.88 && /^\d+(?:[.,]\d+)?\s*(?:k|n|nghìn|m|tr|triệu)?$/i.test(V().normalizeText(el.innerText || ''))
-        })
-        .map((el) => ({ val: V().parseHumanCount(el.innerText), top: el.getBoundingClientRect().top }))
-        .sort((a, b) => a.top - b.top)
-      if (rightNumbers[0]) likes = rightNumbers[0].val
-      if (rightNumbers[1]) comments = rightNumbers[1].val
-      if (rightNumbers[2]) shares = rightNumbers[2].val
+    const authorLink = Array.from(document.querySelectorAll('a[href]')).find((a) => {
+      if (!V().isReallyVisible(a)) return false
+      const r = a.getBoundingClientRect()
+      return r.top > window.innerHeight * 0.65 && r.left > 100 && r.right < window.innerWidth * 0.6 && V().normalizeText(a.innerText).length >= 2
+    })
+    const videoPoster = document.querySelector('video[poster]')?.getAttribute('poster') || document.querySelector('div[role="main"] img[src]')?.src || ''
+    return {
+      postUrl, likes, comments, shares,
+      caption: bestCaption || `Thước phim Facebook #${extractFacebookPostId(postUrl) || Date.now()}`,
+      authorName: V().normalizeText(authorLink?.innerText || ''),
+      authorUrl: authorLink?.href ? cleanFacebookUrl(authorLink.href) : '',
+      thumbnailUrl: videoPoster
     }
-    const videoPoster = document.querySelector('video[poster]')?.getAttribute('poster') || document.querySelector('div[role="main"] img')?.src || ''
-    return { postUrl, likes, comments, shares, caption: bestCaption || `Thước phim Facebook #${extractFacebookPostId(postUrl) || Date.now()}`, thumbnailUrl: videoPoster }
   }
 
   async function advanceToNextFacebookReel(prevUrl) {
@@ -947,38 +943,46 @@
     else {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, bubbles: true }))
       document.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, bubbles: true }))
-      window.dispatchEvent(new WheelEvent('wheel', { deltaY: 600, bubbles: true }))
+      window.dispatchEvent(new WheelEvent('wheel', { deltaY: 650, bubbles: true }))
     }
-    // Đợi URL thực sự chuyển sang thước phim kế tiếp để KHÔNG BAO GIỜ cào trùng!
-    await M().waitFor(() => cleanFacebookUrl(location.href) !== prevUrl, 5000, 250)
-    await V().humanDelay(900, 1500)
+    await M().waitFor(() => cleanFacebookUrl(location.href) !== prevUrl, 6000, 280)
+    await V().humanScrollPause()
   }
 
   async function scrapeFacebookViralPosts(options = {}) {
     const targetCount = Number(options.targetCount) || 10
-    const minLikes = Number(options.minLikes) || 5000
-    const maxRoundsOnPage = Number(options.maxRoundsOnPage) || 20
-    const idleTimeoutMs = Number(options.idleTimeoutMs) || 4 * 60 * 1000
+    const sourceKind = options.sourceKind || (/\/(reel|watch|search\/videos)/i.test(location.pathname) ? 'reels' : 'feed')
+    const minLikes = Number(options.minLikes) || (sourceKind === 'reels' ? 5000 : 1000)
+    const minRoundsOnPage = Number(options.minRoundsOnPage) || 12
+    const maxRoundsOnPage = Number(options.maxRoundsOnPage) || 28
+    const perSourceMaxMs = Number(options.perSourceMaxMs) || 150000
+    const strictDurationMs = Number(options.strictDurationMs) || 0
+    const idleTimeoutMs = Number(options.idleTimeoutMs) || 3 * 60 * 1000
     let lastFoundAt = Number(options.lastFoundAt) || Date.now()
+    const startedAt = Date.now()
     const totalAlreadyFound = Number(options.totalAlreadyFound) || 0
     const topicLabel = options.topicLabel || ''
-    const sourceKind = options.sourceKind || (/\/(reel|watch|search\/videos)/i.test(location.pathname) ? 'reels' : 'feed')
-    const sourceTag = sourceKind === 'reels' ? 'Thước phim (Reels)' : 'Trang chủ'
+    const sourceTag = sourceKind === 'reels' ? 'Thước phim (Reels)' : 'Bài viết'
 
     const seenUrls = new Set((options.excludeUrls || []).map((u) => cleanFacebookUrl(u).toLowerCase()))
     const seenFingerprints = new Set()
 
-    const stable = await V().waitForPageStable('facebook', { maxWaitMs: 20000 })
+    const stable = await V().waitForPageStable('facebook', { maxWaitMs: 22000 })
     if (!stable.ok) return { ok: false, error: `FACEBOOK_${stable.reason}`, posts: [], lastFoundAt }
     if (isLoginOrCheckpointScreen()) return { ok: false, error: 'FACEBOOK_LOGIN_REQUIRED', posts: [], lastFoundAt }
 
     const collected = []
+    let visionAssistCalled = false
 
     // Chế độ Reels trực tiếp (/reel/...)
     if (/\/reel\b/i.test(location.pathname)) {
       let stuckCount = 0
-      for (let round = 0; round < maxRoundsOnPage && collected.length < targetCount; round++) {
+      for (let round = 0; round < maxRoundsOnPage; round++) {
+        if (!strictDurationMs && collected.length >= targetCount) break
+        if (strictDurationMs && Date.now() - startedAt >= strictDurationMs) break
+        if (Date.now() - startedAt >= perSourceMaxMs) break
         if (Date.now() - lastFoundAt >= idleTimeoutMs) return { ok: true, posts: collected, timedOut: true, lastFoundAt }
+
         const curUrl = cleanFacebookUrl(location.href)
         const reel = extractActiveReelPost2026()
         if (reel && reel.likes >= minLikes) {
@@ -988,45 +992,51 @@
             seenUrls.add(urlKey)
             seenFingerprints.add(fp)
             lastFoundAt = Date.now()
+            const hashtags = extractHashtagsFromText(reel.caption)
             collected.push({
               id: `fb-reel-${Date.now()}-${collected.length}`,
-              title: V().truncateClean(reel.caption, 105),
+              title: V().truncateClean(reel.caption, 115),
               platform: 'facebook',
               category: topicLabel || 'Thước phim (Reels)',
               postUrl: reel.postUrl,
-              summary: V().truncateClean(`${reel.caption} • ${reel.likes.toLocaleString('vi-VN')} cảm xúc`, 250),
-              viralityScore: Math.min(99, 86 + Math.min(13, Math.floor(Math.log10(reel.likes) * 3))),
+              summary: V().truncateClean(`${reel.caption} • ${reel.likes.toLocaleString('vi-VN')} thích • ${reel.comments} bình luận`, 250),
+              viralityScore: Math.min(99, 86 + Math.min(13, Math.floor(Math.log10(Math.max(10, reel.likes)) * 3))),
               likesCount: reel.likes, sharesCount: reel.shares, commentsCount: reel.comments,
-              trendingTopic: `Thước phim (Reels) • ${(reel.likes / 1000).toFixed(1)}K+ cảm xúc`,
+              trendingTopic: hashtags ? `Thước phim (Reels) • ${hashtags}` : `Thước phim (Reels) • ${(reel.likes / 1000).toFixed(1)}K+ thích`,
               thumbnailUrl: reel.thumbnailUrl || '',
+              authorName: reel.authorName || '',
+              authorUrl: reel.authorUrl || '',
               createdAt: new Date().toISOString()
             })
-            V().reportStep('facebook', 'scrape_viral', `FB Thước phim: ${totalAlreadyFound + collected.length} bài (${reel.likes.toLocaleString('vi-VN')})`)
+            V().reportStep('facebook', 'scrape_viral', `FB Reels: ${totalAlreadyFound + collected.length} bài (👍 ${reel.likes.toLocaleString('vi-VN')} · 💬 ${reel.comments})`)
           }
         }
-        if (collected.length >= targetCount) break
+        if (!strictDurationMs && collected.length >= targetCount) break
         await advanceToNextFacebookReel(curUrl)
         if (cleanFacebookUrl(location.href) === curUrl) {
           stuckCount++
-          if (stuckCount >= 2) break
-        } else {
-          stuckCount = 0
-        }
+          if (stuckCount >= 3) break
+        } else stuckCount = 0
       }
       V().clearHud(2500)
       return { ok: true, posts: collected, timedOut: false, lastFoundAt }
     }
 
-    // Chế độ Trang chủ / Tìm kiếm Bài viết / Tìm kiếm Video-Reels
+    // Chế độ Bài viết / Tìm kiếm Facebook (kiên trì cuộn 12–28 lần khi mạng chậm!)
     let stagnantScrolls = 0, lastScrollHeight = 0
-    for (let round = 0; round < maxRoundsOnPage && collected.length < targetCount; round++) {
+    for (let round = 0; round < maxRoundsOnPage; round++) {
+      if (!strictDurationMs && collected.length >= targetCount) break
+      if (strictDurationMs && Date.now() - startedAt >= strictDurationMs) break
+      if (Date.now() - startedAt >= perSourceMaxMs) break
       if (Date.now() - lastFoundAt >= idleTimeoutMs) return { ok: true, posts: collected, timedOut: true, lastFoundAt }
+
       if (V().inspectPageHealth().isOffline) await V().waitForPageStable('facebook', { maxWaitMs: 25000 })
 
-      for (const article of document.querySelectorAll('div[role="article"], article, div[data-pagelet^="FeedUnit"]')) {
-        if (collected.length >= targetCount || Date.now() - lastFoundAt >= idleTimeoutMs) break
+      const cards = collectFeedArticleCards()
+      for (const article of cards) {
+        if (!strictDurationMs && collected.length >= targetCount) break
         try {
-          const metrics = await extractFeedPostMetrics2026(article)
+          const metrics = extractFeedPostMetrics2026(article)
           if (metrics.likes < minLikes) continue
           const postUrl = await hoverAndExtractPostPermalink(article)
           if (!postUrl || !isFacebookPostPermalink(postUrl)) continue
@@ -1034,17 +1044,14 @@
           if (seenUrls.has(urlKey)) continue
 
           const msgEl = article.querySelector('div[data-ad-preview="message"], div[data-ad-comet-preview="message"]') ||
-            Array.from(article.querySelectorAll('div[dir="auto"]')).find((d) => V().normalizeText(d.innerText).length >= 12)
+            Array.from(article.querySelectorAll('div[dir="auto"]')).find((d) => V().normalizeText(d.innerText).length >= 8)
           const rawText = V().normalizeText(msgEl?.innerText || msgEl?.textContent || '')
-          const author = V().normalizeText(article.querySelector('h2 a, h3 a, h4 a, strong a')?.innerText || '')
           const isVideoOrReel = Boolean(article.querySelector('video')) || /\/(reel|videos|watch)\//i.test(postUrl)
-          const actualKindTag = isVideoOrReel ? 'Thước phim (Reels)' : 'Trang chủ'
-          const mediaAndAuthor = extractArticleMediaAndAuthor(article)
-          const actualAuthorName = mediaAndAuthor.authorName || author
-          const actualAuthorUrl = mediaAndAuthor.authorUrl
-          const actualThumbnailUrl = mediaAndAuthor.thumbnailUrl
+          const actualKindTag = isVideoOrReel ? 'Thước phim (Reels)' : 'Bài viết'
+          const { authorName, authorUrl, thumbnailUrl } = extractArticleMediaAndAuthor(article)
+          const hashtags = extractHashtagsFromText(rawText)
 
-          const summaryText = rawText || `[${actualKindTag}] ${author || 'Bài Viral Facebook'} đạt ${metrics.likes.toLocaleString('vi-VN')} cảm xúc.`
+          const summaryText = rawText || `[${actualKindTag}] ${authorName || 'Bài Viral Facebook'} đạt ${metrics.likes.toLocaleString('vi-VN')} thích.`
           const fp = `${V().stripToMatchKey(summaryText).slice(0, 44)}|${metrics.likes}`
           if (seenFingerprints.has(fp)) continue
 
@@ -1053,31 +1060,53 @@
           lastFoundAt = Date.now()
           collected.push({
             id: `fb-${sourceKind}-${Date.now()}-${collected.length}`,
-            title: V().truncateClean(rawText || `[${actualKindTag}] ${actualAuthorName || 'Bài Viral Facebook'}`, 105),
+            title: V().truncateClean(rawText || `[${actualKindTag}] ${authorName || 'Bài Viral Facebook'}`, 115),
             platform: 'facebook',
             category: topicLabel || actualKindTag,
             postUrl,
-            summary: V().truncateClean(`${actualAuthorName ? `[${actualAuthorName}] ` : ''}${summaryText}`, 250),
-            viralityScore: Math.min(99, 85 + Math.min(14, Math.floor(Math.log10(metrics.likes) * 3))),
+            summary: V().truncateClean(`${authorName ? `[${authorName}] ` : ''}${summaryText}`, 250),
+            viralityScore: Math.min(99, 85 + Math.min(14, Math.floor(Math.log10(Math.max(10, metrics.likes)) * 3))),
             likesCount: metrics.likes, sharesCount: metrics.shares, commentsCount: metrics.comments,
-            trendingTopic: `${actualKindTag} • ${(metrics.likes / 1000).toFixed(1)}K+ cảm xúc`,
-            thumbnailUrl: actualThumbnailUrl || '',
-            authorName: actualAuthorName || '',
-            authorUrl: actualAuthorUrl || '',
+            trendingTopic: hashtags ? `${actualKindTag} • ${hashtags}` : `${actualKindTag} • ${(metrics.likes / 1000).toFixed(1)}K+ thích`,
+            thumbnailUrl: thumbnailUrl || '',
+            authorName: authorName || '',
+            authorUrl: authorUrl || '',
             createdAt: new Date().toISOString()
           })
-          V().reportStep('facebook', 'scrape_viral', `FB ${sourceTag}: ${totalAlreadyFound + collected.length} bài (${metrics.likes.toLocaleString('vi-VN')})`)
+          V().reportStep('facebook', 'scrape_viral', `FB ${sourceTag}: ${totalAlreadyFound + collected.length} bài (👍 ${metrics.likes.toLocaleString('vi-VN')} · 💬 ${metrics.comments})`)
         } catch (_) {}
       }
 
-      if (collected.length >= targetCount) break
-      const curH = document.documentElement.scrollHeight
-      if (curH === lastScrollHeight) stagnantScrolls++
-      else { stagnantScrolls = 0; lastScrollHeight = curH }
-      if (stagnantScrolls >= 4) break
+      if (!strictDurationMs && collected.length >= targetCount) break
 
-      await V().scrollPageDownForFeed(1150 + Math.round(Math.random() * 450))
-      await V().humanDelay(1300, 2100)
+      // Nếu đã cuộn 5 lượt mà vẫn 0 bài -> nhờ Mắt Vision qwen3.5:4b kiểm tra có popup che hoặc cần bấm lọc không!
+      if (round === 5 && collected.length === 0 && !visionAssistCalled) {
+        visionAssistCalled = true
+        const aiHelp = await V().askSelfHealingAI({
+          platform: 'facebook', stepKey: 'facebook:viral_scrape_rescue',
+          goal: 'Trang tìm kiếm hoặc bảng tin Facebook đang cào bài Viral nhưng chưa lấy được bài. Kiểm tra xem có popup che cần đóng (dismiss_popup) hoặc nút Bài viết cần bấm (click_mark) hay chỉ cần cuộn tiếp (scroll_down).',
+          errorReason: 'Đã cuộn 5 lần trên Facebook nhưng chưa đọc được bài viết nào >= ngưỡng like'
+        })
+        if (aiHelp.ok && aiHelp.action === 'dismiss_popup') {
+          if (aiHelp.element) await V().humanClick(aiHelp.element, { skipScroll: true })
+          else V().dispatchEscape()
+        } else if (aiHelp.ok && aiHelp.action === 'click_mark' && aiHelp.element) {
+          await V().humanClick(aiHelp.element, { skipScroll: true })
+          await V().humanDelay(1600, 2600)
+        }
+      }
+
+      const beforeH = document.documentElement.scrollHeight
+      await V().scrollPageDownForFeed(1100)
+      await V().humanScrollPause()
+
+      // Chờ mạng chậm tải thêm nội dung tối đa 5s trước khi tính là đứng trang
+      await M().waitFor(() => document.documentElement.scrollHeight > beforeH, 5000, 450)
+      const afterH = document.documentElement.scrollHeight
+      if (afterH <= lastScrollHeight) stagnantScrolls++
+      else { stagnantScrolls = 0; lastScrollHeight = afterH }
+
+      if (!strictDurationMs && round >= minRoundsOnPage && stagnantScrolls >= 6) break
     }
 
     V().clearHud(2500)
@@ -1106,7 +1135,7 @@
     const groups = []
     const mainRoot = document.querySelector('[role="main"]') || document.body
 
-    for (let round = 0; round < 12 && groups.length < targetCount; round++) {
+    for (let round = 0; round < 14 && groups.length < targetCount; round++) {
       for (const a of mainRoot.querySelectorAll('a[href*="/groups/"]')) {
         if (groups.length >= targetCount) break
         if (a.closest('[role="navigation"], [role="banner"]')) continue
@@ -1143,24 +1172,21 @@
         })
         V().reportStep('facebook', 'scrape_groups', `Hội nhóm: ${groups.length}/${targetCount} (${membersCount.toLocaleString('vi-VN')} tv)`)
       }
-
       if (groups.length >= targetCount) break
-      await V().scrollPageDownForFeed(950 + Math.round(Math.random() * 400))
-      await V().humanDelay(1200, 2000)
+      await V().scrollPageDownForFeed(950)
+      await V().humanScrollPause()
     }
-
     V().clearHud(2500)
     return { ok: true, groups }
   }
+
   async function watchFacebookItem(options = {}) {
-    const dwellMs = Math.max(3000, (Number(options.dwellSeconds) || 8) * 1000)
-    await V().sleep(dwellMs)
-    if (/\/reel\//i.test(location.pathname)) {
-      await advanceToNextFacebookReel(cleanFacebookUrl(location.href))
-    } else {
-      await V().scrollPageDownForFeed(900)
+    const watchedMs = await V().humanWatchPause(Number(options.dwellSeconds) || 8)
+    if (options.advanceNext !== false) {
+      if (/\/reel\//i.test(location.pathname)) await advanceToNextFacebookReel(cleanFacebookUrl(location.href))
+      else await V().scrollPageDownForFeed(880)
     }
-    return { ok: true }
+    return { ok: true, watchedMs }
   }
 
   async function scrapeFacebookPostComments(options = {}) {
@@ -1169,7 +1195,7 @@
     const seen = new Set()
     const postTitle = V().truncateClean(document.querySelector('h1, div[data-ad-preview="message"]')?.innerText || document.title, 120)
 
-    for (let round = 0; round < 10 && comments.length < maxComments; round++) {
+    for (let round = 0; round < 12 && comments.length < maxComments; round++) {
       for (const node of document.querySelectorAll('[role="article"][aria-label*="Bình luận"], [role="article"][aria-label*="Comment"], ul li div[dir="auto"]')) {
         if (comments.length >= maxComments) break
         const card = node.closest('[role="article"]') || node.parentElement
@@ -1180,43 +1206,34 @@
         seen.add(text)
         const author = V().normalizeText(card.querySelector('a[role="link"] span, strong')?.innerText || 'Người dùng FB')
         const likeMatch = V().normalizeText(card.innerText || '').match(/\b(\d+(?:[.,]\d+)?\s*(?:k|m|tr)?)\b/i)
-        const likes = likeMatch ? V().parseHumanCount(likeMatch[1]) : 0
-        comments.push({ author, text, likes })
+        comments.push({ author, text, likes: likeMatch ? V().parseHumanCount(likeMatch[1]) : 0 })
       }
       const moreBtn = Array.from(document.querySelectorAll('[role="button"], span')).find((b) =>
         V().isReallyVisible(b) && /xem thêm bình luận|view more comments/i.test(V().normalizeText(b.innerText))
       )
       if (moreBtn) await V().humanClick(moreBtn)
       else await V().scrollPageDownForFeed(700)
-      await V().sleep(1200)
+      await V().humanDelay(1200, 2200)
     }
     return { ok: true, postTitle, comments }
   }
 
   async function scrapeFacebookChannelInfo(options = {}) {
+    await V().humanDelay(900, 1500)
     const channelName = V().normalizeText(document.querySelector('h1')?.innerText || document.title)
     const bio = V().normalizeText(document.body?.innerText || '').slice(0, 600)
     const followersMatch = bio.match(/(\d+(?:[.,]\d+)?\s*(?:k|n|nghìn|m|tr|triệu)?)\s*(?:người theo dõi|followers?)/i)
     const followersCount = followersMatch ? V().parseHumanCount(followersMatch[1]) : 0
     const sampleTitles = Array.from(document.querySelectorAll('div[role="article"] div[dir="auto"]'))
-      .map((el) => V().normalizeText(el.innerText))
-      .filter((t) => t.length >= 12 && t.length <= 160)
-      .slice(0, 10)
+      .map((el) => V().normalizeText(el.innerText)).filter((t) => t.length >= 12 && t.length <= 160).slice(0, 10)
     const avatarUrl = document.querySelector('svg image')?.getAttribute('xlink:href') || ''
     return {
       ok: true,
       channel: {
-        platform: 'facebook',
-        channelUrl: options.channelUrl || location.href,
-        channelName,
-        handle: location.pathname.replace(/^\/+|\/+$/g, ''),
-        bio: bio.slice(0, 260),
-        avatarUrl,
-        followersCount,
-        totalLikesCount: 0,
-        sampleTitles
+        platform: 'facebook', channelUrl: options.channelUrl || location.href, channelName,
+        handle: location.pathname.replace(/^\/+|\/+$/g, ''), bio: bio.slice(0, 260),
+        avatarUrl, followersCount, totalLikesCount: 0, sampleTitles
       }
     }
   }
-
 })()

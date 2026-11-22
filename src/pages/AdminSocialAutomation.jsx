@@ -1,8 +1,12 @@
 /*
   FILE NOTE
-  - Mục đích: Module Quản trị Đăng bài Tự động MXH (Facebook & TikTok) v3.5.0, tích hợp OmniVision v3.5, mở rộng từ khóa AI Local, lọc & gắn tag bài viral đa chủ đề, nghe OMNICART_VIRAL_BATCH, Soạn bài AI tùy chọn sản phẩm/quyền riêng tư, và 5 Panel tự động hóa.
-  - Liên kết trực tiếp: Store-Admin/extension/content-admin-bridge.js, Store-Admin/server-dotnet/Controllers/AdminSocialController.cs, Store-Admin/src/pages/AdminSocialPowerPanels.jsx, Store-Admin/src/pages/AdminSocialAutomation.css
-  - Vùng ảnh hưởng khi sửa: Toàn bộ bảng điều khiển đăng bài tự động, cào bài viral và giao tiếp Extension.
+  - Mục đích: Module Quản trị Đăng bài Tự động MXH v3.5.1.
+  - Nâng cấp:
+    1. Đăng SONG SONG độc lập Facebook & TikTok (postingBusy tách riêng từng nền tảng — đang đăng FB vẫn bấm đăng TikTok được ngay!).
+    2. Cấu hình Kênh đăng & Quyền riêng tư hoạt động chuẩn xác, đồng bộ tự động xuống Soạn bài AI & Bộ lập lịch; Soạn bài AI hỗ trợ rõ "👤 Trang cá nhân (Mặc định)" hoặc chọn Nhóm Facebook cụ thể.
+    3. Bảng bài Viral chia 2 cột song song: Facebook BÊN TRÁI (Bài ≥1K • Reels ≥5K) và TikTok BÊN PHẢI (≥1M Tim), ảnh đại diện lớn 84px, hiển thị đầy đủ lượt thích/tim, bình luận, chia sẻ, hashtag, phân loại xu hướng chính xác và mở 1 tab duy nhất.
+  - Liên kết trực tiếp: src/pages/AdminSocialPowerPanels.jsx, src/pages/AdminSocialAutomation.css, src/pages/socialPrivacy.js, src/api/chat.js
+  - Vùng ảnh hưởng khi sửa: Giao diện quản trị mạng xã hội, luồng soạn bài AI, bảng theo dõi bài viral, danh sách nhóm và nhật ký đăng bài.
 */
 
 import { useEffect, useState, useMemo, useRef } from 'react'
@@ -44,6 +48,11 @@ const VIRAL_TOPICS = [
   ['custom', '✏️ Chủ đề tự nhập...']
 ]
 
+function extractHashtagChips(item) {
+  const raw = `${item?.title || ''} ${item?.trendingTopic || ''} ${item?.summary || ''}`
+  return Array.from(new Set(raw.match(/#[\p{L}\p{N}_]{2,40}/gu) || [])).slice(0, 5)
+}
+
 export default function AdminSocialAutomation({ csrfToken }) {
   const [activeSubTab, setActiveSubTab] = useState('settings')
   const [stats, setStats] = useState({
@@ -77,19 +86,11 @@ export default function AdminSocialAutomation({ csrfToken }) {
 
   const [viralPosts, setViralPosts] = useState([])
   const [viralTopic, setViralTopic] = useState('all')
-  const [fbSourceMode, setFbSourceMode] = useState('both') // 'both' | 'feed' | 'reels'
+  const [fbSourceMode, setFbSourceMode] = useState('both')
   const [viralFilterTopic, setViralFilterTopic] = useState('all')
-  const [viralFbKindFilter, setViralFbKindFilter] = useState('all') // 'all' | 'feed' | 'reels'
+  const [viralFbKindFilter, setViralFbKindFilter] = useState('all')
   const [viralSearch, setViralSearch] = useState('')
   const [aiCleaningViral, setAiCleaningViral] = useState(false)
-
-  const handleOpenViralSingleTab = async (url, platform) => {
-    if (!url) return
-    const res = await sendExtensionMessage('OPEN_SINGLE_TAB', { url, platform })
-    if (!res?.ok) {
-      window.open(url, 'omnicart_viral_single_tab', 'noopener')
-    }
-  }
   const [customViralTopic, setCustomViralTopic] = useState('')
   const [fbViralSort, setFbViralSort] = useState('likes_desc')
   const [ttViralSort, setTtViralSort] = useState('likes_desc')
@@ -97,7 +98,8 @@ export default function AdminSocialAutomation({ csrfToken }) {
 
   const [extensionConnected, setExtensionConnected] = useState(false)
   const [showExtensionHelp, setShowExtensionHelp] = useState(false)
-  const [realPostingBusy, setRealPostingBusy] = useState(false)
+  // Tách trạng thái đăng từng nền tảng để Facebook & TikTok chạy SONG SONG không khóa chéo nhau!
+  const [postingBusy, setPostingBusy] = useState({ facebook: false, tiktok: false })
   const [batchPosting, setBatchPosting] = useState(false)
 
   const [studioPlatform, setStudioPlatform] = useState('facebook')
@@ -111,7 +113,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
   })
 
   const [studioPrivacy, setStudioPrivacy] = useState('only_me')
-  const [studioSelectionMode, setStudioSelectionMode] = useState('smart') // smart | random | custom
+  const [studioSelectionMode, setStudioSelectionMode] = useState('smart')
   const [studioProductId, setStudioProductId] = useState('')
   const [catalogList, setCatalogList] = useState([])
 
@@ -122,8 +124,15 @@ export default function AdminSocialAutomation({ csrfToken }) {
   const extensionPingCancelRef = useRef(null)
   const autoPostAttemptedIdsRef = useRef(new Set())
   const autoPostInFlightRef = useRef(false)
-  const autoPostLastAttemptAtRef = useRef(0)
   const extensionPingInFlightRef = useRef(false)
+
+  const configuredChannels = useMemo(() => {
+    const raw = String(settings.channels || 'facebook,tiktok').toLowerCase()
+    const list = []
+    if (raw.includes('facebook')) list.push('facebook')
+    if (raw.includes('tiktok')) list.push('tiktok')
+    return list.length ? list : ['facebook', 'tiktok']
+  }, [settings.channels])
 
   const markCopiedPost = (id) => {
     setCopiedPostId(id)
@@ -144,7 +153,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
 
   const formatPostText = (post) => {
     if (!post) return ''
-    let text = (post.content || '').trim()
+    let text = (post.content || '').replace(/\*\*([^*]+)\*\*/g, '$1').trim()
     if (!text) return ''
     if (post.title && !text.includes(post.title)) text = post.title + '\n\n' + text
     const orderLink = `https://omnicart.vn/products/${post.productId || '1'}`
@@ -170,10 +179,12 @@ export default function AdminSocialAutomation({ csrfToken }) {
       let settled = false
 
       const idleLimitMs =
-        action === 'FETCH_REAL_VIRAL' ? 360000
-          : action === 'SCRAPE_FB_GROUPS' ? 150000
-            : action === 'AUTO_POST' ? 180000
-              : action === 'PING' ? 8000 : 14000
+        action === 'SURF_AND_COLLECT' ? Math.max(180000, ((Number(payload.durationMinutes) || 2) + 3) * 60000)
+          : action === 'AUTO_WATCH_TASK' ? Math.max(180000, ((Number(payload.repeatCount) || 5) * ((Number(payload.dwellSeconds) || 8) + 5) + 60) * 1000)
+            : action === 'FETCH_REAL_VIRAL' ? 420000
+              : action === 'SCRAPE_FB_GROUPS' || action === 'SCRAPE_CHANNEL_PROFILES' || action === 'SCRAPE_POST_COMMENTS' ? 240000
+                : action === 'AUTO_POST' ? 210000
+                  : action === 'PING' ? 8000 : 18000
 
       const cleanup = () => {
         if (settled) return
@@ -194,7 +205,10 @@ export default function AdminSocialAutomation({ csrfToken }) {
 
       const handler = (event) => {
         if (event.source !== window || event.origin !== window.location.origin) return
-        if (event.data?.source === 'OMNICART_EXTENSION_PROGRESS' && action === 'FETCH_REAL_VIRAL') { armTimeout(); return }
+        if (event.data?.source === 'OMNICART_EXTENSION_PROGRESS' && ['FETCH_REAL_VIRAL', 'SURF_AND_COLLECT', 'AUTO_WATCH_TASK', 'SCRAPE_CHANNEL_PROFILES'].includes(action)) {
+          armTimeout()
+          return
+        }
         if (event.data && event.data.source === 'OMNICART_EXTENSION_RESPONSE' && event.data.requestId === requestId) {
           cleanup()
           if (action === 'PING') setExtensionConnected(event.data.ok === true && event.data.data?.ok === true)
@@ -213,6 +227,12 @@ export default function AdminSocialAutomation({ csrfToken }) {
     })
   }
 
+  const handleOpenViralSingleTab = async (url, platform) => {
+    if (!url) return
+    const res = await sendExtensionMessage('OPEN_SINGLE_TAB', { url, platform })
+    if (!res?.ok) window.open(url, 'omnicart_viral_single_tab', 'noopener')
+  }
+
   const loadAll = async () => {
     try {
       setLoading(true)
@@ -225,7 +245,11 @@ export default function AdminSocialAutomation({ csrfToken }) {
         apiJson('/api/admin/products?offset=0&limit=100').catch(() => null)
       ])
       if (resStats?.stats) setStats(resStats.stats)
-      if (resSettings?.settings) setSettings(cur => ({ ...cur, ...resSettings.settings, privacy: resSettings.settings.privacy === 'public' ? 'public' : 'only_me' }))
+      if (resSettings?.settings) {
+        const nextPrivacy = resSettings.settings.privacy === 'public' ? 'public' : 'only_me'
+        setSettings(cur => ({ ...cur, ...resSettings.settings, privacy: nextPrivacy }))
+        setStudioPrivacy(nextPrivacy)
+      }
       if (resPosts?.posts) setPosts(resPosts.posts)
       if (resGroups?.groups) setGroups(resGroups.groups)
       if (resViral?.posts) setViralPosts(resViral.posts)
@@ -295,7 +319,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
             body: JSON.stringify({ posts: postsToSave })
           })
           if (saved?.posts) setViralPosts(saved.posts)
-          showNotice(`⚡ ${batch.sourceLabel} xong trước: đã hiện ngay +${postsToSave.length} bài!`, 'info')
+          showNotice(`⚡ ${batch.sourceLabel} vừa về: +${postsToSave.length} bài!`, 'info')
         }
       } catch (_) {}
     }
@@ -335,13 +359,16 @@ export default function AdminSocialAutomation({ csrfToken }) {
     e?.preventDefault()
     try {
       setLoading(true)
+      const nextPrivacy = settings.privacy === 'public' ? 'public' : 'only_me'
       const res = await apiJson('/api/admin/social/settings', {
         method: 'POST', headers: { 'x-csrf-token': csrfToken },
-        body: JSON.stringify({ ...settings, privacy: settings.privacy === 'public' ? 'public' : 'only_me' })
+        body: JSON.stringify({ ...settings, privacy: nextPrivacy })
       })
       if (res?.settings) {
-        setSettings(cur => ({ ...cur, ...res.settings, privacy: res.settings.privacy === 'public' ? 'public' : 'only_me' }))
-        showNotice('Đã lưu cấu hình.')
+        const savedPriv = res.settings.privacy === 'public' ? 'public' : 'only_me'
+        setSettings(cur => ({ ...cur, ...res.settings, privacy: savedPriv }))
+        setStudioPrivacy(savedPriv)
+        showNotice(`✅ Đã lưu cấu hình (${savedPriv === 'public' ? 'Công khai' : 'Chỉ mình tôi'} • ${res.settings.channels}).`)
         const resStats = await apiJson('/api/admin/social/stats')
         if (resStats?.stats) setStats(resStats.stats)
       }
@@ -349,8 +376,9 @@ export default function AdminSocialAutomation({ csrfToken }) {
     finally { setLoading(false) }
   }
 
+  // Đăng đồng thời song song theo đúng Kênh đăng trong Cấu hình (chỉ FB / chỉ TikTok / cả 2 song song!)
   const handleTriggerCycle = async () => {
-    if (batchPosting || realPostingBusy) return
+    if (batchPosting) return
     try {
       setBatchPosting(true); setLoading(true)
       const extensionStatus = await sendExtensionMessage('CHECK_STATUS', {})
@@ -358,21 +386,21 @@ export default function AdminSocialAutomation({ csrfToken }) {
         setShowExtensionHelp(true)
         throw new Error('Chưa kết nối Chrome Extension.')
       }
-      const platforms = ['facebook', 'tiktok']
-      const results = []
-      for (const [index, platform] of platforms.entries()) {
-        if (index > 0) await new Promise(resolve => setTimeout(resolve, 1800 + Math.floor(Math.random() * 1200)))
+
+      const platforms = configuredChannels
+      const results = await Promise.all(platforms.map(async (platform) => {
         try {
           const res = await apiJson('/api/admin/social/trigger-cycle?platform=' + encodeURIComponent(platform), {
             method: 'POST', headers: { 'x-csrf-token': csrfToken }
           })
-          if (!res?.ok || !res.post) { results.push({ platform, ok: false, error: 'Chưa tạo được bài AI.' }); continue }
-          const result = await handleRealAutoPostThroughExtension(res.post)
-          results.push({ platform, ...result })
-        } catch (err) { results.push({ platform, ok: false, error: err.message }) }
-      }
+          if (!res?.ok || !res.post) return { platform, ok: false, error: 'Chưa tạo được bài AI.' }
+          const postResult = await handleRealAutoPostThroughExtension({ ...res.post, privacy: settings.privacy })
+          return { platform, ...postResult }
+        } catch (err) { return { platform, ok: false, error: err.message } }
+      }))
+
       const okCount = results.filter(r => r.ok).length
-      showNotice(`Hoàn tất ${okCount}/${platforms.length} kênh.`, okCount === platforms.length ? 'success' : 'error')
+      showNotice(`Hoàn tất đăng song song ${okCount}/${platforms.length} kênh.`, okCount === platforms.length ? 'success' : 'error')
       await loadAll()
       setActiveSubTab('logs')
     } catch (err) { showNotice(err.message || 'Lỗi kích hoạt.', 'error') }
@@ -385,9 +413,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
       const res = await apiJson('/api/admin/social/generate', {
         method: 'POST', headers: { 'x-csrf-token': csrfToken },
         body: JSON.stringify({
-          platform: studioPlatform,
-          toneStyle: studioTone,
-          customTopic: studioTopic,
+          platform: studioPlatform, toneStyle: studioTone, customTopic: studioTopic,
           productId: studioSelectionMode === 'custom' ? studioProductId : undefined,
           selectionMode: studioSelectionMode
         })
@@ -407,7 +433,16 @@ export default function AdminSocialAutomation({ csrfToken }) {
   const handlePublishStudio = async (immediate = true) => {
     const targetPrivacy = privacyForSocialPlatform(studioPlatform, studioPrivacy || settings.privacy)
     if (!targetPrivacy) return showNotice('Kênh không được hỗ trợ.', 'error')
-    const draft = { ...studioDraft, platform: studioPlatform, privacy: targetPrivacy }
+    const chosenGroup = studioPlatform === 'facebook' && studioTargetGroup
+      ? groups.find((g) => g.groupName === studioTargetGroup)
+      : null
+    const draft = {
+      ...studioDraft,
+      platform: studioPlatform,
+      privacy: targetPrivacy,
+      targetGroup: chosenGroup ? chosenGroup.groupName : 'Trang cá nhân đang đăng nhập',
+      targetGroupUrl: chosenGroup ? chosenGroup.groupUrl : ''
+    }
     if (immediate) return handleRealAutoPostThroughExtension(draft)
 
     try {
@@ -418,7 +453,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
           productId: studioDraft.productId || '1', productName: studioDraft.productName,
           productPrice: studioDraft.productPrice, productImage: studioDraft.productImage,
           platform: studioPlatform, title: studioDraft.title, content: studioDraft.content,
-          hashtags: studioDraft.hashtags, targetGroup: studioTargetGroup || undefined,
+          hashtags: studioDraft.hashtags, targetGroup: draft.targetGroup,
           privacy: targetPrivacy, publishImmediately: false
         })
       })
@@ -431,25 +466,32 @@ export default function AdminSocialAutomation({ csrfToken }) {
   }
 
   const handleRealAutoPostThroughExtension = async (targetPost) => {
+    const post = { ...studioDraft, ...(targetPost || {}) }
+    const platform = String(post.platform || studioPlatform || 'facebook').toLowerCase()
+    if (!['facebook', 'tiktok'].includes(platform)) {
+      showNotice('Kênh không được hỗ trợ.', 'error')
+      return { ok: false, platform }
+    }
+    if (postingBusy[platform]) {
+      showNotice(`Kênh ${platform.toUpperCase()} đang đăng bài — bạn vẫn có thể đăng song song kênh còn lại!`, 'info')
+      return { ok: false, platform }
+    }
+
     if (targetPost?.id) autoPostAttemptedIdsRef.current.add(String(targetPost.id))
     let postId = targetPost?.id || null
-    let platform = String(targetPost?.platform || 'unknown').toLowerCase()
     let failureCode = null
     let livePostUrl = null
     let livePostId = null
 
     try {
-      setRealPostingBusy(true)
-      const post = { ...studioDraft, ...(targetPost || {}) }
-      platform = (post.platform || studioPlatform || 'facebook').toLowerCase()
-      if (!['facebook', 'tiktok'].includes(platform)) throw new Error('Kênh không được hỗ trợ.')
+      setPostingBusy((cur) => ({ ...cur, [platform]: true }))
 
       const productImage = post.productImage || studioDraft.productImage
-      if (!productImage) throw new Error('Thiếu ảnh sản phẩm.')
+      if (!productImage) throw new Error('Thiếu ảnh sản phẩm — hãy bấm "Tạo bài bằng AI" trước.')
       const imageUrl = new URL(productImage, window.location.origin).href
       const fullText = formatPostText(post)
       if (!fullText) throw new Error('Thiếu nội dung bài viết.')
-      const targetPrivacy = privacyForSocialPlatform(platform, post.privacy || settings.privacy || 'only_me')
+      const targetPrivacy = privacyForSocialPlatform(platform, post.privacy || studioPrivacy || settings.privacy || 'only_me')
       if (!targetPrivacy) throw new Error('Quyền riêng tư không hợp lệ.')
 
       postId = post.id || postId
@@ -460,6 +502,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
             productId: post.productId || '1', productName: post.productName || 'Sản phẩm OmniCart',
             productPrice: post.productPrice || 0, productImage, platform,
             title: post.title || '', content: post.content || '', hashtags: post.hashtags || '',
+            targetGroup: post.targetGroup || 'Trang cá nhân đang đăng nhập',
             privacy: targetPrivacy, publishImmediately: false
           })
         })
@@ -470,7 +513,10 @@ export default function AdminSocialAutomation({ csrfToken }) {
 
       const reply = await sendExtensionMessage('AUTO_POST', {
         platform,
-        post: { postId, title: post.title || '', content: fullText, hashtags: post.hashtags || '', privacy: targetPrivacy, imageUrl }
+        post: {
+          postId, title: post.title || '', content: fullText, hashtags: post.hashtags || '',
+          privacy: targetPrivacy, targetGroupUrl: post.targetGroupUrl || '', imageUrl
+        }
       })
 
       if (reply?.error === 'EXTENSION_NOT_DETECTED') {
@@ -483,14 +529,10 @@ export default function AdminSocialAutomation({ csrfToken }) {
       if (reply?.ok === true && result?.ok === true && result.pendingReview === true) {
         await apiJson(`/api/admin/social/posts/${encodeURIComponent(postId)}/pending-review`, {
           method: 'POST', headers: { 'x-csrf-token': csrfToken },
-          body: JSON.stringify({
-            platform, privacy: result.privacy || targetPrivacy,
-            message: 'Đang chờ TikTok xét duyệt (~2–3 phút).'
-          })
+          body: JSON.stringify({ platform, privacy: result.privacy || targetPrivacy, message: 'Đang chờ TikTok xét duyệt (~2–3 phút).' })
         })
         showNotice('⏳ Đã gửi bài lên TikTok — đang chờ xét duyệt.', 'info')
         await loadAll()
-        setActiveSubTab('logs')
         return { ok: true, pendingReview: true, platform }
       }
 
@@ -512,7 +554,6 @@ export default function AdminSocialAutomation({ csrfToken }) {
 
       showNotice(`✅ Đăng ${platform === 'facebook' ? 'Facebook' : 'TikTok'} thành công!`)
       await loadAll()
-      setActiveSubTab('logs')
       return { ok: true, platform, postUrl: result.postUrl }
     } catch (err) {
       const errorMessage = err.message || 'Lỗi đăng bài'
@@ -528,7 +569,9 @@ export default function AdminSocialAutomation({ csrfToken }) {
       }
       showNotice(errorMessage, 'error')
       return { ok: false, platform, error: errorMessage }
-    } finally { setRealPostingBusy(false) }
+    } finally {
+      setPostingBusy((cur) => ({ ...cur, [platform]: false }))
+    }
   }
 
   const getExtensionPostErrorMessage = (code) => ({
@@ -540,40 +583,41 @@ export default function AdminSocialAutomation({ csrfToken }) {
     TIKTOK_NETWORK_OFFLINE: 'TikTok đang mất mạng.',
     TIKTOK_DESCRIPTION_NOT_INSERTED: 'Không điền được Mô tả & Hashtag TikTok.',
     FACEBOOK_PUBLIC_NOT_CONFIRMED: 'Không đổi được sang Công khai trên Facebook.',
-    FACEBOOK_ONLY_ME_NOT_CONFIRMED: 'Không đổi được sang Chỉ mình tôi trên Facebook.'
+    FACEBOOK_ONLY_ME_NOT_CONFIRMED: 'Không đổi được sang Chỉ mình tôi trên Facebook.',
+    TIKTOK_PRIVACY_NOT_CONFIRMED: 'Không xác nhận được quyền riêng tư trên TikTok Studio.'
   }[code] || `Chưa xác nhận đăng thành công (${code}).`)
 
   useEffect(() => {
     if (!settings.isActive || settings.mode !== 'full_auto' || !extensionConnected) return undefined
     let disposed = false
-    const pollNextReadyPost = async () => {
-      if (disposed || autoPostInFlightRef.current || batchPosting || realPostingBusy) return
+    const pollNextReadyPosts = async () => {
+      if (disposed || autoPostInFlightRef.current || batchPosting) return
       autoPostInFlightRef.current = true
       try {
         const response = await apiJson('/api/admin/social/posts')
         const availablePosts = Array.isArray(response?.posts) ? response.posts : []
         setPosts(availablePosts)
-        const nextPost = availablePosts
-          .filter(post => (post.status === 'ready_for_publish' || post.status === 'ready_for_api') &&
-            ['facebook', 'tiktok'].includes(String(post.platform || '').toLowerCase()) &&
-            post.id && !autoPostAttemptedIdsRef.current.has(String(post.id)))
-          .sort((a, b) => Date.parse(b.createdAt || b.triggerTime || 0) - Date.parse(a.createdAt || a.triggerTime || 0))[0]
-        if (!nextPost || disposed) return
-        const remainingGapMs = (1800 + Math.floor(Math.random() * 1200)) - (Date.now() - autoPostLastAttemptAtRef.current)
-        if (remainingGapMs > 0) await new Promise(resolve => setTimeout(resolve, remainingGapMs))
-        if (disposed) return
-        autoPostAttemptedIdsRef.current.add(String(nextPost.id))
-        autoPostLastAttemptAtRef.current = Date.now()
-        await handleRealAutoPostThroughExtension(nextPost)
+        for (const plat of configuredChannels) {
+          if (disposed || postingBusy[plat]) continue
+          const nextPost = availablePosts
+            .filter(post => (post.status === 'ready_for_publish' || post.status === 'ready_for_api') &&
+              String(post.platform || '').toLowerCase() === plat &&
+              post.id && !autoPostAttemptedIdsRef.current.has(String(post.id)))
+            .sort((a, b) => Date.parse(b.createdAt || b.triggerTime || 0) - Date.parse(a.createdAt || a.triggerTime || 0))[0]
+          if (nextPost) {
+            autoPostAttemptedIdsRef.current.add(String(nextPost.id))
+            handleRealAutoPostThroughExtension({ ...nextPost, privacy: nextPost.privacy || settings.privacy })
+          }
+        }
       } catch (_) {}
       finally { autoPostInFlightRef.current = false }
     }
-    pollNextReadyPost()
-    const timer = setInterval(pollNextReadyPost, 10000)
+    pollNextReadyPosts()
+    const timer = setInterval(pollNextReadyPosts, 10000)
     return () => { disposed = true; clearInterval(timer) }
-  }, [settings.isActive, settings.mode, extensionConnected, batchPosting, realPostingBusy])
+  }, [settings.isActive, settings.mode, settings.channels, extensionConnected, batchPosting, postingBusy.facebook, postingBusy.tiktok])
 
-  // Cào bài Viral theo Chủ đề (FB Bài >= 1K • FB Reels >= 10K • TikTok >= 1M)
+  // Cào Viral (FB Bài ≥ 1K • FB Reels ≥ 5K • TikTok ≥ 1M)
   const handleScrapeRealViralThroughExtension = async (overrideCfg = null) => {
     if (scrapingViralBusy) return
     const activeTopic = overrideCfg?.topic || viralTopic
@@ -589,15 +633,12 @@ export default function AdminSocialAutomation({ csrfToken }) {
         ? activeCustomTopic
         : (VIRAL_TOPICS.find(([k]) => k === activeTopic)?.[1]?.replace(/^[^\p{L}\p{N}]+/u, '').trim() || '')
 
-      // Bước 1: Dùng Model AI Local (qwen3.5:4b) sinh 6-8 từ khóa đa dạng theo chủ đề
-      let fbKeywords = []
-      let ttKeywords = []
+      let fbKeywords = [], ttKeywords = []
       if (activeTopic !== 'all') {
-        showNotice(`🤖 AI Local đang mở rộng đa từ khóa cho chủ đề "${topicLabel}"...`, 'info')
+        showNotice(`🤖 AI Local đang mở rộng từ khóa "${topicLabel}"...`, 'info')
         try {
           const expanded = await apiJson('/api/admin/social/ai/expand-topic', {
-            method: 'POST',
-            headers: { 'x-csrf-token': csrfToken },
+            method: 'POST', headers: { 'x-csrf-token': csrfToken },
             body: JSON.stringify({ topicKey: activeTopic, customTopic: activeCustomTopic })
           })
           fbKeywords = expanded?.fbKeywords || []
@@ -605,95 +646,43 @@ export default function AdminSocialAutomation({ csrfToken }) {
         } catch (_) {}
       }
 
-      showNotice(`🔥 Đang cào bài Viral (${topicLabel || 'Tất cả'} · FB: ${activeFbSource === 'feed' ? 'Trang chủ' : activeFbSource === 'reels' ? 'Thước phim' : 'Trang chủ + Reels'})...`, 'info')
+      showNotice(`🔥 Đang cào Viral (${topicLabel || 'Tất cả'} • FB Bài ≥1K • FB Reels ≥5K • TikTok ≥1M)...`, 'info')
       const res = await sendExtensionMessage('FETCH_REAL_VIRAL', {
         platform: overrideCfg?.platform || 'both',
         fbCount: overrideCfg?.fbCount || 10,
         tiktokCount: overrideCfg?.tiktokCount || 10,
         fbFeedMinLikes: overrideCfg?.fbFeedMinLikes ?? 1000,
-        fbReelMinLikes: overrideCfg?.fbReelMinLikes ?? 10000,
+        fbReelMinLikes: overrideCfg?.fbReelMinLikes ?? 5000,
         tiktokMinLikes: overrideCfg?.tiktokMinLikes ?? 1000000,
         fbSourceMode: activeFbSource,
         topic: activeTopic,
         customTopic: activeCustomTopic,
-        topicLabel,
-        fbKeywords,
-        ttKeywords,
+        topicLabel, fbKeywords, ttKeywords,
         excludeUrls: viralPosts.map(v => v.postUrl).filter(Boolean)
       })
       if (res?.error === 'EXTENSION_NOT_DETECTED') { setShowExtensionHelp(true); throw new Error('Chưa kết nối Chrome Extension.') }
 
-      if (res?.data?.streamed === true) {
-        // Bên nào xong trước đã được lưu tức thì qua OMNICART_VIRAL_BATCH, chỉ cần đồng bộ lại danh sách
-        const resViral = await apiJson('/api/admin/social/viral')
-        if (resViral?.posts) setViralPosts(resViral.posts)
-        showNotice('✅ Hoàn tất cào bài Viral theo thời gian thực!')
-        setActiveSubTab('groups')
-        return
-      }
-
-      let scrapedPosts = res?.data?.posts || []
-      if (scrapedPosts.length > 0) {
-        // Bước 2: Dùng Model AI Local lọc bài sai chủ đề, tự gắn tag & xóa bài trùng lặp
-        showNotice(`🤖 AI Local đang phân loại thể loại, gắn tag & lọc trùng ${scrapedPosts.length} bài...`, 'info')
-        let removedInfo = ''
-        try {
-          const classified = await apiJson('/api/admin/social/ai/classify-viral', {
-            method: 'POST',
-            headers: { 'x-csrf-token': csrfToken },
-            body: JSON.stringify({
-              requestedTopic: activeTopic,
-              requestedTopicLabel: topicLabel,
-              posts: scrapedPosts
-            })
-          })
-          if (classified?.ok && Array.isArray(classified.posts)) {
-            scrapedPosts = classified.posts
-            if (classified.removedOffTopic > 0 || classified.removedDuplicates > 0) {
-              removedInfo = ` (AI lọc bỏ ${classified.removedOffTopic} sai tag, ${classified.removedDuplicates} trùng)`
-            }
-          }
-        } catch (_) {}
-
-        if (scrapedPosts.length > 0) {
-          const saved = await apiJson('/api/admin/social/viral/import-real', {
-            method: 'POST',
-            headers: { 'x-csrf-token': csrfToken },
-            body: JSON.stringify({ posts: scrapedPosts })
-          })
-          if (saved?.posts) setViralPosts(saved.posts)
-          else {
-            const resViral = await apiJson('/api/admin/social/viral')
-            if (resViral?.posts) setViralPosts(resViral.posts)
-          }
-          const fbAdded = scrapedPosts.filter(p => p.platform === 'facebook').length
-          const ttAdded = scrapedPosts.filter(p => p.platform === 'tiktok').length
-          showNotice(`✅ Đã lưu: Facebook +${fbAdded} • TikTok +${ttAdded} bài${removedInfo}.`)
-          setActiveSubTab('groups')
-        } else {
-          showNotice(`Không còn bài nào đạt đúng chủ đề "${topicLabel}" sau khi AI lọc${removedInfo}.`, 'info')
-        }
-      } else {
-        showNotice('Không tìm thấy thêm bài viral nào đạt ngưỡng.', 'error')
-      }
+      const resViral = await apiJson('/api/admin/social/viral')
+      if (resViral?.posts) setViralPosts(resViral.posts)
+      const totalNew = (res?.data?.posts || []).length
+      showNotice(totalNew > 0 ? `✅ Hoàn tất cào Viral (+${totalNew} bài mới)!` : '✅ Đã đồng bộ xong danh sách bài Viral.')
+      setActiveSubTab('groups')
     } catch (err) { showNotice(err.message || 'Lỗi cào bài viral.', 'error') }
     finally { setScrapingViralBusy(false) }
   }
 
-  // Nút dùng AI Local phân loại lại & lọc trùng toàn bộ kho bài Viral hiện có
   const handleAiCleanExistingViral = async () => {
     if (aiCleaningViral || !viralPosts.length) return
     try {
       setAiCleaningViral(true)
-      showNotice(`🤖 AI Local đang nhận diện thể loại, tự gắn tag & lọc trùng ${viralPosts.length} bài hiện có...`, 'info')
+      showNotice(`🤖 AI Local đang phân loại xu hướng, gắn tag & lọc trùng ${viralPosts.length} bài...`, 'info')
       const res = await apiJson('/api/admin/social/ai/classify-viral', {
-        method: 'POST',
-        headers: { 'x-csrf-token': csrfToken },
+        method: 'POST', headers: { 'x-csrf-token': csrfToken },
         body: JSON.stringify({ requestedTopic: 'all', requestedTopicLabel: '', posts: [] })
       })
       if (res?.ok && Array.isArray(res.posts)) {
         setViralPosts(res.posts)
-        showNotice(`✅ AI đã gắn tag & làm gọn còn ${res.posts.length} bài (đã lọc ${res.removedDuplicates || 0} bài trùng).`)
+        showNotice(`✅ AI đã phân loại chuẩn xác ${res.posts.length} bài (lọc ${res.removedDuplicates || 0} bài trùng).`)
       }
     } catch (err) { showNotice(err.message || 'Lỗi lọc AI.', 'error') }
     finally { setAiCleaningViral(false) }
@@ -704,8 +693,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
     try {
       setScrapingGroupsBusy(true)
       const res = await sendExtensionMessage('SCRAPE_FB_GROUPS', {
-        count: 5,
-        keyword: groupKeyword.trim(),
+        count: 5, keyword: groupKeyword.trim(),
         excludeUrls: groups.map(g => g.groupUrl).filter(Boolean),
         excludeNames: groups.map(g => g.groupName).filter(Boolean)
       })
@@ -832,13 +820,10 @@ export default function AdminSocialAutomation({ csrfToken }) {
   }, [viralPosts])
 
   const matchesViralFilters = (v) => {
-    if (viralFilterTopic !== 'all') {
-      const cat = String(v.category || '').trim().toLowerCase()
-      if (cat !== viralFilterTopic.toLowerCase()) return false
-    }
+    if (viralFilterTopic !== 'all' && String(v.category || '').trim().toLowerCase() !== viralFilterTopic.toLowerCase()) return false
     if (viralSearch.trim()) {
       const q = viralSearch.trim().toLowerCase()
-      const hay = `${v.title || ''} ${v.category || ''} ${v.trendingTopic || ''} ${v.summary || ''}`.toLowerCase()
+      const hay = `${v.title || ''} ${v.category || ''} ${v.trendingTopic || ''} ${v.summary || ''} ${v.authorName || ''}`.toLowerCase()
       if (!hay.includes(q)) return false
     }
     return true
@@ -856,9 +841,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
   }, [viralPosts, fbViralSort, viralFilterTopic, viralFbKindFilter, viralSearch])
 
   const tiktokViralAll = useMemo(() => {
-    const list = viralPosts.filter((v) =>
-      String(v.platform || '').toLowerCase() === 'tiktok' && matchesViralFilters(v)
-    )
+    const list = viralPosts.filter((v) => String(v.platform || '').toLowerCase() === 'tiktok' && matchesViralFilters(v))
     return sortViralList(list, ttViralSort)
   }, [viralPosts, ttViralSort, viralFilterTopic, viralSearch])
 
@@ -867,6 +850,10 @@ export default function AdminSocialAutomation({ csrfToken }) {
     try { return new Date(isoString).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) }
     catch { return isoString }
   }
+
+  const triggerBtnLabel = configuredChannels.length === 2
+    ? '⚡ Đăng FB + TikTok'
+    : configuredChannels[0] === 'facebook' ? '⚡ Đăng Facebook' : '⚡ Đăng TikTok'
 
   return (
     <div className="admin-social-workspace admin-social-posting admin-social-automation" data-module="social-automation">
@@ -877,20 +864,17 @@ export default function AdminSocialAutomation({ csrfToken }) {
         </div>
       )}
 
-      {/* KPI Banner — Gọn gàng */}
       <section className="social-kpi-banner">
         <div className="social-kpi-banner__head">
           <div className="social-kpi-title">
             <span style={{ fontSize: '22px' }}>📢</span>
             <h2>Tự Động Đăng Bài MXH</h2>
             <span className={'social-status-pill ' + (settings.isActive ? 'is-active' : 'is-paused')}>
-              {settings.isActive
-                ? `● Đang chạy (${currentIntervalKey === '2m' ? '2 phút' : currentIntervalKey === '1' ? '1 giờ' : '4 giờ'})`
-                : '○ Tạm dừng'}
+              {settings.isActive ? `● Đang chạy (${currentIntervalKey === '2m' ? '2 phút' : currentIntervalKey === '1' ? '1 giờ' : '4 giờ'})` : '○ Tạm dừng'}
             </span>
           </div>
           <div className="social-kpi-actions">
-            <button type="button" className="social-btn-trigger" onClick={handleTriggerCycle} disabled={loading || realPostingBusy || batchPosting}>⚡ Đăng FB + TikTok</button>
+            <button type="button" className="social-btn-trigger" onClick={handleTriggerCycle} disabled={loading || batchPosting}>{batchPosting ? '⏳ Đang chạy...' : triggerBtnLabel}</button>
             <button type="button" className="social-btn-secondary" onClick={loadAll} disabled={loading}>🔄 Làm mới</button>
           </div>
         </div>
@@ -904,31 +888,46 @@ export default function AdminSocialAutomation({ csrfToken }) {
         </div>
       </section>
 
-      {/* Extension Bar — Tối giản, bỏ chữ thừa */}
-      <section className="social-extension-bar" style={{
-        margin: '4px 0', padding: '10px 14px',
-        background: 'linear-gradient(135deg, rgba(16, 42, 30, 0.95), rgba(24, 76, 52, 0.95))',
-        border: '1px solid #28543a', borderRadius: '10px', color: '#edf7ef',
-        display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '10px'
-      }}>
+      <section className="social-extension-bar">
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{ fontSize: '20px' }}>👁️</span>
-          <strong style={{ fontSize: '13px' }}>OmniVision v3.3</strong>
-          <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '12px', background: extensionConnected ? '#10b981' : '#f59e0b', color: '#fff' }}>
+          <strong style={{ fontSize: '13px' }}>OmniVision v3.5</strong>
+          <span className={'social-ext-badge ' + (extensionConnected ? 'is-on' : 'is-wait')}>
             {extensionConnected ? '🟢 Đã kết nối' : '🟡 Chờ Extension'}
           </span>
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button type="button" className="social-btn-trigger" style={{ fontSize: '12px', padding: '6px 12px' }} disabled={realPostingBusy || batchPosting || !studioDraft.productImage || !studioDraft.content} onClick={() => handleRealAutoPostThroughExtension({ ...studioDraft, platform: 'facebook' })}>🚀 Đăng FB</button>
-          <button type="button" className="social-btn-trigger" style={{ fontSize: '12px', padding: '6px 12px', background: '#000', borderColor: '#fe2c55', color: '#fe2c55' }} disabled={realPostingBusy || batchPosting || !studioDraft.productImage || !studioDraft.content} onClick={() => handleRealAutoPostThroughExtension({ ...studioDraft, platform: 'tiktok' })}>🚀 Đăng TikTok</button>
-          <button type="button" className="social-btn-secondary" style={{ fontSize: '12px', padding: '6px 12px', background: '#0f172a', borderColor: '#334155', color: '#38bdf8' }} disabled={scrapingViralBusy} onClick={handleScrapeRealViralThroughExtension}>
+          <button
+            type="button"
+            className="social-btn-trigger"
+            style={{ fontSize: '12px', padding: '6px 12px' }}
+            disabled={postingBusy.facebook || !studioDraft.productImage || !studioDraft.content}
+            onClick={() => handleRealAutoPostThroughExtension({ ...studioDraft, platform: 'facebook', privacy: studioPrivacy })}
+          >
+            {postingBusy.facebook ? '⏳ Đang đăng FB...' : '🚀 Đăng FB'}
+          </button>
+          <button
+            type="button"
+            className="social-btn-trigger"
+            style={{ fontSize: '12px', padding: '6px 12px', background: '#000', borderColor: '#fe2c55', color: '#fe2c55' }}
+            disabled={postingBusy.tiktok || !studioDraft.productImage || !studioDraft.content}
+            onClick={() => handleRealAutoPostThroughExtension({ ...studioDraft, platform: 'tiktok', privacy: studioPrivacy })}
+          >
+            {postingBusy.tiktok ? '⏳ Đang đăng TikTok...' : '🚀 Đăng TikTok'}
+          </button>
+          <button
+            type="button"
+            className="social-btn-secondary"
+            style={{ fontSize: '12px', padding: '6px 12px', background: '#0f172a', borderColor: '#334155', color: '#38bdf8' }}
+            disabled={scrapingViralBusy}
+            onClick={() => handleScrapeRealViralThroughExtension()}
+          >
             {scrapingViralBusy ? '⏳ Đang cào...' : '🔥 Cào Viral'}
           </button>
           <button type="button" className="social-btn-secondary" style={{ fontSize: '12px', padding: '6px 10px' }} onClick={() => setShowExtensionHelp(true)}>📖 Hướng dẫn</button>
         </div>
       </section>
 
-      {/* Subnav — Ngắn gọn */}
       <nav className="social-subnav" aria-label="Phân hệ tiếp thị MXH">
         <button type="button" className={'social-subnav-btn ' + (activeSubTab === 'settings' ? 'is-active' : '')} onClick={() => setActiveSubTab('settings')}>⚙️ Cấu hình</button>
         <button type="button" className={'social-subnav-btn ' + (activeSubTab === 'studio' ? 'is-active' : '')} onClick={() => setActiveSubTab('studio')}>✍️ Soạn bài AI</button>
@@ -936,18 +935,18 @@ export default function AdminSocialAutomation({ csrfToken }) {
         <button type="button" className={'social-subnav-btn ' + (activeSubTab === 'logs' ? 'is-active' : '')} onClick={() => setActiveSubTab('logs')}>📋 Nhật ký ({posts.length})</button>
       </nav>
 
-      {/* TAB 1: CẤU HÌNH */}
+      {/* TAB 1: CẤU HÌNH + 5 PANEL TỰ ĐỘNG HÓA */}
       {activeSubTab === 'settings' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <section className="social-panel">
-            <div className="social-panel__heading"><h3>⚙️ Cấu hình tự động</h3></div>
+            <div className="social-panel__heading"><h3>⚙️ Cấu hình đăng bài tự động</h3></div>
             <form onSubmit={handleSaveSettings}>
               <div className="social-form-grid">
                 <div className="social-field"><label htmlFor="cfg-status">Trạng thái</label><select id="cfg-status" className="social-select" value={settings.isActive ? '1' : '0'} onChange={e => setSettings({ ...settings, isActive: e.target.value === '1' })}><option value="1">🟢 Bật</option><option value="0">🔴 Tắt</option></select></div>
                 <div className="social-field"><label htmlFor="cfg-mode">Chế độ</label><select id="cfg-mode" className="social-select" value={settings.mode} onChange={e => setSettings({ ...settings, mode: e.target.value })}><option value="full_auto">🚀 Tự động (Full-Auto)</option><option value="semi_auto">📝 Duyệt trước (Semi-Auto)</option></select></div>
                 <div className="social-field"><label htmlFor="cfg-interval">Chu kỳ đăng</label><select id="cfg-interval" className="social-select" value={currentIntervalKey} onChange={e => handleIntervalChange(e.target.value)}><option value="2m">⚡ Mỗi 2 phút</option><option value="1">🕐 Mỗi 1 giờ</option><option value="4">🕓 Mỗi 4 giờ</option></select></div>
-                <div className="social-field"><label htmlFor="cfg-privacy">Quyền riêng tư</label><select id="cfg-privacy" className="social-select" value={settings.privacy || 'only_me'} onChange={e => setSettings({ ...settings, privacy: e.target.value })}><option value="only_me">🔒 Chỉ mình tôi</option><option value="public">🌐 Công khai</option></select></div>
-                <div className="social-field"><label htmlFor="cfg-channels">Kênh đăng</label><select id="cfg-channels" className="social-select" value={settings.channels} onChange={e => setSettings({ ...settings, channels: e.target.value })}><option value="facebook,tiktok">Facebook + TikTok</option><option value="facebook">Chỉ Facebook</option><option value="tiktok">Chỉ TikTok</option></select></div>
+                <div className="social-field"><label htmlFor="cfg-privacy">Quyền riêng tư</label><select id="cfg-privacy" className="social-select" value={settings.privacy || 'only_me'} onChange={e => { const v = e.target.value; setSettings({ ...settings, privacy: v }); setStudioPrivacy(v) }}><option value="only_me">🔒 Chỉ mình tôi</option><option value="public">🌐 Công khai</option></select></div>
+                <div className="social-field"><label htmlFor="cfg-channels">Kênh đăng</label><select id="cfg-channels" className="social-select" value={settings.channels} onChange={e => setSettings({ ...settings, channels: e.target.value })}><option value="facebook,tiktok">Facebook + TikTok (Song song)</option><option value="facebook">Chỉ Facebook</option><option value="tiktok">Chỉ TikTok</option></select></div>
                 <div className="social-field"><label htmlFor="cfg-category">Danh mục sản phẩm</label><select id="cfg-category" className="social-select" value={settings.preferredCategory} onChange={e => setSettings({ ...settings, preferredCategory: e.target.value })}><option value="all">Tất cả</option><option value="Đồ gia dụng">Đồ gia dụng</option><option value="Thời trang">Thời trang</option><option value="Công nghệ">Công nghệ</option></select></div>
                 <div className="social-field"><label htmlFor="cfg-tone">Phong cách viết</label><select id="cfg-tone" className="social-select" value={settings.toneStyle} onChange={e => setSettings({ ...settings, toneStyle: e.target.value })}><option value="viral_engaging">Bắt trend</option><option value="humorous">Hài hước</option><option value="fomo_sales">Chốt đơn gấp</option><option value="authentic_review">Review chân thực</option><option value="storytelling">Kể chuyện</option></select></div>
                 <div className="social-field"><label htmlFor="cfg-hotline">Hotline</label><input id="cfg-hotline" type="text" className="social-input" value={settings.contactHotline} onChange={e => setSettings({ ...settings, contactHotline: e.target.value })} /></div>
@@ -984,8 +983,8 @@ export default function AdminSocialAutomation({ csrfToken }) {
             <div className="social-studio-grid">
               <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <div style={{ display: 'flex', gap: '10px' }}>
-                  <button type="button" className={'social-action-btn ' + (studioPlatform === 'facebook' ? 'social-action-btn--primary' : '')} style={{ flex: 1, padding: '10px' }} onClick={() => setStudioPlatform('facebook')}>🔵 Facebook</button>
-                  <button type="button" className={'social-action-btn ' + (studioPlatform === 'tiktok' ? 'social-action-btn--primary' : '')} style={{ flex: 1, padding: '10px' }} onClick={() => setStudioPlatform('tiktok')}>🎵 TikTok</button>
+                  <button type="button" className={'social-action-btn ' + (studioPlatform === 'facebook' ? 'social-action-btn--primary' : '')} style={{ flex: 1, padding: '10px', justifyContent: 'center' }} onClick={() => setStudioPlatform('facebook')}>🔵 Facebook {postingBusy.facebook ? '(Đang đăng...)' : ''}</button>
+                  <button type="button" className={'social-action-btn ' + (studioPlatform === 'tiktok' ? 'social-action-btn--primary' : '')} style={{ flex: 1, padding: '10px', justifyContent: 'center' }} onClick={() => setStudioPlatform('tiktok')}>🎵 TikTok {postingBusy.tiktok ? '(Đang đăng...)' : ''}</button>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   <div className="social-field">
@@ -1006,7 +1005,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
                 </div>
                 {studioSelectionMode === 'custom' && (
                   <div className="social-field">
-                    <label htmlFor="studio-product-select">Chọn sản phẩm từ kho ({catalogList.length})</label>
+                    <label htmlFor="studio-product-select">Sản phẩm trong kho ({catalogList.length})</label>
                     <select
                       id="studio-product-select"
                       className="social-select"
@@ -1015,45 +1014,35 @@ export default function AdminSocialAutomation({ csrfToken }) {
                         const pid = e.target.value
                         setStudioProductId(pid)
                         const found = catalogList.find(p => String(p.id) === String(pid))
-                        if (found) {
-                          setStudioDraft(cur => ({
-                            ...cur,
-                            productId: found.id,
-                            productName: found.name,
-                            productPrice: found.price,
-                            productImage: found.image
-                          }))
-                        }
+                        if (found) setStudioDraft(cur => ({ ...cur, productId: found.id, productName: found.name, productPrice: found.price, productImage: found.image }))
                       }}
                     >
-                      <option value="">-- Bấm để chọn sản phẩm --</option>
-                      {catalogList.map(p => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({Number(p.price || 0).toLocaleString('vi-VN')} đ)
-                        </option>
-                      ))}
+                      <option value="">-- Chọn sản phẩm --</option>
+                      {catalogList.map(p => <option key={p.id} value={p.id}>{p.name} ({Number(p.price || 0).toLocaleString('vi-VN')} đ)</option>)}
                     </select>
                   </div>
                 )}
-                <div className="social-field">
-                  <label htmlFor="studio-tone">Phong cách</label>
-                  <select id="studio-tone" className="social-select" value={studioTone} onChange={e => setStudioTone(e.target.value)}>
-                    <option value="viral_engaging">Bắt trend</option>
-                    <option value="humorous">Hài hước</option>
-                    <option value="fomo_sales">Chốt đơn gấp</option>
-                    <option value="authentic_review">Review chân thực</option>
-                    <option value="storytelling">Kể chuyện</option>
-                  </select>
-                </div>
-                {studioPlatform === 'facebook' && (
+                <div style={{ display: 'grid', gridTemplateColumns: studioPlatform === 'facebook' ? '1fr 1fr' : '1fr', gap: '10px' }}>
                   <div className="social-field">
-                    <label htmlFor="studio-target-group">Nhóm mục tiêu</label>
-                    <select id="studio-target-group" className="social-select" value={studioTargetGroup} onChange={e => setStudioTargetGroup(e.target.value)}>
-                      <option value="">Tự động</option>
-                      {groups.map(grp => <option key={grp.id} value={grp.groupName}>{grp.groupName} ({grp.membersCount.toLocaleString('vi-VN')} tv)</option>)}
+                    <label htmlFor="studio-tone">Phong cách</label>
+                    <select id="studio-tone" className="social-select" value={studioTone} onChange={e => setStudioTone(e.target.value)}>
+                      <option value="viral_engaging">Bắt trend</option>
+                      <option value="humorous">Hài hước</option>
+                      <option value="fomo_sales">Chốt đơn gấp</option>
+                      <option value="authentic_review">Review chân thực</option>
+                      <option value="storytelling">Kể chuyện</option>
                     </select>
                   </div>
-                )}
+                  {studioPlatform === 'facebook' && (
+                    <div className="social-field">
+                      <label htmlFor="studio-target-group">Nơi đăng Facebook</label>
+                      <select id="studio-target-group" className="social-select" value={studioTargetGroup} onChange={e => setStudioTargetGroup(e.target.value)}>
+                        <option value="">👤 Trang cá nhân (Mặc định)</option>
+                        {groups.map(grp => <option key={grp.id} value={grp.groupName}>👥 {grp.groupName} ({grp.membersCount.toLocaleString('vi-VN')} tv)</option>)}
+                      </select>
+                    </div>
+                  )}
+                </div>
                 <div className="social-field">
                   <label htmlFor="studio-topic">Chủ đề bổ sung</label>
                   <input id="studio-topic" type="text" className="social-input" value={studioTopic} onChange={e => setStudioTopic(e.target.value)} placeholder="VD: Freeship, bảo hành 1 đổi 1..." />
@@ -1066,17 +1055,26 @@ export default function AdminSocialAutomation({ csrfToken }) {
                   <textarea id="studio-draft-content" className="social-textarea" rows={8} value={studioDraft.content} onChange={e => setStudioDraft({ ...studioDraft, content: e.target.value })} />
                 </div>
                 <div style={{ display: 'flex', gap: '10px' }}>
-                  <button type="button" className="social-btn-trigger" style={{ flex: 1, padding: '10px', justifyContent: 'center' }} onClick={() => handlePublishStudio(true)} disabled={loading || realPostingBusy || batchPosting}>🚀 Đăng ngay</button>
-                  <button type="button" className="social-action-btn" style={{ flex: 1, padding: '10px', justifyContent: 'center' }} onClick={() => handlePublishStudio(false)} disabled={loading || realPostingBusy || batchPosting}>⏳ Lưu nháp</button>
+                  <button
+                    type="button"
+                    className="social-btn-trigger"
+                    style={{ flex: 1, padding: '10px', justifyContent: 'center' }}
+                    onClick={() => handlePublishStudio(true)}
+                    disabled={loading || postingBusy[studioPlatform]}
+                  >
+                    {postingBusy[studioPlatform] ? `⏳ Đang đăng ${studioPlatform.toUpperCase()}...` : `🚀 Đăng ngay (${studioPlatform === 'facebook' ? (studioTargetGroup ? 'Nhóm FB' : 'Trang cá nhân') : 'TikTok'})`}
+                  </button>
+                  <button type="button" className="social-action-btn" style={{ flex: 1, padding: '10px', justifyContent: 'center' }} onClick={() => handlePublishStudio(false)} disabled={loading}>⏳ Lưu nháp</button>
                 </div>
               </div>
+
               <div className="social-preview-container">
                 <span className="social-subhead" style={{ fontWeight: 800 }}>Xem trước ({studioPlatform === 'facebook' ? 'Facebook' : 'TikTok'})</span>
                 <div className={'social-preview-card ' + (studioPlatform === 'facebook' ? 'social-preview-card--facebook' : 'social-preview-card--tiktok')}>
                   <div className="preview-header">
                     <div className="preview-avatar">O</div>
                     <div className="preview-author">
-                      <strong>Tài khoản đang đăng nhập <span className="preview-badge-verified">✓</span></strong>
+                      <strong>{studioPlatform === 'facebook' && studioTargetGroup ? studioTargetGroup : 'Trang cá nhân đang đăng nhập'} <span className="preview-badge-verified">✓</span></strong>
                       <small>Vừa xong · {studioPrivacy === 'public' ? 'Công khai 🌐' : 'Chỉ mình tôi 🔒'}</small>
                     </div>
                   </div>
@@ -1095,16 +1093,15 @@ export default function AdminSocialAutomation({ csrfToken }) {
               setStudioSelectionMode('custom')
               setStudioProductId(prod.id)
               setStudioDraft((cur) => ({ ...cur, productId: prod.id, productName: prod.name, productPrice: prod.price, productImage: prod.image }))
-              showNotice(`Đã chọn "${prod.name}" vào Soạn bài AI — bấm "Tạo bài bằng AI" ngay!`)
+              showNotice(`Đã chọn "${prod.name}" vào Soạn bài AI!`)
             }}
           />
         </div>
       )}
 
-      {/* TAB 3: HỘI NHÓM & BÀI VIRAL THEO CHỦ ĐỀ */}
+      {/* TAB 3: HỘI NHÓM & KHO BÀI VIRAL 2 CỘT TRÁI (FB) — PHẢI (TIKTOK) */}
       {activeSubTab === 'groups' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {/* Hội nhóm Facebook */}
           <section className="social-panel">
             <div className="social-panel__heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
               <h3>👥 Hội nhóm Facebook</h3>
@@ -1136,18 +1133,11 @@ export default function AdminSocialAutomation({ csrfToken }) {
                 <tbody>
                   {filteredAndSortedGroups.map(grp => (
                     <tr key={grp.id}>
-                      <td>
-                        <strong>{grp.groupName}</strong>
-                        <div style={{ fontSize: '11px' }}><a href={grp.groupUrl} target="_blank" rel="noopener noreferrer" className="social-table-link">{grp.groupUrl} ↗</a></div>
-                      </td>
+                      <td><strong>{grp.groupName}</strong><div style={{ fontSize: '11px' }}><a href={grp.groupUrl} target="_blank" rel="noopener noreferrer" className="social-table-link">{grp.groupUrl} ↗</a></div></td>
                       <td>{grp.category}</td>
                       <td><strong>{Number(grp.membersCount || 0).toLocaleString('vi-VN')}</strong></td>
                       <td><span className="status-tag status-tag--published">{grp.interactionRate}</span></td>
-                      <td>
-                        <button type="button" className={'social-action-btn ' + (grp.isAutoShare ? 'social-action-btn--primary' : '')} onClick={() => handleToggleGroup(grp.id, grp.isAutoShare)}>
-                          {grp.isAutoShare ? '✓ Bật' : '○ Tắt'}
-                        </button>
-                      </td>
+                      <td><button type="button" className={'social-action-btn ' + (grp.isAutoShare ? 'social-action-btn--primary' : '')} onClick={() => handleToggleGroup(grp.id, grp.isAutoShare)}>{grp.isAutoShare ? '✓ Bật' : '○ Tắt'}</button></td>
                       <td><button type="button" className="social-action-btn social-action-btn--danger" onClick={() => handleDeleteGroup(grp.id)}>Xóa</button></td>
                     </tr>
                   ))}
@@ -1168,105 +1158,66 @@ export default function AdminSocialAutomation({ csrfToken }) {
             </form>
           </section>
 
-          {/* BẢNG BÀI ĐĂNG VIRAL theo Chủ đề — Chia đôi FB (Bài ≥1K • Reels ≥10K) & TikTok (≥ 1M Tim) */}
           <section className="social-panel">
             <div className="social-panel__heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-              <div>
-                <h3>🔥 Bài đăng Viral ({viralPosts.length} bài)</h3>
-                <div className="social-muted-text" style={{ fontSize: '11.5px', marginTop: '2px' }}>
-                  Lọc bài trên Facebook (Bài viết ≥ 1.000 Like • Reels ≥ 10.000 Like) hoặc TikTok (≥ 1.000.000 Tim) theo đúng chủ đề bạn chọn
-                </div>
-              </div>
+              <h3>🔥 Bài đăng Viral ({viralPosts.length} bài)</h3>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                <select
-                  id="viral-fb-source-select"
-                  aria-label="Nguồn cào Facebook"
-                  className="social-sort-select"
-                  value={fbSourceMode}
-                  onChange={e => setFbSourceMode(e.target.value)}
-                >
-                  <option value="both">📘 FB: Trang chủ + Thước phim</option>
-                  <option value="feed">🏠 FB: Chỉ Trang chủ / Bài viết</option>
-                  <option value="reels">🎬 FB: Chỉ Thước phim (Reels)</option>
+                <select id="viral-fb-source-select" aria-label="Nguồn cào Facebook" className="social-sort-select" value={fbSourceMode} onChange={e => setFbSourceMode(e.target.value)}>
+                  <option value="both">📘 FB: Bài viết + Reels</option>
+                  <option value="feed">🏠 FB: Bài viết (≥1K)</option>
+                  <option value="reels">🎬 FB: Thước phim (≥5K)</option>
                 </select>
-                <select
-                  id="viral-topic-select"
-                  aria-label="Chủ đề cào bài viral"
-                  className="social-sort-select"
-                  value={viralTopic}
-                  onChange={e => setViralTopic(e.target.value)}
-                >
+                <select id="viral-topic-select" aria-label="Chủ đề cào bài viral" className="social-sort-select" value={viralTopic} onChange={e => setViralTopic(e.target.value)}>
                   {VIRAL_TOPICS.map(([val, label]) => <option key={val} value={val}>{label}</option>)}
                 </select>
                 {viralTopic === 'custom' && (
-                  <input
-                    type="text"
-                    className="social-input"
-                    style={{ width: '190px', padding: '6px 10px' }}
-                    placeholder="Nhập chủ đề muốn cào..."
-                    value={customViralTopic}
-                    onChange={e => setCustomViralTopic(e.target.value)}
-                  />
+                  <input type="text" className="social-input" style={{ width: '185px', padding: '6px 10px' }} placeholder="Nhập chủ đề..." value={customViralTopic} onChange={e => setCustomViralTopic(e.target.value)} />
                 )}
                 <button type="button" className="social-btn-trigger" onClick={() => handleScrapeRealViralThroughExtension()} disabled={scrapingViralBusy || loading} style={{ fontSize: '12px', padding: '8px 14px' }}>
-                  {scrapingViralBusy ? '⏳ Đang cào...' : '⚡ Cào Bài Viral (AI)'}
+                  {scrapingViralBusy ? '⏳ Đang cào...' : '⚡ Cào Viral (AI)'}
                 </button>
-                <button type="button" className="social-action-btn" onClick={handleAiCleanExistingViral} disabled={aiCleaningViral || viralPosts.length === 0} style={{ fontSize: '12px', padding: '8px 12px' }} title="Dùng AI Local tự nhận diện thể loại, gắn tag & lọc bài trùng">
+                <button type="button" className="social-action-btn" onClick={handleAiCleanExistingViral} disabled={aiCleaningViral || viralPosts.length === 0} style={{ fontSize: '12px', padding: '8px 12px' }}>
                   {aiCleaningViral ? '⏳ AI đang lọc...' : '🤖 AI Gắn Tag & Lọc Trùng'}
                 </button>
                 <button type="button" className="social-action-btn social-action-btn--danger" onClick={handleClearAllViralPosts} disabled={loading || viralPosts.length === 0} style={{ fontSize: '12px', padding: '8px 12px' }}>
-                  🗑️ Xóa tất cả ({viralPosts.length})
+                  🗑️ Xóa ({viralPosts.length})
                 </button>
               </div>
             </div>
 
-            {/* Thanh lọc bài đăng Viral theo chủ đề, nguồn FB & từ khóa */}
             <div style={{ display: 'flex', gap: '10px', marginBottom: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <input
-                type="search"
-                className="social-input"
-                style={{ maxWidth: '260px', padding: '7px 11px' }}
-                placeholder="🔍 Tìm trong bài viral, hashtag..."
-                value={viralSearch}
-                onChange={e => setViralSearch(e.target.value)}
-              />
+              <input type="search" className="social-input" style={{ maxWidth: '250px', padding: '7px 11px' }} placeholder="🔍 Tìm tiêu đề, hashtag, tác giả..." value={viralSearch} onChange={e => setViralSearch(e.target.value)} />
               <div className="social-sort-bar">
-                <label htmlFor="filter-viral-topic">Lọc chủ đề:</label>
+                <label htmlFor="filter-viral-topic">Xu hướng:</label>
                 <select id="filter-viral-topic" className="social-sort-select" value={viralFilterTopic} onChange={e => setViralFilterTopic(e.target.value)}>
-                  <option value="all">Tất cả chủ đề ({viralPosts.length})</option>
+                  <option value="all">Tất cả ({viralPosts.length})</option>
                   {availableViralCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                 </select>
               </div>
               <div className="social-sort-bar">
                 <label htmlFor="filter-fb-kind">Loại FB:</label>
                 <select id="filter-fb-kind" className="social-sort-select" value={viralFbKindFilter} onChange={e => setViralFbKindFilter(e.target.value)}>
-                  <option value="all">Tất cả (Trang chủ + Reels)</option>
-                  <option value="feed">🏠 Chỉ bài Trang chủ</option>
-                  <option value="reels">🎬 Chỉ Thước phim (Reels)</option>
+                  <option value="all">Tất cả</option>
+                  <option value="feed">🏠 Bài viết</option>
+                  <option value="reels">🎬 Thước phim</option>
                 </select>
               </div>
               {(viralFilterTopic !== 'all' || viralFbKindFilter !== 'all' || viralSearch) && (
-                <button type="button" className="social-action-btn" onClick={() => { setViralFilterTopic('all'); setViralFbKindFilter('all'); setViralSearch('') }}>
-                  ✕ Bỏ lọc
-                </button>
+                <button type="button" className="social-action-btn" onClick={() => { setViralFilterTopic('all'); setViralFbKindFilter('all'); setViralSearch('') }}>✕ Bỏ lọc</button>
               )}
-              <span className="social-muted-text" style={{ marginLeft: 'auto' }}>
-                Đang hiển thị: {facebookViralAll.length + tiktokViralAll.length}/{viralPosts.length} bài · Mở link trên 1 tab duy nhất
-              </span>
             </div>
 
-            {/* BỐ CỤC 2 CỘT SONG SONG: FACEBOOK (BÊN TRÁI) & TIKTOK (BÊN PHẢI) */}
-            <div className="social-viral-columns-grid">
-              {/* CỘT TRÁI: TOÀN BỘ FACEBOOK (Bài >=1K • Reels >=10K) */}
+            {/* CHIA 2 CỘT SONG SONG: FACEBOOK TRÁI | TIKTOK PHẢI */}
+            <div className="social-viral-split-grid">
+              {/* CỘT TRÁI: FACEBOOK (Bài ≥1K • Reels ≥5K) */}
               <div className="social-viral-column">
                 <div className="social-viral-column__head social-viral-column__head--fb">
-                  <span>📘 Facebook (Bài ≥1K • Reels ≥10K)</span>
+                  <span>📘 Facebook (Bài ≥1K • Reels ≥5K)</span>
                   <div className="social-viral-head-tools">
                     <select aria-label="Sắp xếp bài viral Facebook" className="social-sort-select social-sort-select--mini" value={fbViralSort} onChange={e => setFbViralSort(e.target.value)}>
-                      <option value="likes_desc">Like (Cao → Thấp)</option>
-                      <option value="likes_asc">Like (Thấp → Cao)</option>
-                      <option value="name_asc">Tên (A → Z)</option>
-                      <option value="name_desc">Tên (Z → A)</option>
+                      <option value="likes_desc">Like ↓</option>
+                      <option value="likes_asc">Like ↑</option>
+                      <option value="name_asc">A → Z</option>
                     </select>
                     <span className="social-viral-count">{facebookViralAll.length} bài</span>
                   </div>
@@ -1275,71 +1226,53 @@ export default function AdminSocialAutomation({ csrfToken }) {
                   <table className="social-table">
                     <thead><tr><th>#</th><th>Bài viết / Thước phim</th><th>Tương tác</th><th>Link</th></tr></thead>
                     <tbody>
-                      {facebookViralAll.map((v, idx) => (
-                        <tr key={v.id}>
-                          <td><strong>{idx + 1}</strong></td>
-                          <td>
-                            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-                              {v.thumbnailUrl ? (
-                                <img
-                                  src={v.thumbnailUrl}
-                                  alt={v.title}
-                                  style={{ width: '44px', height: '44px', objectFit: 'cover', borderRadius: '4px', flexShrink: 0 }}
-                                  onError={(e) => { e.currentTarget.style.display = 'none' }}
-                                />
-                              ) : null}
-                              <div style={{ minWidth: 0, flex: 1 }}>
-                                <div style={{ fontWeight: 700, marginBottom: '2px', wordBreak: 'break-word' }}>{v.title}</div>
-                                {v.authorName && (
-                                  <div style={{ fontSize: '11px', color: 'var(--text-muted, #888)' }}>
-                                    👤 {v.authorUrl ? <a href={v.authorUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit' }}>{v.authorName}</a> : v.authorName}
+                      {facebookViralAll.map((v, idx) => {
+                        const tags = extractHashtagChips(v)
+                        return (
+                          <tr key={v.id}>
+                            <td><strong>{idx + 1}</strong></td>
+                            <td>
+                              <div className="viral-card-cell">
+                                {v.thumbnailUrl
+                                  ? <img src={v.thumbnailUrl} alt={v.title} className="viral-thumb-lg" onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                                  : <div className="viral-thumb-lg viral-thumb-lg--fb">📘</div>}
+                                <div className="viral-card-meta">
+                                  <div className="viral-card-title">{v.title}</div>
+                                  {v.authorName && <div className="viral-card-author">👤 {v.authorUrl ? <a href={v.authorUrl} target="_blank" rel="noopener noreferrer">{v.authorName}</a> : v.authorName}</div>}
+                                  <div className="viral-card-badges">
+                                    <span className="channel-tag channel-tag--facebook">{v.category || 'Xu hướng FB'}</span>
+                                    <span className="viral-kind-badge">{isFacebookReelItem(v) ? '🎬 Reels' : '🏠 Bài viết'}</span>
+                                    {tags.map((t) => <span key={t} className="viral-hashtag-chip">{t}</span>)}
                                   </div>
-                                )}
-                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '3px' }}>
-                                  <span className="channel-tag channel-tag--facebook">{v.category || 'Facebook'}</span>
-                                  <span className="channel-tag channel-tag--external_draft" style={{ fontSize: '10px', padding: '2px 6px' }}>
-                                    {isFacebookReelItem(v) ? '🎬 Thước phim' : '🏠 Trang chủ'}
-                                  </span>
-                                  {v.trendingTopic?.includes('#') && (
-                                    <span style={{ fontSize: '10px', color: '#0284c7' }}>{v.trendingTopic.slice(v.trendingTopic.indexOf('#'))}</span>
-                                  )}
                                 </div>
                               </div>
-                            </div>
-                          </td>
-                          <td style={{ whiteSpace: 'nowrap', fontSize: '11px', lineHeight: '1.4' }}>
-                            <div>👍 <strong>{Number(v.likesCount || 0).toLocaleString('vi-VN')}</strong></div>
-                            {Number(v.commentsCount || 0) > 0 && <div>💬 {Number(v.commentsCount).toLocaleString('vi-VN')}</div>}
-                            {Number(v.sharesCount || 0) > 0 && <div>🔁 {Number(v.sharesCount).toLocaleString('vi-VN')}</div>}
-                          </td>
-                          <td style={{ whiteSpace: 'nowrap' }}>
-                            <button
-                              type="button"
-                              className="social-action-btn social-table-link"
-                              onClick={() => handleOpenViralSingleTab(v.postUrl, 'facebook')}
-                              title="Mở gọn trên 1 tab duy nhất"
-                            >
-                              Mở ↗
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                      {facebookViralAll.length === 0 && <tr><td colSpan={4} className="social-table-empty">Chưa có bài Facebook phù hợp bộ lọc.</td></tr>}
+                            </td>
+                            <td className="viral-metrics-cell">
+                              <div>👍 <strong>{Number(v.likesCount || 0).toLocaleString('vi-VN')}</strong></div>
+                              <div>💬 <strong>{Number(v.commentsCount || 0).toLocaleString('vi-VN')}</strong></div>
+                              {Number(v.sharesCount || 0) > 0 && <div>🔁 {Number(v.sharesCount).toLocaleString('vi-VN')}</div>}
+                            </td>
+                            <td>
+                              <button type="button" className="social-action-btn social-table-link" onClick={() => handleOpenViralSingleTab(v.postUrl, 'facebook')}>Mở ↗</button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                      {facebookViralAll.length === 0 && <tr><td colSpan={4} className="social-table-empty">Chưa có bài Facebook phù hợp.</td></tr>}
                     </tbody>
                   </table>
                 </div>
               </div>
 
-              {/* CỘT PHẢI: TOÀN BỘ TIKTOK (≥ 1M Tim) */}
+              {/* CỘT PHẢI: TIKTOK (≥ 1M Tim) */}
               <div className="social-viral-column">
                 <div className="social-viral-column__head social-viral-column__head--tt">
                   <span>🎵 TikTok (≥ 1M Tim)</span>
                   <div className="social-viral-head-tools">
                     <select aria-label="Sắp xếp bài viral TikTok" className="social-sort-select social-sort-select--mini" value={ttViralSort} onChange={e => setTtViralSort(e.target.value)}>
-                      <option value="likes_desc">Tim (Cao → Thấp)</option>
-                      <option value="likes_asc">Tim (Thấp → Cao)</option>
-                      <option value="name_asc">Tên (A → Z)</option>
-                      <option value="name_desc">Tên (Z → A)</option>
+                      <option value="likes_desc">Tim ↓</option>
+                      <option value="likes_asc">Tim ↑</option>
+                      <option value="name_asc">A → Z</option>
                     </select>
                     <span className="social-viral-count">{tiktokViralAll.length} bài</span>
                   </div>
@@ -1348,53 +1281,38 @@ export default function AdminSocialAutomation({ csrfToken }) {
                   <table className="social-table">
                     <thead><tr><th>#</th><th>Video / Ảnh</th><th>Tương tác</th><th>Link</th></tr></thead>
                     <tbody>
-                      {tiktokViralAll.map((v, idx) => (
-                        <tr key={v.id}>
-                          <td><strong>{idx + 1}</strong></td>
-                          <td>
-                            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-                              {v.thumbnailUrl ? (
-                                <img
-                                  src={v.thumbnailUrl}
-                                  alt={v.title}
-                                  style={{ width: '44px', height: '44px', objectFit: 'cover', borderRadius: '4px', flexShrink: 0 }}
-                                  onError={(e) => { e.currentTarget.style.display = 'none' }}
-                                />
-                              ) : null}
-                              <div style={{ minWidth: 0, flex: 1 }}>
-                                <div style={{ fontWeight: 700, marginBottom: '2px', wordBreak: 'break-word' }}>{v.title}</div>
-                                {v.authorName && (
-                                  <div style={{ fontSize: '11px', color: 'var(--text-muted, #888)' }}>
-                                    👤 {v.authorUrl ? <a href={v.authorUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit' }}>{v.authorName}</a> : v.authorName}
+                      {tiktokViralAll.map((v, idx) => {
+                        const tags = extractHashtagChips(v)
+                        return (
+                          <tr key={v.id}>
+                            <td><strong>{idx + 1}</strong></td>
+                            <td>
+                              <div className="viral-card-cell">
+                                {v.thumbnailUrl
+                                  ? <img src={v.thumbnailUrl} alt={v.title} className="viral-thumb-lg" onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                                  : <div className="viral-thumb-lg viral-thumb-lg--tt">🎵</div>}
+                                <div className="viral-card-meta">
+                                  <div className="viral-card-title">{v.title}</div>
+                                  {v.authorName && <div className="viral-card-author">👤 {v.authorUrl ? <a href={v.authorUrl} target="_blank" rel="noopener noreferrer">{v.authorName}</a> : v.authorName}</div>}
+                                  <div className="viral-card-badges">
+                                    <span className="channel-tag channel-tag--tiktok">{v.category || 'Xu hướng TikTok'}</span>
+                                    {tags.map((t) => <span key={t} className="viral-hashtag-chip viral-hashtag-chip--tt">{t}</span>)}
                                   </div>
-                                )}
-                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '3px' }}>
-                                  <span className="channel-tag channel-tag--tiktok">{v.category || 'TikTok'}</span>
-                                  {v.trendingTopic?.includes('#') && (
-                                    <span style={{ fontSize: '10px', color: '#ff0050' }}>{v.trendingTopic.slice(v.trendingTopic.indexOf('#'))}</span>
-                                  )}
                                 </div>
                               </div>
-                            </div>
-                          </td>
-                          <td style={{ whiteSpace: 'nowrap', fontSize: '11px', lineHeight: '1.4' }}>
-                            <div>❤️ <strong>{Number(v.likesCount || 0).toLocaleString('vi-VN')}</strong></div>
-                            {Number(v.commentsCount || 0) > 0 && <div>💬 {Number(v.commentsCount).toLocaleString('vi-VN')}</div>}
-                            {Number(v.sharesCount || 0) > 0 && <div>🔁 {Number(v.sharesCount).toLocaleString('vi-VN')}</div>}
-                          </td>
-                          <td style={{ whiteSpace: 'nowrap' }}>
-                            <button
-                              type="button"
-                              className="social-action-btn social-table-link"
-                              onClick={() => handleOpenViralSingleTab(v.postUrl, 'tiktok')}
-                              title="Mở gọn trên 1 tab duy nhất"
-                            >
-                              Mở ↗
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                      {tiktokViralAll.length === 0 && <tr><td colSpan={4} className="social-table-empty">Chưa có bài TikTok phù hợp bộ lọc.</td></tr>}
+                            </td>
+                            <td className="viral-metrics-cell">
+                              <div>❤️ <strong>{Number(v.likesCount || 0).toLocaleString('vi-VN')}</strong></div>
+                              <div>💬 <strong>{Number(v.commentsCount || 0).toLocaleString('vi-VN')}</strong></div>
+                              {Number(v.sharesCount || 0) > 0 && <div>🔁 {Number(v.sharesCount).toLocaleString('vi-VN')}</div>}
+                            </td>
+                            <td>
+                              <button type="button" className="social-action-btn social-table-link" onClick={() => handleOpenViralSingleTab(v.postUrl, 'tiktok')}>Mở ↗</button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                      {tiktokViralAll.length === 0 && <tr><td colSpan={4} className="social-table-empty">Chưa có bài TikTok phù hợp.</td></tr>}
                     </tbody>
                   </table>
                 </div>
@@ -1411,7 +1329,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
               setStudioProductId(idea.productId || '')
               setStudioTopic(`${idea.hook} — ${idea.angle}`)
               setActiveSubTab('studio')
-              showNotice(`Đã chuyển ý tưởng bắt trend "${idea.trendName}" sang Soạn bài AI!`)
+              showNotice(`Đã chuyển ý tưởng "${idea.trendName}" sang Soạn bài AI!`)
             }}
           />
         </div>
@@ -1456,10 +1374,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <img src={p.productImage || '/products/bag.svg'} alt={p.productName} className="social-product-thumb" onError={e => { e.currentTarget.src = '/products/bag.svg' }} />
-                        <div>
-                          <strong>{p.productName}</strong>
-                          <div style={{ fontSize: '11px', color: '#2e8658', fontWeight: 700 }}>{Number(p.productPrice).toLocaleString('vi-VN')}đ</div>
-                        </div>
+                        <div><strong>{p.productName}</strong><div style={{ fontSize: '11px', color: '#2e8658', fontWeight: 700 }}>{Number(p.productPrice).toLocaleString('vi-VN')}đ</div></div>
                       </div>
                     </td>
                     <td>
@@ -1472,8 +1387,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
                           : p.status === 'pending_review' ? '⏳ Đang xét duyệt'
                             : p.status === 'unverified' ? '⚠️ Chưa xác minh'
                               : p.status === 'internal_draft' ? '📝 Bản nháp'
-                                : p.status === 'failed' && /từ chối/i.test(p.errorMessage || '') ? '🔴 Bị từ chối duyệt'
-                                  : '🔴 Lỗi'}
+                                : p.status === 'failed' && /từ chối/i.test(p.errorMessage || '') ? '🔴 Bị từ chối duyệt' : '🔴 Lỗi'}
                       </span>
                     </td>
                     <td style={{ fontSize: '11.5px', whiteSpace: 'nowrap' }}>👍 {p.likesCount} · 🔁 {p.sharesCount} · 💬 {p.commentsCount}</td>
@@ -1487,7 +1401,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
                       <div style={{ display: 'flex', gap: '4px' }}>
                         <button type="button" className="social-action-btn" onClick={() => handleCopyPost(p)}>{copiedPostId === p.id ? '✓' : '📋'}</button>
                         {p.status !== 'pending_review' && (
-                          <button type="button" className="social-action-btn social-action-btn--primary" onClick={() => handleRealAutoPostThroughExtension(p)} disabled={realPostingBusy || batchPosting}>🚀</button>
+                          <button type="button" className="social-action-btn social-action-btn--primary" onClick={() => handleRealAutoPostThroughExtension(p)} disabled={postingBusy[p.platform]}>🚀</button>
                         )}
                         <button type="button" className="social-action-btn social-action-btn--danger" onClick={() => handleDeletePost(p.id)}>✕</button>
                       </div>
@@ -1501,7 +1415,6 @@ export default function AdminSocialAutomation({ csrfToken }) {
         </section>
       )}
 
-      {/* Modal chi tiết */}
       {selectedPostModal && (
         <div className="social-modal-overlay" onClick={() => setSelectedPostModal(null)}>
           <div className="social-modal-card" onClick={e => e.stopPropagation()}>
@@ -1509,10 +1422,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
               <h3>📄 Chi tiết bài #{selectedPostModal.id}</h3>
               <button type="button" className="social-modal-close" onClick={() => setSelectedPostModal(null)}>✕</button>
             </div>
-            <div>
-              <strong>{selectedPostModal.title}</strong>
-              <div className="social-modal-body-content">{selectedPostModal.content}</div>
-            </div>
+            <div><strong>{selectedPostModal.title}</strong><div className="social-modal-body-content">{selectedPostModal.content}</div></div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button type="button" className="social-btn-trigger" onClick={() => handleCopyPost(selectedPostModal)}>📋 Chép</button>
               {selectedPostModal.postUrl && <a href={selectedPostModal.postUrl} target="_blank" rel="noopener noreferrer" className="social-btn-trigger" style={{ textDecoration: 'none' }}>Mở bài ↗</a>}
@@ -1522,18 +1432,17 @@ export default function AdminSocialAutomation({ csrfToken }) {
         </div>
       )}
 
-      {/* Modal Hướng dẫn */}
       {showExtensionHelp && (
         <div className="social-modal-overlay" onClick={() => setShowExtensionHelp(false)}>
           <div className="social-modal-card" style={{ maxWidth: '520px' }} onClick={e => e.stopPropagation()}>
             <div className="social-modal-head">
-              <h3>👁️ Cài đặt OmniVision v3.3</h3>
+              <h3>👁️ Cài đặt OmniVision v3.5</h3>
               <button type="button" className="social-modal-close" onClick={() => setShowExtensionHelp(false)}>✕</button>
             </div>
             <ol style={{ paddingLeft: '20px', fontSize: '13px', lineHeight: 1.65 }}>
               <li>Vào <code>chrome://extensions/</code> → bật <strong>Developer mode</strong>.</li>
-              <li>Chọn <strong>Load unpacked</strong> vào <code>Store-Admin/extension</code> hoặc bấm <strong>Reload ↻</strong> lên <strong>3.2.0</strong>.</li>
-              <li>Đăng nhập Facebook & TikTok trên cùng trình duyệt Chrome.</li>
+              <li>Chọn <strong>Load unpacked</strong> vào <code>Store-Admin/extension</code> hoặc bấm <strong>Reload ↻</strong>.</li>
+              <li>Đăng nhập Facebook & TikTok trên cùng trình duyệt Chrome và đảm bảo Ollama đang chạy <code>qwen3.5:4b</code>.</li>
             </ol>
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button type="button" className="social-btn-trigger" onClick={() => setShowExtensionHelp(false)}>Đóng</button>

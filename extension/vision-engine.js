@@ -1,15 +1,19 @@
 /*
   FILE NOTE
   - Mục đích: Lõi nhận thức thị giác & mô phỏng hành vi người thật chạy ngầm 24/7 (OmniVision Engine v3.5.0).
-  - Liên kết trực tiếp: background.js, content-facebook.js, content-tiktok.js
-  - Vùng ảnh hưởng khi sửa: Toàn bộ thao tác DOM, cuộn và click của Extension trên Facebook và TikTok.
+  - Nâng cấp:
+    1. Chống short-circuit SW_SLEEP: chỉ kết thúc sớm khi Service Worker xác nhận đã ngủ đủ >= 85% thời gian.
+    2. Hệ thống delay ngẫu nhiên như người thật (Gaussian + jitter đa dạng cho click, gõ phím, cuộn, đọc bài, xem video).
+    3. Kết nối trọn vẹn Vision AI (qwen3.5:4b) qua AI_SELF_HEAL để tự phân tích giao diện & tự học selector khi FB/TikTok thay đổi DOM.
+  - Liên kết trực tiếp: extension/background.js, extension/content-facebook.js, extension/content-tiktok.js
+  - Vùng ảnh hưởng khi sửa: Khả năng nhận thức thị giác, tự sửa lỗi DOM và độ trễ hành vi người thật trên Facebook và TikTok.
 */
 
 ;(() => {
-  if (globalThis.__OMNICART_VISION_VERSION__ === '3.5.0' && globalThis.OmniVision) {
+  if (globalThis.__OMNICART_VISION_VERSION__ === '3.5.1' && globalThis.OmniVision) {
     return
   }
-  globalThis.__OMNICART_VISION_VERSION__ = '3.5.0'
+  globalThis.__OMNICART_VISION_VERSION__ = '3.5.1'
 
   const HUD_HOST_ID = 'omnicart-vision-hud-host'
 
@@ -17,12 +21,12 @@
   let pacingMode = 'normal'
   let currentMarkLookup = new Map()
 
-  // Đua giữa setTimeout cục bộ và bộ đếm SW_SLEEP từ Service Worker (Service Worker không bị bóp 1 phút trên tab nền!)
   function sleep(ms) {
     const duration = Math.max(0, Math.round(Number(ms) || 0))
     if (duration <= 0) return Promise.resolve()
     return new Promise((resolve) => {
       let done = false
+      const startedAt = Date.now()
       const finish = () => {
         if (done) return
         done = true
@@ -32,9 +36,11 @@
       const localTimer = setTimeout(finish, duration)
       if (duration >= 150 && typeof chrome !== 'undefined' && chrome.runtime?.id) {
         try {
-          chrome.runtime.sendMessage({ type: 'SW_SLEEP', ms: Math.min(duration, 15000) }, () => {
+          chrome.runtime.sendMessage({ type: 'SW_SLEEP', ms: Math.min(duration, 25000) }, (res) => {
             void chrome.runtime.lastError
-            finish()
+            if (res?.ok === true && Date.now() - startedAt >= duration * 0.85) {
+              finish()
+            }
           })
         } catch (_) {}
       }
@@ -43,28 +49,44 @@
 
   function getPacingMultiplier() {
     if (pacingMode === 'careful') return 1.45
-    if (pacingMode === 'fast') return 0.45
-    return 0.9
+    if (pacingMode === 'fast') return 0.55
+    return 1.0
   }
 
   function randomGaussianBetween(minMs, maxMs) {
     const low = Math.min(minMs, maxMs)
     const high = Math.max(minMs, maxMs)
     const u = (Math.random() + Math.random() + Math.random()) / 3
-    return Math.round(low + u * (high - low))
+    const jitter = 0.88 + Math.random() * 0.24
+    return Math.round(Math.max(low, Math.min(high * 1.15, (low + u * (high - low)) * jitter)))
   }
 
-  async function humanDelay(minMs = 500, maxMs = 1150) {
-    const ms = Math.max(80, Math.round(randomGaussianBetween(minMs, maxMs) * getPacingMultiplier()))
+  async function humanDelay(minMs = 650, maxMs = 1550) {
+    const ms = Math.max(120, Math.round(randomGaussianBetween(minMs, maxMs) * getPacingMultiplier()))
     await sleep(ms)
     return ms
   }
 
-  async function humanMicroPause() { return humanDelay(160, 360) }
-  async function humanReadPause() { return humanDelay(850, 1650) }
-  async function humanReviewPause() { return humanDelay(1200, 2100) }
+  async function humanMicroPause() { return humanDelay(240, 560) }
+  async function humanReadPause() { return humanDelay(1100, 2300) }
+  async function humanReviewPause() { return humanDelay(1450, 2750) }
 
-  // Cuộn tức thời lên đầu trang (không chờ smooth animation bị treo trong tab nền)
+  async function humanScrollPause() {
+    const base = randomGaussianBetween(1900, 4100)
+    const extraRead = Math.random() < 0.22 ? randomGaussianBetween(1400, 3200) : 0
+    const ms = Math.round((base + extraRead) * getPacingMultiplier())
+    await sleep(ms)
+    return ms
+  }
+
+  async function humanWatchPause(baseSeconds = 8) {
+    const baseMs = Math.max(3000, Number(baseSeconds || 8) * 1000)
+    const factor = 0.78 + Math.random() * 0.48
+    const ms = Math.round(baseMs * factor)
+    await sleep(ms)
+    return ms
+  }
+
   async function smoothScrollToTop() {
     if (window.scrollY <= 40) return
     try {
@@ -74,7 +96,7 @@
     } catch (_) {
       try { window.scrollTo(0, 0) } catch (_) {}
     }
-    await humanDelay(300, 550)
+    await humanDelay(420, 820)
   }
 
   function normalizeText(value) {
@@ -103,6 +125,7 @@
       .replace(/[\u200B-\u200D\uFEFF]/g, '')
       .replace(/\u00A0/g, ' ')
       .replace(/\r\n?/g, '\n')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
       .split('\n')
       .map((line) => line.replace(/[ \t]+$/g, ''))
       .join('\n')
@@ -325,7 +348,7 @@
           if (onStatus) onStatus('network', msg, 'warn')
           else reportStep(platform, 'network', msg, 'warn')
         }
-        await sleep(1800)
+        await sleep(2200)
         continue
       }
       if (health.isPageError) return { ok: false, reason: 'PAGE_ERROR_STATE', health }
@@ -336,7 +359,7 @@
           if (onStatus) onStatus('loading', msg, 'info')
           else reportStep(platform, 'loading', msg, 'info')
         }
-        await sleep(750)
+        await sleep(850)
         continue
       }
       return { ok: true, reason: 'STABLE', health }
@@ -356,15 +379,14 @@
     return document.scrollingElement || document.documentElement
   }
 
-  // Cuộn tức thời an toàn cho cả tab nền lẫn tab đang mở
   async function scrollIntoViewSafely(el, block = 'center') {
     if (!el) return
     try {
       el.scrollIntoView({ behavior: 'auto', block, inline: 'nearest' })
-      await sleep(180)
+      await sleep(260)
     } catch (_) {
       try { el.scrollIntoView({ block }) } catch (_) {}
-      await sleep(180)
+      await sleep(260)
     }
   }
 
@@ -382,18 +404,17 @@
     } catch (_) {
       try { window.scrollTo(0, document.body.scrollHeight) } catch (_) {}
     }
-    await humanDelay(320, 560)
+    await humanDelay(450, 820)
   }
 
-  // Cuộn mạnh cho Infinite Scroll trên TikTok Search & Facebook Feed kể cả trong tab chạy ngầm
-  async function scrollPageDownForFeed(deltaY = 1200, containerHint = null) {
+  async function scrollPageDownForFeed(deltaY = 1150, containerHint = null) {
+    const stepY = Math.round(deltaY * (0.8 + Math.random() * 0.42))
     const candidates = []
     if (containerHint) candidates.push(getScrollableAncestor(containerHint))
     candidates.push(document.scrollingElement || document.documentElement)
     candidates.push(document.documentElement)
     candidates.push(document.body)
 
-    // Tìm thêm container cuộn chính của SPA (TikTok / FB) nếu trang không cuộn bằng window
     for (const el of document.querySelectorAll('main, [role="main"], [id*="main-content"], [class*="DivBodyContainer"], [class*="SearchMain"]')) {
       if (el.scrollHeight > el.clientHeight + 80) candidates.push(el)
     }
@@ -403,18 +424,17 @@
       if (!scroller || visited.has(scroller)) continue
       visited.add(scroller)
       try {
-        const before = scroller.scrollTop
-        scroller.scrollTop = before + deltaY
+        scroller.scrollTop += stepY
         scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
-        scroller.dispatchEvent(new WheelEvent('wheel', { deltaY, deltaMode: 0, bubbles: true, cancelable: true }))
+        scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: stepY, deltaMode: 0, bubbles: true, cancelable: true }))
       } catch (_) {}
     }
     try {
-      window.scrollBy({ top: deltaY, behavior: 'auto' })
+      window.scrollBy({ top: stepY, behavior: 'auto' })
       window.dispatchEvent(new Event('scroll'))
-      window.dispatchEvent(new WheelEvent('wheel', { deltaY, deltaMode: 0, bubbles: true, cancelable: true }))
+      window.dispatchEvent(new WheelEvent('wheel', { deltaY: stepY, deltaMode: 0, bubbles: true, cancelable: true }))
     } catch (_) {}
-    await sleep(220)
+    await sleep(randomGaussianBetween(320, 620))
   }
 
   function findLabelElement(pattern, options = {}) {
@@ -461,20 +481,20 @@
     if (!skipScroll) await scrollIntoViewSafely(el, 'center')
 
     const rect = el.getBoundingClientRect()
-    const cx = Math.round(rect.left + rect.width * (0.35 + Math.random() * 0.3))
-    const cy = Math.round(rect.top + rect.height * (0.35 + Math.random() * 0.3))
+    const cx = Math.round(rect.left + rect.width * (0.3 + Math.random() * 0.4))
+    const cy = Math.round(rect.top + rect.height * (0.3 + Math.random() * 0.4))
     const common = { bubbles: true, cancelable: true, composed: true, view: window, clientX: cx, clientY: cy, button: 0, buttons: 1 }
 
     try { el.dispatchEvent(new PointerEvent('pointermove', { ...common, buttons: 0 })) } catch (_) {}
     try { el.dispatchEvent(new PointerEvent('pointerover', { ...common, buttons: 0 })) } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mousemove', { ...common, buttons: 0 })) } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mouseover', { ...common, buttons: 0 })) } catch (_) {}
-    await sleep(randomGaussianBetween(80, 170))
+    await sleep(randomGaussianBetween(110, 260))
 
     try { el.dispatchEvent(new PointerEvent('pointerdown', common)) } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mousedown', common)) } catch (_) {}
     try { el.focus({ preventScroll: true }) } catch (_) {}
-    await sleep(randomGaussianBetween(55, 120))
+    await sleep(randomGaussianBetween(75, 165))
 
     try { el.dispatchEvent(new PointerEvent('pointerup', { ...common, buttons: 0 })) } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mouseup', { ...common, buttons: 0 })) } catch (_) {}
@@ -482,7 +502,7 @@
       try { el.dispatchEvent(new MouseEvent('click', { ...common, buttons: 0 })) } catch (_) {}
     }
 
-    await humanDelay(200, 420)
+    await humanDelay(320, 680)
     return true
   }
 
@@ -526,7 +546,7 @@
       else el.value = ''
       el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }))
       el.dispatchEvent(new Event('change', { bubbles: true }))
-      await sleep(90)
+      await sleep(140)
       return
     }
     try {
@@ -541,7 +561,7 @@
       document.execCommand('selectAll', false, null)
       document.execCommand('delete', false, null)
       el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' }))
-      await sleep(120)
+      await sleep(180)
     } catch (_) {}
   }
 
@@ -557,7 +577,7 @@
       if (setter) setter.call(el, built)
       else el.value = built
       el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: chunk }))
-      await sleep(Math.round(randomGaussianBetween(28, 70) * getPacingMultiplier()))
+      await sleep(Math.round(randomGaussianBetween(45, 115) * getPacingMultiplier()))
     }
     el.dispatchEvent(new Event('change', { bubbles: true }))
   }
@@ -589,7 +609,7 @@
         el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: targetText }))
         el.dispatchEvent(new Event('change', { bubbles: true }))
       }
-      await humanDelay(280, 520)
+      await humanDelay(350, 650)
       const res = verifySuccess(el)
       return { ok: res.ok, method: humanBurst ? 'human-native-burst' : 'native-setter', actual: res.actual }
     }
@@ -601,13 +621,13 @@
     await humanClick(editableEl)
     if (clearFirst) await clearEditable(editableEl)
     placeCaretAtEnd(editableEl)
-    await humanDelay(380, 720)
+    await humanDelay(420, 780)
 
     try {
       const dt = new DataTransfer()
       dt.setData('text/plain', targetText)
       editableEl.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, composed: true, clipboardData: dt }))
-      await humanDelay(480, 780)
+      await humanDelay(520, 880)
       const c1 = verifySuccess(editableEl)
       if (c1.ok) { if (dismissPopover) dispatchEscape(editableEl); return { ok: true, method: 'synthetic-paste', actual: c1.actual } }
     } catch (_) {}
@@ -618,7 +638,7 @@
       const dt = new DataTransfer()
       dt.setData('text/plain', targetText)
       editableEl.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, composed: true, inputType: 'insertFromPaste', data: targetText, dataTransfer: dt }))
-      await humanDelay(450, 740)
+      await humanDelay(500, 840)
       const c2 = verifySuccess(editableEl)
       if (c2.ok) { if (dismissPopover) dispatchEscape(editableEl); return { ok: true, method: 'beforeinput-paste', actual: c2.actual } }
     } catch (_) {}
@@ -634,9 +654,9 @@
           editableEl.dispatchEvent(textEvent)
         }
         if (i < lines.length - 1) document.execCommand('insertLineBreak', false, null)
-        await sleep(Math.round(randomGaussianBetween(50, 120) * getPacingMultiplier()))
+        await sleep(Math.round(randomGaussianBetween(60, 140) * getPacingMultiplier()))
       }
-      await humanDelay(460, 760)
+      await humanDelay(500, 820)
       const c3 = verifySuccess(editableEl)
       if (c3.ok) { if (dismissPopover) dispatchEscape(editableEl); return { ok: true, method: 'chromium-textInput', actual: c3.actual } }
     } catch (_) {}
@@ -648,10 +668,10 @@
       for (let i = 0; i < lines.length; i++) {
         if (lines[i]) document.execCommand('insertText', false, lines[i])
         if (i < lines.length - 1) document.execCommand('insertLineBreak', false, null)
-        await sleep(Math.round(randomGaussianBetween(45, 110) * getPacingMultiplier()))
+        await sleep(Math.round(randomGaussianBetween(55, 130) * getPacingMultiplier()))
       }
       editableEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: targetText }))
-      await humanDelay(450, 740)
+      await humanDelay(480, 820)
       const c4 = verifySuccess(editableEl)
       if (c4.ok) { if (dismissPopover) dispatchEscape(editableEl); return { ok: true, method: 'execCommand-lines', actual: c4.actual } }
     } catch (_) {}
@@ -662,7 +682,7 @@
         placeCaretAtEnd(editableEl)
         await navigator.clipboard.writeText(targetText)
         document.execCommand('paste')
-        await humanDelay(450, 720)
+        await humanDelay(480, 780)
         const c5 = verifySuccess(editableEl)
         if (c5.ok) { if (dismissPopover) dispatchEscape(editableEl); return { ok: true, method: 'clipboard-api', actual: c5.actual } }
       } catch (_) {}
@@ -716,88 +736,6 @@
     return null
   }
 
-  function buildInteractiveMap(root = document, maxItems = 75) {
-    currentMarkLookup = new Map()
-    const selector = 'button,[role="button"],[role="tab"],[role="combobox"],[role="option"],[role="menuitem"],[role="radio"],[role="textbox"],[contenteditable="true"],input:not([type="hidden"]):not([type="file"]),textarea,select,a[href]'
-    const items = []
-    let id = 1
-    for (const el of queryAllDeep(root, selector)) {
-      if (id > maxItems) break
-      if (el.closest?.(`#${HUD_HOST_ID}`)) continue
-      if (!isReallyVisible(el, { minWidth: 14, minHeight: 14 })) continue
-      const rect = el.getBoundingClientRect()
-      if (!isInViewport(rect)) continue
-      const label = getAccessibleLabel(el).slice(0, 90)
-      const tag = el.tagName.toLowerCase()
-      const isEditable = el.isContentEditable || tag === 'input' || tag === 'textarea'
-      if (!label && !isEditable) continue
-      const color = getElementColorInfo(el)
-      const markId = id++
-      currentMarkLookup.set(markId, el)
-      items.push({
-        id: markId, tag, role: el.getAttribute('role') || tag, label,
-        disabled: isElementDisabled(el), editable: isEditable,
-        primaryColor: color.isRedPink ? 'red' : color.isBlue ? 'blue' : 'neutral',
-        rect: { x: Math.round(rect.left), y: Math.round(rect.top), w: Math.round(rect.width), h: Math.round(rect.height) }
-      })
-    }
-    return { url: location.href, title: document.title, viewport: { width: window.innerWidth, height: window.innerHeight }, items }
-  }
-
-  function getElementByMarkId(markId) { return currentMarkLookup.get(Number(markId)) || null }
-
-  function reportStep(platform, step, message, level = 'info', extra = {}) {
-    try {
-      showHudStatus(`[${platform.toUpperCase()}] ${message}`, level)
-      chrome.runtime.sendMessage({ type: 'JOB_STEP_PROGRESS', platform, step, message, level, extra, timestamp: new Date().toISOString() }).catch?.(() => {})
-    } catch (_) {}
-  }
-
-  function ensureHudHost() {
-    let host = document.getElementById(HUD_HOST_ID)
-    if (host) return host
-    host = document.createElement('div')
-    host.id = HUD_HOST_ID
-    host.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:2147483646;pointer-events:none;font-family:system-ui,-apple-system,sans-serif;'
-    document.documentElement.appendChild(host)
-    return host
-  }
-
-  function showHudStatus(text, level = 'info') {
-    if (!hudEnabled) return
-    try {
-      const host = ensureHudHost()
-      const colors = {
-        info: { bg: 'rgba(15, 23, 42, 0.92)', border: '#10b981', dot: '#10b981' },
-        warn: { bg: 'rgba(30, 27, 15, 0.94)', border: '#f59e0b', dot: '#f59e0b' },
-        error: { bg: 'rgba(42, 14, 18, 0.95)', border: '#ef4444', dot: '#ef4444' },
-        success: { bg: 'rgba(6, 42, 28, 0.95)', border: '#22c55e', dot: '#22c55e' }
-      }
-      const theme = colors[level] || colors.info
-      host.innerHTML = `<div style="display:flex;align-items:center;gap:8px;background:${theme.bg};border:1px solid ${theme.border};color:#f8fafc;padding:8px 12px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.35);font-size:12px;font-weight:600;max-width:390px;backdrop-filter:blur(6px);"><span style="width:8px;height:8px;border-radius:50%;background:${theme.dot};flex-shrink:0;"></span><span>👁️ ${String(text).replace(/[<>&]/g, '')}</span></div>`
-    } catch (_) {}
-  }
-
-  function clearHud(delayMs = 4500) {
-    setTimeout(() => { try { document.getElementById(HUD_HOST_ID)?.remove() } catch (_) {} }, delayMs)
-  }
-
-  function highlightTarget() {}
-  function showVisualMarks() {}
-  function clearVisualMarks() {}
-
-  function applyConfig(cfg = {}) {
-    if (typeof cfg.showHud === 'boolean') {
-      hudEnabled = cfg.showHud
-      if (!hudEnabled) { try { document.getElementById(HUD_HOST_ID)?.remove() } catch (_) {} }
-    }
-    if (cfg.pacingMode && ['normal', 'careful', 'fast'].includes(cfg.pacingMode)) pacingMode = cfg.pacingMode
-  }
-
-  try {
-    chrome.storage?.local?.get('visionConfig', (res) => { if (res?.visionConfig) applyConfig(res.visionConfig) })
-  } catch (_) {}
-  // Tạo CSS selector bền vững (bỏ các class ngẫu nhiên như x1i10hfl của FB hay css-1abc của TikTok)
   function buildStableSelector(el) {
     if (!el || !el.tagName) return ''
     const tag = el.tagName.toLowerCase()
@@ -823,7 +761,7 @@
     return parts.join(' ')
   }
 
-  function buildRichInteractiveMap(root = document, maxItems = 140) {
+  function buildRichInteractiveMap(root = document, maxItems = 90) {
     currentMarkLookup = new Map()
     const selector = 'button,[role="button"],[role="tab"],[role="combobox"],[role="option"],[role="menuitem"],[role="radio"],[role="textbox"],[contenteditable="true"],input:not([type="hidden"]):not([type="file"]),textarea,select,a[href],div[class*="Select"],div[class*="Option"],div[class*="option"]'
     const allNodes = queryAllDeep(root, selector)
@@ -831,7 +769,7 @@
 
     for (const el of allNodes) {
       if (el.closest?.(`#${HUD_HOST_ID}`)) continue
-      if (!isReallyVisible(el, { minWidth: 16, minHeight: 14 })) continue
+      if (!isReallyVisible(el, { minWidth: 14, minHeight: 14 })) continue
       const rect = el.getBoundingClientRect()
       const text = normalizeText(el.innerText || el.textContent).slice(0, 80)
       const ariaLabel = normalizeText(el.getAttribute('aria-label')).slice(0, 80)
@@ -847,12 +785,12 @@
         ['option', 'menuitem', 'radio'].includes(role)
       )
       const inView = isInViewport(rect)
-      // Ưu tiên số 1: Portal/Dropdown đang mở -> Dialog -> Vùng đang hiển thị trên màn hình -> Phần tử có chữ quyền riêng tư/đăng bài
       let priority = 0
-      if (inPortal) priority += 100
-      if (inDialog) priority += 70
+      if (inPortal) priority += 120
+      if (inDialog) priority += 80
       if (inView) priority += 50
-      if (/mọi người|chỉ mình|bạn bè|công khai|đối tượng|quyền riêng tư|đăng|post|everyone|only|private/i.test(`${text} ${ariaLabel}`)) priority += 90
+      if (/mọi người|chỉ mình|bạn bè|công khai|đối tượng|quyền riêng tư|xong|lưu|đăng|post|everyone|only|private|done|save/i.test(`${text} ${ariaLabel}`)) priority += 100
+      if (/nhãn ai|ai label/i.test(`${text} ${ariaLabel}`)) priority -= 80
       if (el.querySelectorAll('*').length > 10) priority -= 30
 
       scoredNodes.push({ el, rect, text, ariaLabel, dataE2e, tag, role, inDialog, inPortal, priority })
@@ -866,28 +804,70 @@
       const markId = id++
       currentMarkLookup.set(markId, n.el)
       items.push({
-        id: markId,
-        tag: n.tag,
-        role: n.role,
+        id: markId, tag: n.tag, role: n.role,
         label: (n.ariaLabel || n.text).slice(0, 80),
-        text: n.text,
-        ariaLabel: n.ariaLabel,
-        dataE2e: n.dataE2e,
+        text: n.text, ariaLabel: n.ariaLabel, dataE2e: n.dataE2e,
         stableSelector: buildStableSelector(n.el),
-        inDialog: n.inDialog,
-        inPortal: n.inPortal,
+        inDialog: n.inDialog, inPortal: n.inPortal,
         disabled: isElementDisabled(n.el),
         primaryColor: color.isRedPink ? 'red' : color.isBlue ? 'blue' : 'neutral',
-        x: Math.round(n.rect.left),
-        y: Math.round(n.rect.top),
-        w: Math.round(n.rect.width),
-        h: Math.round(n.rect.height)
+        x: Math.round(n.rect.left), y: Math.round(n.rect.top),
+        w: Math.round(n.rect.width), h: Math.round(n.rect.height)
       })
     }
     return items
   }
 
-  // Đọc quy tắc đã học trước đó từ kho kiến thức (0ms, không gọi AI)
+  function getElementByMarkId(markId) { return currentMarkLookup.get(Number(markId)) || null }
+
+  function reportStep(platform, step, message, level = 'info', extra = {}) {
+    try {
+      showHudStatus(`[${platform.toUpperCase()}] ${message}`, level)
+      chrome.runtime.sendMessage({ type: 'JOB_STEP_PROGRESS', platform, step, message, level, extra, timestamp: new Date().toISOString() }, () => { void chrome.runtime.lastError })
+    } catch (_) {}
+  }
+
+  function ensureHudHost() {
+    let host = document.getElementById(HUD_HOST_ID)
+    if (host) return host
+    host = document.createElement('div')
+    host.id = HUD_HOST_ID
+    host.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:2147483646;pointer-events:none;font-family:system-ui,-apple-system,sans-serif;'
+    document.documentElement.appendChild(host)
+    return host
+  }
+
+  function showHudStatus(text, level = 'info') {
+    if (!hudEnabled) return
+    try {
+      const host = ensureHudHost()
+      const colors = {
+        info: { bg: 'rgba(15, 23, 42, 0.92)', border: '#10b981', dot: '#10b981' },
+        warn: { bg: 'rgba(30, 27, 15, 0.94)', border: '#f59e0b', dot: '#f59e0b' },
+        error: { bg: 'rgba(42, 14, 18, 0.95)', border: '#ef4444', dot: '#ef4444' },
+        success: { bg: 'rgba(6, 42, 28, 0.95)', border: '#22c55e', dot: '#22c55e' }
+      }
+      const theme = colors[level] || colors.info
+      host.innerHTML = `<div style="display:flex;align-items:center;gap:8px;background:${theme.bg};border:1px solid ${theme.border};color:#f8fafc;padding:8px 12px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.35);font-size:12px;font-weight:600;max-width:400px;backdrop-filter:blur(6px);"><span style="width:8px;height:8px;border-radius:50%;background:${theme.dot};flex-shrink:0;"></span><span>👁️ ${String(text).replace(/[<>&]/g, '')}</span></div>`
+    } catch (_) {}
+  }
+
+  function clearHud(delayMs = 4500) {
+    setTimeout(() => { try { document.getElementById(HUD_HOST_ID)?.remove() } catch (_) {} }, delayMs)
+  }
+
+  function applyConfig(cfg = {}) {
+    if (typeof cfg.showHud === 'boolean') {
+      hudEnabled = cfg.showHud
+      if (!hudEnabled) { try { document.getElementById(HUD_HOST_ID)?.remove() } catch (_) {} }
+    }
+    if (cfg.pacingMode && ['normal', 'careful', 'fast'].includes(cfg.pacingMode)) pacingMode = cfg.pacingMode
+  }
+
+  try {
+    chrome.storage?.local?.get('visionConfig', (res) => { if (res?.visionConfig) applyConfig(res.visionConfig) })
+  } catch (_) {}
+
   async function getLearnedRule(stepKey) {
     try {
       const res = await new Promise((resolve) => {
@@ -923,7 +903,6 @@
     } catch (_) {}
   }
 
-  // Tìm phần tử theo quy tắc kiến thức đã học từ AI Local
   function findByLearnedRule(rule, root = document) {
     if (!rule) return null
     const scope = rule.inDialog ? (document.querySelector('div[role="dialog"], div[aria-modal="true"]') || root) : root
@@ -953,18 +932,15 @@
     return candidates.length === 1 ? candidates[0] : null
   }
 
-  // Chỉ gọi AI Local qwen3.5:4b khi cả kiến thức cũ lẫn bộ tìm mặc định đều gặp lỗi/giao diện mới!
   async function askSelfHealingAI({ platform, stepKey, goal, root = document, errorReason = '' }) {
-    reportStep(platform, 'ai_heal', `🧠 Đang nhờ AI Local (qwen3.5:4b) phân tích giao diện "${stepKey}"...`, 'warn')
-    const elements = buildRichInteractiveMap(root, 65)
+    reportStep(platform, 'ai_heal', `🧠 Đang nhờ Mắt Vision qwen3.5:4b phân tích "${stepKey}"...`, 'warn')
+    const elements = buildRichInteractiveMap(root, 75)
     try {
       const res = await new Promise((resolve) => {
         chrome.runtime.sendMessage({
           type: 'AI_SELF_HEAL',
           payload: {
-            platform,
-            stepKey,
-            goal,
+            platform, stepKey, goal,
             url: location.href,
             errorReason,
             viewportWidth: window.innerWidth,
@@ -980,26 +956,28 @@
 
       if (res?.ok) {
         const element = res.targetMarkId ? getElementByMarkId(res.targetMarkId) : null
-        reportStep(platform, 'ai_heal', `🧠 AI phán đoán: ${res.diagnosis || res.action}`, 'info')
+        reportStep(platform, 'ai_heal', `🧠 Vision AI phán đoán: ${res.diagnosis || res.action}`, 'info')
         return { ...res, element }
       }
-      return { ok: false, action: 'wait_and_retry', element: null }
+      reportStep(platform, 'ai_heal', `⚠️ Vision AI chưa kết nối được (${res?.error || 'kiểm tra tab Admin & Ollama'})`, 'warn')
+      return { ok: false, action: 'wait_and_retry', element: null, error: res?.error }
     } catch (err) {
       return { ok: false, error: err.message, element: null }
     }
   }
 
   globalThis.OmniVision = {
-    version: '3.5.0',
-    sleep, humanDelay, humanMicroPause, humanReadPause, humanReviewPause, smoothScrollToTop,
+    version: '3.5.1',
+    sleep, randomGaussianBetween, humanDelay, humanMicroPause, humanReadPause, humanReviewPause,
+    humanScrollPause, humanWatchPause, smoothScrollToTop,
     normalizeText, stripToMatchKey, formatPostText, truncateClean, formatHashtags, composeBodyAndHashtags, parseHumanCount,
     getDeepActiveElement, queryAllDeep, isReallyVisible, isElementDisabled, isInViewport,
     getAccessibleLabel, getElementColorInfo, inspectPageHealth, waitForPageStable,
     getScrollableAncestor, scrollIntoViewSafely, scrollContainerToBottom, scrollPageDownForFeed,
     findLabelElement, findControlNearLabel, humanClick, readEditorValue, isTextMatched, smartTypeText, dispatchEscape,
-    captureVisualImageSnapshot, findNewlyRenderedMedia, buildInteractiveMap,
-    showVisualMarks, clearVisualMarks, getElementByMarkId,
-    reportStep, showHudStatus, highlightTarget, clearHud, applyConfig,
-    buildStableSelector, buildRichInteractiveMap, getLearnedRule, saveLearnedRule, invalidateLearnedRule, findByLearnedRule, askSelfHealingAI
+    captureVisualImageSnapshot, findNewlyRenderedMedia,
+    buildStableSelector, buildRichInteractiveMap, getElementByMarkId,
+    reportStep, showHudStatus, clearHud, applyConfig,
+    getLearnedRule, saveLearnedRule, invalidateLearnedRule, findByLearnedRule, askSelfHealingAI
   }
 })()

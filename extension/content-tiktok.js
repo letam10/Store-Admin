@@ -1,8 +1,12 @@
 /*
   FILE NOTE
-  - Mục đích: Content Script OmniVision v3.3.0 cho TikTok Studio & TikTok Web 2026 (Chạy ngầm tab + Checkpoint nhớ bước + sửa triệt để chọn Đối tượng + cuộn sâu Tìm kiếm đa từ khóa).
-  - Liên kết trực tiếp: vision-engine.js, background.js, content-admin-bridge.js
-  - Vùng ảnh hưởng khi sửa: Luồng tự động tải video, chọn quyền riêng tư TikTok Studio và cào video viral TikTok.
+  - Mục đích: Content Script OmniVision v3.5.1 cho TikTok Studio & TikTok Web 2026.
+  - Nâng cấp:
+    1. Sửa triệt để chọn Đối tượng (Mọi người / Chỉ mình bạn): cuộn nút vào giữa màn hình trước khi mở menu, KHÔNG cuộn làm đóng popover, dự phòng bàn phím + Mắt Vision qwen3.5:4b cứu cánh.
+    2. Cào Viral TikTok (mặc định >= 1M tim) kiên trì cuộn 12–28 lần / 2–3 phút, chờ tải khi mạng chậm thay vì vội chuyển từ khóa sau 1 lần lướt; đọc đủ tim, bình luận, chia sẻ, hashtag, ảnh bìa lớn và tác giả.
+    3. Hỗ trợ lướt theo đúng số phút cài đặt (strictDurationMs) và xem video với độ trễ ngẫu nhiên như người thật.
+  - Liên kết trực tiếp: extension/vision-engine.js, extension/content-media.js, extension/background.js
+  - Vùng ảnh hưởng khi sửa: Tương tác với TikTok Studio (đăng bài ảnh, chọn quyền riêng tư, theo dõi duyệt bài) và TikTok Web (cào video viral, xem video).
 */
 
 ;(() => {
@@ -110,15 +114,11 @@
       })
       if (!topDiscard) break
       await V().humanClick(topDiscard, { skipScroll: true })
-      await V().humanDelay(500, 850)
-      const modalConfirm = V().queryAllDeep(document, '[role="dialog"] button, [class*="modal"] button').find((b) => {
-        if (!V().isReallyVisible(b)) return false
-        return b.getBoundingClientRect().top > 200 && /^(hủy bỏ|discard|xác nhận|confirm)$/i.test(V().normalizeText(b.innerText || b.textContent))
-      })
-      if (modalConfirm) {
-        await V().humanClick(modalConfirm, { skipScroll: true })
-        await V().humanDelay(550, 950)
-      }
+      await V().humanDelay(550, 950)
+      const modalConfirm = V().queryAllDeep(document, '[role="dialog"] button, [class*="modal"] button').find((b) =>
+        V().isReallyVisible(b) && b.getBoundingClientRect().top > 200 && /^(hủy bỏ|discard|xác nhận|confirm)$/i.test(V().normalizeText(b.innerText || b.textContent))
+      )
+      if (modalConfirm) { await V().humanClick(modalConfirm, { skipScroll: true }); await V().humanDelay(600, 1000) }
     }
   }
 
@@ -131,7 +131,7 @@
     if (!uploadBtn) return false
     stepLog('nav', 'Đang bấm "+ Tải lên" -> "Ảnh" trên TikTok Studio...')
     await V().humanClick(uploadBtn, { skipScroll: true })
-    await V().humanDelay(480, 850)
+    await V().humanDelay(550, 950)
     const photoOption = V().queryAllDeep(document, '[role="menuitem"], [role="option"], button, a, div, span').find((el) => {
       if (!V().isReallyVisible(el, { minWidth: 30, minHeight: 18 })) return false
       const r = el.getBoundingClientRect()
@@ -139,7 +139,7 @@
     })
     if (photoOption) await V().humanClick(photoOption, { skipScroll: true })
     await M().waitFor(() => isUploadPath() || detectScreenState() === 'upload_photo_tab' || detectScreenState() === 'upload_video_tab', 10000)
-    await V().humanDelay(750, 1250)
+    await V().humanDelay(800, 1400)
     return isUploadPath()
   }
 
@@ -151,7 +151,7 @@
     })
     if (!navBtn) return false
     await V().humanClick(navBtn, { skipScroll: true })
-    await V().humanDelay(1000, 1600)
+    await V().humanDelay(1000, 1650)
     return true
   }
 
@@ -250,7 +250,7 @@
     const ph = findDescriptionPlaceholder()
     if (ph) {
       await V().humanClick(ph)
-      await V().humanDelay(320, 560)
+      await V().humanDelay(380, 650)
       const active = V().getDeepActiveElement()
       if (active && active !== titleEl && !titleEl?.contains(active) && (active.isContentEditable || active.tagName === 'TEXTAREA' || active.getAttribute('role') === 'textbox' || active.getAttribute('role') === 'combobox')) return active
       editor = findDescriptionEditorPassive()
@@ -262,7 +262,7 @@
       const hit = document.elementFromPoint(Math.round(fRect.left + 60), Math.round(Math.max(100, fRect.top - 48)))
       if (hit && hit !== titleEl && !titleEl?.contains(hit)) {
         await V().humanClick(hit)
-        await V().humanDelay(300, 520)
+        await V().humanDelay(350, 620)
         const active = V().getDeepActiveElement()
         if (active && active !== titleEl && (active.isContentEditable || active.tagName === 'TEXTAREA')) return active
       }
@@ -285,10 +285,9 @@
   function findPrivacyControl() {
     const label = V().findLabelElement(PRIVACY_LABEL_RE, { minLeft: 180, maxLength: 90 })
     if (label) {
-      // Ưu tiên tìm đúng <button> hoặc [role="combobox"] trước tiên!
-      const exactBtn = V().findControlNearLabel(label, 'button, [role="combobox"], select', { direction: 'below', maxVertical: 110, maxHorizontal: 280 })
+      const exactBtn = V().findControlNearLabel(label, 'button, [role="combobox"], select', { direction: 'below', maxVertical: 120, maxHorizontal: 280 })
       if (exactBtn) return exactBtn
-      const nearby = V().findControlNearLabel(label, '[role="button"], div[class*="Select"], div[class*="select"]', { direction: 'below', maxVertical: 110, maxHorizontal: 280 })
+      const nearby = V().findControlNearLabel(label, '[role="button"], div[class*="Select"], div[class*="select"]', { direction: 'below', maxVertical: 120, maxHorizontal: 280 })
       if (nearby) return nearby.querySelector('button, [role="combobox"], select') || nearby
     }
     const found = V().queryAllDeep(document, 'select, button, [role="combobox"], [role="button"], div[class*="Select"], div[class*="select"]').find((el) => {
@@ -363,7 +362,6 @@
     const rawHashtags = payload.hashtags || payload.tags || ''
     const shortTitle = V().truncateClean(rawTitle || V().formatPostText(rawBody, 200).split('\n')[0] || 'Ưu đãi OmniCart', 85)
 
-    // CHECKPOINT: Nếu trước đó ĐÃ BẤM ĐĂNG rồi mới tải lại/chuyển trang -> chuyển sang chờ xét duyệt thay vì đăng lại!
     if (checkpoint.verifyOnly) {
       stepLog('verify', 'Phục hồi từ Checkpoint sau bước Đăng TikTok — chuyển sang theo dõi xét duyệt...')
       return {
@@ -389,20 +387,18 @@
     if (!fullDescription) return { ok: false, error: 'POST_TEXT_REQUIRED', visionTrace: trace }
     if (/#[\p{L}\p{N}_]+$/u.test(fullDescription)) fullDescription += ' '
 
-    await V().humanDelay(550, 950)
+    await V().humanDelay(600, 1100)
     await dismissStaleDraftBanners2026()
     await M().waitFor(() => detectScreenState() !== 'loading_or_unknown', 12000)
     let state = detectScreenState()
 
     const alreadyUploadedOwnImage = (checkpoint.completedSteps || []).includes('image_uploaded')
-
-    // Chỉ xóa bản nháp cũ nếu KHÔNG phải bài hiện tại đang chạy dở!
     if (state === 'detail_editor_form' && !alreadyUploadedOwnImage) {
       await V().scrollContainerToBottom(findDescriptionFooterAnchor() || findTitleInput())
       const discardBtn = findDiscardButton()
       if (discardBtn) {
         await V().humanClick(discardBtn)
-        await V().humanDelay(600, 1000)
+        await V().humanDelay(650, 1100)
         const confirmDiscard = V().queryAllDeep(document, '[role="dialog"] button, [class*="modal"] button').find((b) =>
           V().isReallyVisible(b) && /^(hủy bỏ|hủy|discard|xác nhận|confirm)$/i.test(V().normalizeText(b.innerText || b.textContent))
         )
@@ -410,7 +406,7 @@
           await V().humanClick(confirmDiscard, { skipScroll: true })
           await M().waitFor(() => detectScreenState() !== 'detail_editor_form', 8000)
         }
-        await V().humanDelay(700, 1150)
+        await V().humanDelay(750, 1250)
       }
       state = detectScreenState()
     }
@@ -422,7 +418,7 @@
           stepLog('switch_tab', 'Chuyển sang tab Ảnh...')
           await V().humanClick(photoTab)
           await M().waitFor(() => detectScreenState() === 'upload_photo_tab' || Boolean(M().findImageInput(document, 200, false)), 8000)
-          await V().humanDelay(500, 900)
+          await V().humanDelay(550, 950)
         }
       }
 
@@ -446,21 +442,19 @@
       }, 30000, 350)
       if (!detailFormReady) return { ok: false, needsNavigation: true, targetUrl: TIKTOK_UPLOAD_URL, visionTrace: trace }
       stepLog('upload_image', 'Đã tải ảnh bìa thành công.', 'info', { checkpointStep: 'image_uploaded' })
-      await V().humanDelay(1200, 2000)
+      await V().humanDelay(1250, 2100)
     }
 
     const confirmedHandle = detectCurrentTikTokHandle() || ''
 
-    // Điền Tiêu đề (bỏ qua nếu đã điền đúng)
     const titleInput = findTitleInput()
     if (titleInput && !V().isTextMatched(V().readEditorValue(titleInput), shortTitle)) {
       stepLog('fill_title', 'Đang điền Tiêu đề...')
       await V().smartTypeText(titleInput, shortTitle, { clearFirst: true, humanBurst: true })
       stepLog('fill_title', 'Đã điền Tiêu đề.', 'info', { checkpointStep: 'title_filled' })
-      await V().humanDelay(550, 950)
+      await V().humanDelay(600, 1050)
     }
 
-    // Điền Mô tả & Hashtag (bỏ qua nếu đã điền đủ)
     const existingCounter = readDescriptionCounter()
     const descEditor = await findAndFocusDescriptionEditor()
     if (!descEditor) return { ok: false, error: 'TIKTOK_DESCRIPTION_EDITOR_NOT_FOUND', visionTrace: trace }
@@ -475,13 +469,13 @@
       }
 
       let descRes = await V().smartTypeText(descEditor, fullDescription, { clearFirst: true, dismissPopover: true, placeholderRe: DESC_PLACEHOLDER_RE, verifyFn: descVerifyFn })
-      await V().humanDelay(550, 950)
+      await V().humanDelay(600, 1050)
       let counterAfter = readDescriptionCounter()
       if (!descRes.ok && (counterAfter === null || counterAfter === 0)) {
         const reFocused = await findAndFocusDescriptionEditor()
         if (reFocused) {
           descRes = await V().smartTypeText(reFocused, fullDescription, { clearFirst: true, dismissPopover: true, placeholderRe: DESC_PLACEHOLDER_RE, verifyFn: descVerifyFn })
-          await V().humanDelay(550, 950)
+          await V().humanDelay(600, 1050)
           counterAfter = readDescriptionCounter()
         }
       }
@@ -490,8 +484,7 @@
     }
     stepLog('fill_desc', 'Đã điền xong Mô tả & Hashtag.', 'info', { checkpointStep: 'desc_filled' })
 
-    // Chọn quyền riêng tư (đã sửa triệt để lỗi không chọn được "Chỉ mình bạn"!)
-    await V().humanDelay(550, 950)
+    await V().humanDelay(600, 1050)
     stepLog('privacy', `Đang chọn đối tượng: ${requestedPrivacy === 'only_me' ? 'Chỉ mình bạn' : 'Mọi người'}...`)
     const privacyResult = await setAndVerifyTikTokPrivacy(requestedPrivacy)
     if (!privacyResult.ok) return { ok: false, error: 'TIKTOK_PRIVACY_NOT_CONFIRMED', actualPrivacy: privacyResult.actual, visionTrace: trace }
@@ -519,35 +512,28 @@
     }
   }
 
-  // SỬA TRIỆT ĐỂ CHỌN ĐỐI TƯỢNG TIKTOK STUDIO 2026 (KHÔNG CUỘN LÀM ĐÓNG POPOVER + CHỌN ĐÚNG LÁ OPTION + PHÍM DỰ PHÒNG)
   async function setAndVerifyTikTokPrivacy(requestedPrivacy) {
     const stepKeyTrigger = 'tiktok:privacy_trigger'
     const stepKeyOption = `tiktok:privacy_option_${requestedPrivacy}`
     const targetLabel = requestedPrivacy === 'only_me' ? 'Chỉ mình bạn' : 'Mọi người'
 
-    // Tạo khoảng đệm 260px dưới cùng vùng cuộn để menu "Mọi người / Bạn bè / Chỉ mình bạn" KHÔNG BỊ CẮT ĐÁY!
     const label = V().findLabelElement(PRIVACY_LABEL_RE, { minLeft: 180, maxLength: 90 })
     const scroller = V().getScrollableAncestor(label || document.body)
     const prevPaddingBottom = scroller?.style?.paddingBottom || ''
-    if (scroller && scroller !== document.documentElement) {
-      scroller.style.paddingBottom = '260px'
-    } else {
-      document.body.style.paddingBottom = '260px'
-    }
+    if (scroller && scroller !== document.documentElement) scroller.style.paddingBottom = '280px'
+    else document.body.style.paddingBottom = '280px'
 
     try {
       await V().scrollContainerToBottom(label || findPrivacyControl())
-      await V().sleep(350)
+      await V().sleep(420)
 
-      // Tầng 1: Kiến thức đã học -> Tầng 2: Bộ tìm mặc định
       const learnedTriggerRule = await V().getLearnedRule(stepKeyTrigger)
       let control = (learnedTriggerRule ? V().findByLearnedRule(learnedTriggerRule) : null) || findPrivacyControl()
       if (!control) {
         const aiTrig = await V().askSelfHealingAI({
-          platform: 'tiktok',
-          stepKey: stepKeyTrigger,
+          platform: 'tiktok', stepKey: stepKeyTrigger,
           goal: 'Tìm nút dropdown chọn quyền riêng tư bên dưới nhãn "Người có thể nhìn thấy bài đăng này" (hiện chữ Mọi người / Bạn bè / Chỉ mình bạn).',
-          errorReason: 'Không tìm thấy nút dropdown chọn quyền riêng tư TikTok'
+          errorReason: 'Không tìm thấy dropdown quyền riêng tư TikTok'
         })
         if (aiTrig.ok && aiTrig.element) {
           control = aiTrig.element
@@ -555,6 +541,9 @@
         }
       }
       if (!control) return { ok: false, actual: null }
+
+      await V().scrollIntoViewSafely(control, 'center')
+      await V().sleep(320)
 
       const exactTargetRe = requestedPrivacy === 'only_me' ? ONLY_ME_RE : PUBLIC_RE
       const looseTargetRe = requestedPrivacy === 'only_me' ? ONLY_ME_LOOSE_RE : PUBLIC_LOOSE_RE
@@ -584,11 +573,10 @@
           if (el === control || el.contains(control) || control.contains(el)) continue
           if (!V().isReallyVisible(el, { minWidth: 36, minHeight: 16 })) continue
           const txt = V().normalizeText(el.innerText || el.textContent)
-          if (!txt || txt.length > 55) continue
-          if (!looseTargetRe.test(txt)) continue
+          if (!txt || txt.length > 55 || !looseTargetRe.test(txt)) continue
           if (oppositeRe.test(txt) || /bạn bè|friends/i.test(txt)) continue
           const r = el.getBoundingClientRect()
-          if (Math.abs(r.left - cRect.left) > 260) continue
+          if (Math.abs(r.left - cRect.left) > 300) continue
           let score = 0
           if (exactTargetRe.test(txt)) score += 60
           if (['option', 'menuitem', 'radio'].includes(el.getAttribute('role'))) score += 50
@@ -603,10 +591,10 @@
       }
 
       const learnedOptRule = await V().getLearnedRule(stepKeyOption)
-
       for (let attempt = 1; attempt <= 3; attempt++) {
         const curControl = findPrivacyControl() || control
         await V().humanClick(curControl, { skipScroll: true })
+        await V().sleep(580)
         if (!findBestDropdownOption()) {
           try {
             curControl.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'mouse', isPrimary: true, bubbles: true }))
@@ -615,13 +603,13 @@
             curControl.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
             curControl.click()
           } catch (_) {}
+          await V().sleep(580)
         }
-        await V().sleep(520)
 
         let opt = (attempt === 1 && learnedOptRule) ? V().findByLearnedRule(learnedOptRule) : null
         const usedLearnedOpt = Boolean(opt)
         if (!opt) {
-          await M().waitFor(() => Boolean(findBestDropdownOption()), 3800, 180)
+          await M().waitFor(() => Boolean(findBestDropdownOption()), 4000, 200)
           opt = findBestDropdownOption()
         }
 
@@ -634,48 +622,41 @@
             opt.click()
           } catch (_) {}
           await V().humanClick(opt, { skipScroll: true })
-          await V().sleep(600)
+          await V().sleep(680)
           if (readCurrent() === requestedPrivacy) return { ok: true, actual: requestedPrivacy }
           if (usedLearnedOpt) await V().invalidateLearnedRule(stepKeyOption)
         }
 
-        // Lần 2: Phím mũi tên + Enter
         if (attempt === 2) {
           try {
             curControl.focus({ preventScroll: true })
             if (!findBestDropdownOption()) {
               curControl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }))
-              await V().sleep(350)
+              await V().sleep(420)
             }
             const steps = requestedPrivacy === 'only_me' ? 3 : 1
             const navKey = requestedPrivacy === 'only_me' ? 'ArrowDown' : 'ArrowUp'
             for (let k = 0; k < steps; k++) {
               curControl.dispatchEvent(new KeyboardEvent('keydown', { key: navKey, code: navKey, bubbles: true }))
-              await V().sleep(180)
+              await V().sleep(220)
             }
             curControl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }))
-            await V().sleep(600)
+            await V().sleep(650)
             if (readCurrent() === requestedPrivacy) return { ok: true, actual: requestedPrivacy }
           } catch (_) {}
         }
 
-        // Lần 3: Tự nhờ AI Local qwen3.5:4b nhìn dropdown đang mở, bấm đúng nút & lưu kiến thức mới!
         if (attempt === 3) {
-          if (!findBestDropdownOption()) {
-            await V().humanClick(curControl, { skipScroll: true })
-            await V().sleep(500)
-          }
+          if (!findBestDropdownOption()) { await V().humanClick(curControl, { skipScroll: true }); await V().sleep(580) }
           const aiOpt = await V().askSelfHealingAI({
-            platform: 'tiktok',
-            stepKey: stepKeyOption,
+            platform: 'tiktok', stepKey: stepKeyOption,
             goal: `Trong danh sách thả xuống quyền riêng tư đang mở của TikTok Studio, chọn mục "${targetLabel}" (không chọn Bạn bè hay mục khác).`,
-            errorReason: `Không chọn được "${targetLabel}" trên TikTok Studio (có thể giao diện mới hoặc bị popup che)`
+            errorReason: `Không chọn được "${targetLabel}" trên TikTok Studio`
           })
           if (aiOpt.ok && aiOpt.element) {
             await V().humanClick(aiOpt.element, { skipScroll: true })
-            await V().sleep(650)
+            await V().sleep(720)
             if (readCurrent() === requestedPrivacy) {
-              // Ghi nhớ vĩnh viễn quy tắc mới để những lần sau KHÔNG cần hỏi AI nữa!
               await V().saveLearnedRule(stepKeyOption, aiOpt.element, { ...(aiOpt.learnedRule || {}), clickMode: 'skip_scroll' })
               return { ok: true, actual: requestedPrivacy }
             }
@@ -683,7 +664,7 @@
         }
 
         V().dispatchEscape()
-        await V().sleep(320)
+        await V().sleep(360)
       }
 
       return { ok: readCurrent() === requestedPrivacy, actual: readCurrent() }
@@ -713,7 +694,7 @@
         const txt = V().normalizeText(modal.innerText || modal.textContent)
         if (!handledConfirmModal && /tiếp tục đăng|continue to post|kiểm tra bản quyền|copyright/i.test(txt)) {
           const confirmBtn = V().queryAllDeep(modal, 'button, [role="button"]').find((b) => V().isReallyVisible(b) && !V().isElementDisabled(b) && /^(đăng ngay|đăng|tiếp tục|post now|post|continue)$/i.test(V().normalizeText(b.innerText || b.textContent)))
-          if (confirmBtn) { handledConfirmModal = true; await V().humanClick(confirmBtn, { skipScroll: true }); await V().humanDelay(750, 1150) }
+          if (confirmBtn) { handledConfirmModal = true; await V().humanClick(confirmBtn, { skipScroll: true }); await V().humanDelay(800, 1250) }
         }
         if (/đã được tải lên|has been uploaded|đã đăng|xét duyệt|đang xem xét|under review|quản lý bài đăng|manage your posts/i.test(txt)) {
           const manageBtn = V().queryAllDeep(modal, 'button, a, [role="button"]').find((b) => V().isReallyVisible(b) && /quản lý bài đăng|manage your posts|bài đăng/i.test(V().normalizeText(b.innerText || b.textContent)))
@@ -724,7 +705,7 @@
       const toasts = V().queryAllDeep(document, '[role="status"], [role="alert"], [class*="toast"], [class*="Toast"]').filter((el) => V().isReallyVisible(el)).map((el) => V().normalizeText(el.innerText || el.textContent)).join(' | ')
       if (/không thể đăng|thất bại|failed|captcha|xác minh/i.test(toasts)) return { ok: false, error: `TIKTOK_PUBLISH_ERROR: ${toasts.slice(0, 120)}` }
       if (/đã đăng|posted|đã tải lên|thành công|xét duyệt|đang xem xét/i.test(toasts)) return { ok: true }
-      await V().sleep(700)
+      await V().sleep(750)
     }
     return { ok: false, error: 'TIKTOK_POST_NOT_VERIFIED' }
   }
@@ -788,7 +769,7 @@
 
     if (moreBtn && moreBtn.getBoundingClientRect().left > rRect.left + rRect.width * 0.65) {
       await V().humanClick(moreBtn, { skipScroll: true })
-      await V().humanDelay(400, 720)
+      await V().humanDelay(450, 800)
       const menuLinks = extractRealTikTokPostLinks(document)
       if (menuLinks.length > 0) { V().dispatchEscape(); return menuLinks[0] }
       const viewLink = V().queryAllDeep(document, 'a[href], [role="menuitem"] a[href]').find((a) =>
@@ -805,7 +786,7 @@
     const stable = await V().waitForPageStable('tiktok', { maxWaitMs: 15000 })
     if (!stable.ok) return { ok: false, status: 'pending_review', reason: stable.reason }
 
-    await V().humanDelay(750, 1250)
+    await V().humanDelay(800, 1350)
     const detectedHandle = detectCurrentTikTokHandle() || options.accountHandle || null
 
     if (/^\/@[A-Za-z0-9._-]+/i.test(location.pathname)) {
@@ -845,6 +826,10 @@
   }
 
   function extractTikTokPostId(postUrl) { return String(postUrl || '').match(/\/(?:video|photo)\/([0-9]+)/i)?.[1] || null }
+  function extractHashtagsFromText(text) {
+    const matches = String(text || '').match(/#[\p{L}\p{N}_]{2,40}/gu) || []
+    return Array.from(new Set(matches)).slice(0, 6).join(' ')
+  }
 
   function extractTikTokCardMetrics(card) {
     let likes = 0, comments = 0, shares = 0
@@ -856,10 +841,14 @@
       const el = card.querySelector(sel)
       if (el) likes = Math.max(likes, V().parseHumanCount(el.innerText || el.textContent))
     }
-    const cEl = card.querySelector('[data-e2e="comment-count"]')
-    if (cEl) comments = V().parseHumanCount(cEl.innerText || cEl.textContent)
-    const sEl = card.querySelector('[data-e2e="share-count"]')
-    if (sEl) shares = V().parseHumanCount(sEl.innerText || sEl.textContent)
+    for (const sel of ['[data-e2e="comment-count"]', '[data-e2e="browse-comment-count"]', '[aria-label*="bình luận"]', '[aria-label*="comment"]']) {
+      const cEl = card.querySelector(sel)
+      if (cEl) comments = Math.max(comments, V().parseHumanCount(cEl.innerText || cEl.textContent || cEl.getAttribute('aria-label')))
+    }
+    for (const sel of ['[data-e2e="share-count"]', '[aria-label*="chia sẻ"]', '[aria-label*="share"]']) {
+      const sEl = card.querySelector(sel)
+      if (sEl) shares = Math.max(shares, V().parseHumanCount(sEl.innerText || sEl.textContent || sEl.getAttribute('aria-label')))
+    }
     if (likes === 0) {
       for (const el of card.querySelectorAll('strong, span')) {
         const t = V().normalizeText(el.innerText || el.textContent)
@@ -883,46 +872,51 @@
     if (!targetPill && categoryIndex > 0) targetPill = pills[categoryIndex % pills.length]
     if (!targetPill) return false
     await V().humanClick(targetPill, { skipScroll: true })
-    await V().humanDelay(1400, 2200)
+    await V().humanDelay(1800, 2900)
     return true
   }
 
-  // SỬA TRIỆT ĐỂ CUỘN SÂU TRÊN TRANG TÌM KIẾM TIKTOK (KỂ CẢ TAB NỀN!)
+  // Kiên trì cuộn 12–28 lần (2–3 phút), chờ tải khi mạng chậm, không bao giờ nhảy từ khóa sau 1 lần lướt!
   async function scrapeTikTokViralPosts(options = {}) {
     const targetCount = Number(options.targetCount) || 10
-    const minLikes = Number(options.minLikes) || 200000
-    const maxRoundsOnPage = Number(options.maxRoundsOnPage) || 18
-    const idleTimeoutMs = Number(options.idleTimeoutMs) || 4 * 60 * 1000
+    const minLikes = Number(options.minLikes) || 1000000
+    const minRoundsOnPage = Number(options.minRoundsOnPage) || 12
+    const maxRoundsOnPage = Number(options.maxRoundsOnPage) || 28
+    const perSourceMaxMs = Number(options.perSourceMaxMs) || 150000
+    const strictDurationMs = Number(options.strictDurationMs) || 0
+    const idleTimeoutMs = Number(options.idleTimeoutMs) || 3 * 60 * 1000
     let lastFoundAt = Number(options.lastFoundAt) || Date.now()
+    const startedAt = Date.now()
     const totalAlreadyFound = Number(options.totalAlreadyFound) || 0
     const startCategoryIndex = Number(options.categoryIndex) || 0
     const preferredExploreTab = options.preferredExploreTab || ''
     const topicLabel = options.topicLabel || ''
     const seenUrls = new Set((options.excludeUrls || []).map((u) => String(u).trim().toLowerCase()))
 
-    const stable = await V().waitForPageStable('tiktok', { maxWaitMs: 20000 })
+    const stable = await V().waitForPageStable('tiktok', { maxWaitMs: 24000 })
     if (!stable.ok) return { ok: false, error: `TIKTOK_${stable.reason}`, posts: [], lastFoundAt }
     if (location.pathname.includes('/explore') && (preferredExploreTab || startCategoryIndex > 0)) {
       await clickExploreCategoryPill(startCategoryIndex, preferredExploreTab)
     }
 
     const collected = []
-    let stagnantRounds = 0, catSwitchCount = 0, lastCardsLen = 0
+    let stagnantRounds = 0, catSwitchCount = 0, lastCardsLen = 0, visionAssistCalled = false
+    const cardSelector = 'div[data-e2e="explore-item"], div[data-e2e="search_video-item"], div[data-e2e="search_top-item"], div[data-e2e="recommend-list-item-container"], article[data-e2e="recommend-list-item-container"], div[class*="DivItemContainer"], article[data-e2e]'
 
-    for (let round = 0; round < maxRoundsOnPage && collected.length < targetCount; round++) {
+    for (let round = 0; round < maxRoundsOnPage; round++) {
+      if (!strictDurationMs && collected.length >= targetCount) break
+      if (strictDurationMs && Date.now() - startedAt >= strictDurationMs) break
+      if (Date.now() - startedAt >= perSourceMaxMs) break
       if (Date.now() - lastFoundAt >= idleTimeoutMs) return { ok: true, posts: collected, timedOut: true, lastFoundAt }
+
       const health = V().inspectPageHealth()
       if (health.isOffline) await V().waitForPageStable('tiktok', { maxWaitMs: 25000 })
       if (health.isCaptchaOrCheckpoint) break
 
-      const cards = Array.from(
-        document.querySelectorAll('div[data-e2e="explore-item"], div[data-e2e="search_video-item"], div[data-e2e="search_top-item"], div[data-e2e="recommend-list-item-container"], article[data-e2e="recommend-list-item-container"], div[class*="DivItemContainer"], article[data-e2e]')
-      )
-
+      const cards = Array.from(document.querySelectorAll(cardSelector))
       for (const card of cards) {
-        if (collected.length >= targetCount || Date.now() - lastFoundAt >= idleTimeoutMs) break
+        if (!strictDurationMs && collected.length >= targetCount) break
         try {
-          // Bỏ qua các thẻ LIVE stream (số trên thẻ là người đang xem LIVE, không phải lượt tim video!)
           const cardTextQuick = V().normalizeText(card.innerText || '').slice(0, 60)
           if (card.querySelector('[data-e2e*="live"], a[href*="/live"]') || /\bLIVE\b/.test(cardTextQuick)) continue
 
@@ -941,6 +935,7 @@
           const authorMatch = postUrl.match(/tiktok\.com\/(@[A-Za-z0-9._-]+)\//i)
           const author = V().normalizeText(card.querySelector('[data-e2e="explore-card-user-unique-id"], [data-e2e="search-card-user-unique-id"], [data-e2e="video-author-uniqueid"]')?.textContent || '') || (authorMatch ? authorMatch[1] : '@creator')
           const bestCaption = (imgAlt.length > descTxt.length && !/avatar/i.test(imgAlt)) ? imgAlt : (descTxt || `Video TikTok Viral của ${author}`)
+          const hashtags = extractHashtagsFromText(`${bestCaption} ${descTxt}`)
 
           const cardImgs = Array.from(card.querySelectorAll('img[src]')).filter((i) => !/avatar/i.test(i.alt || '') && i.naturalWidth >= 80)
           const thumbnailUrl = cardImgs[0]?.src || card.querySelector('img[src]')?.src || ''
@@ -951,56 +946,69 @@
           lastFoundAt = Date.now()
           collected.push({
             id: `tt-viral-${Date.now()}-${collected.length}`,
-            title: V().truncateClean(bestCaption, 105),
+            title: V().truncateClean(bestCaption, 115),
             platform: 'tiktok',
             category: topicLabel || (postUrl.includes('/photo/') ? 'Ảnh TikTok' : 'Video TikTok'),
             postUrl,
             summary: V().truncateClean(`[${authorHandleClean}] ${bestCaption} • ${metrics.likes.toLocaleString('vi-VN')} tim`, 250),
-            viralityScore: Math.min(99, 90 + Math.min(9, Math.floor(Math.log10(metrics.likes) * 1.5))),
+            viralityScore: Math.min(99, 90 + Math.min(9, Math.floor(Math.log10(Math.max(10, metrics.likes)) * 1.5))),
             likesCount: metrics.likes, sharesCount: metrics.shares, commentsCount: metrics.comments,
-            trendingTopic: `${postUrl.includes('/photo/') ? 'Ảnh TikTok' : 'Video TikTok'} • ${(metrics.likes / 1000).toFixed(0)}K+ tim`,
+            trendingTopic: hashtags ? `${postUrl.includes('/photo/') ? 'Ảnh TikTok' : 'Video TikTok'} • ${hashtags}` : `${(metrics.likes / 1000).toFixed(0)}K+ tim`,
             thumbnailUrl,
             authorName: authorHandleClean,
             authorUrl,
             createdAt: new Date().toISOString()
           })
-          V().reportStep('tiktok', 'scrape_viral', `TikTok Viral: ${totalAlreadyFound + collected.length} bài (${metrics.likes.toLocaleString('vi-VN')} tim)`)
+          V().reportStep('tiktok', 'scrape_viral', `TikTok Viral: ${totalAlreadyFound + collected.length} bài (❤️ ${metrics.likes.toLocaleString('vi-VN')})`)
         } catch (_) {}
       }
 
-      if (collected.length >= targetCount) break
+      if (!strictDurationMs && collected.length >= targetCount) break
 
-      // Bấm nút "Tải thêm" / "Load more" nếu TikTok hiển thị nút phân trang ở cuối danh sách tìm kiếm
+      if (round === 5 && collected.length === 0 && !visionAssistCalled) {
+        visionAssistCalled = true
+        const aiHelp = await V().askSelfHealingAI({
+          platform: 'tiktok', stepKey: 'tiktok:viral_scrape_rescue',
+          goal: 'Trang TikTok đang cào video Viral nhưng chưa thấy bài đạt ngưỡng. Kiểm tra có popup đăng nhập/điều khoản cần đóng (dismiss_popup) hoặc nút Tải thêm cần bấm (click_mark) hay cuộn tiếp (scroll_down).',
+          errorReason: 'Đã cuộn 5 lần trên TikTok nhưng chưa lấy được video nào'
+        })
+        if (aiHelp.ok && aiHelp.action === 'dismiss_popup') {
+          if (aiHelp.element) await V().humanClick(aiHelp.element, { skipScroll: true })
+          else V().dispatchEscape()
+        } else if (aiHelp.ok && aiHelp.action === 'click_mark' && aiHelp.element) {
+          await V().humanClick(aiHelp.element, { skipScroll: true })
+          await V().humanDelay(1600, 2600)
+        }
+      }
+
       const loadMoreBtn = V().queryAllDeep(document, 'button, [role="button"]').find((b) =>
         V().isReallyVisible(b, { minWidth: 60, minHeight: 24 }) && /^(tải thêm|xem thêm|load more|show more)$/i.test(V().normalizeText(b.innerText || b.textContent))
       )
       if (loadMoreBtn) {
         await V().humanClick(loadMoreBtn)
-        await V().humanDelay(1400, 2200)
+        await V().humanDelay(1800, 3000)
       }
 
-      // Cuộn sâu container thật của TikTok Search/Explore (kể cả khi tab đang ở nền!)
+      const prevCount = cards.length
       const lastCard = cards[cards.length - 1]
-      if (lastCard) {
-        try { lastCard.scrollIntoView({ behavior: 'auto', block: 'end' }) } catch (_) {}
-      }
-      await V().scrollPageDownForFeed(1400 + Math.round(Math.random() * 500), lastCard)
-      try {
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', code: 'PageDown', keyCode: 34, bubbles: true }))
-      } catch (_) {}
-      await V().humanDelay(1400, 2200)
+      if (lastCard) { try { lastCard.scrollIntoView({ behavior: 'auto', block: 'end' }) } catch (_) {} }
+      await V().scrollPageDownForFeed(1350, lastCard)
+      try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', code: 'PageDown', keyCode: 34, bubbles: true })) } catch (_) {}
 
-      const newCardsLen = document.querySelectorAll('div[data-e2e="explore-item"], div[data-e2e="search_video-item"], div[data-e2e="search_top-item"], div[class*="DivItemContainer"]').length
+      // Chờ mạng chậm tải thêm video mới (tối đa 6s) trước khi đánh dấu đứng trang
+      await V().humanScrollPause()
+      await M().waitFor(() => document.querySelectorAll(cardSelector).length > prevCount, 5500, 500)
+
+      const newCardsLen = document.querySelectorAll(cardSelector).length
       if (newCardsLen <= lastCardsLen) {
         stagnantRounds++
-        if (stagnantRounds >= 3 && location.pathname.includes('/explore') && !preferredExploreTab && catSwitchCount < 6) {
+        if (stagnantRounds >= 4 && location.pathname.includes('/explore') && !preferredExploreTab && catSwitchCount < 6) {
           catSwitchCount++
           stagnantRounds = 0
           await clickExploreCategoryPill(startCategoryIndex + catSwitchCount)
           continue
         }
-        // Ở trang search: nếu cuộn 3 lần liên tiếp không ra thêm video mới -> kết thúc từ khóa này để chuyển sang từ khóa kế tiếp!
-        if (stagnantRounds >= 3 && location.pathname.includes('/search')) break
+        if (!strictDurationMs && round >= minRoundsOnPage && stagnantRounds >= 6) break
       } else {
         stagnantRounds = 0
         lastCardsLen = newCardsLen
@@ -1010,15 +1018,16 @@
     V().clearHud(2500)
     return { ok: true, posts: collected, timedOut: false, lastFoundAt }
   }
+
   async function watchTikTokItem(options = {}) {
-    const dwellMs = Math.max(3000, (Number(options.dwellSeconds) || 8) * 1000)
-    await V().sleep(dwellMs)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, bubbles: true }))
-    await V().scrollPageDownForFeed(850)
-    return { ok: true }
+    const watchedMs = await V().humanWatchPause(Number(options.dwellSeconds) || 8)
+    if (options.advanceNext !== false) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, bubbles: true }))
+      await V().scrollPageDownForFeed(850)
+    }
+    return { ok: true, watchedMs }
   }
 
-  // Đọc bình luận TikTok chuẩn DOM 2026 (như Ảnh 8: tên, nội dung, số tim 37.6K!)
   async function scrapeTikTokComments(options = {}) {
     const maxComments = Number(options.maxComments) || 40
     const comments = []
@@ -1028,9 +1037,9 @@
     const commentTab = V().queryAllDeep(document, 'button, [role="tab"], div').find((el) =>
       V().isReallyVisible(el) && /^bình luận|comments/i.test(V().normalizeText(el.innerText))
     )
-    if (commentTab) { await V().humanClick(commentTab, { skipScroll: true }); await V().sleep(700) }
+    if (commentTab) { await V().humanClick(commentTab, { skipScroll: true }); await V().humanDelay(800, 1400) }
 
-    for (let round = 0; round < 10 && comments.length < maxComments; round++) {
+    for (let round = 0; round < 12 && comments.length < maxComments; round++) {
       const items = document.querySelectorAll('[data-e2e="comment-level-1"], [class*="DivCommentItemContainer"], [class*="CommentObjectWrapper"]')
       for (const item of items) {
         if (comments.length >= maxComments) break
@@ -1040,8 +1049,7 @@
         seen.add(text)
         const author = V().normalizeText(card?.querySelector('[data-e2e="comment-username-1"], a[href*="/@"]')?.innerText || '@user')
         const likeEl = card?.querySelector('[data-e2e="comment-like-count"], [class*="SpanCount"]')
-        const likes = likeEl ? V().parseHumanCount(likeEl.innerText || likeEl.textContent) : 0
-        comments.push({ author, text, likes })
+        comments.push({ author, text, likes: likeEl ? V().parseHumanCount(likeEl.innerText || likeEl.textContent) : 0 })
       }
       const listContainer = document.querySelector('[class*="DivCommentListContainer"], [data-e2e="search-comment-container"]')
       if (listContainer) {
@@ -1050,14 +1058,13 @@
       } else {
         await V().scrollPageDownForFeed(700)
       }
-      await V().sleep(1100)
+      await V().humanDelay(1200, 2200)
     }
     return { ok: true, postTitle, comments }
   }
 
-  // Quét hồ sơ kênh TikTok chuẩn Ảnh 12 (tên, handle, bio, follower, tổng thích, 12 tiêu đề video gần nhất!)
   async function scrapeTikTokChannelProfile(options = {}) {
-    await V().sleep(900)
+    await V().humanDelay(1000, 1800)
     const channelName = V().normalizeText(document.querySelector('[data-e2e="user-subtitle"], h2[data-e2e="user-subtitle"], h1')?.innerText || '')
     const handle = V().normalizeText(document.querySelector('[data-e2e="user-title"], h1[data-e2e="user-title"]')?.innerText || detectCurrentTikTokHandle() || '')
     const bio = V().normalizeText(document.querySelector('[data-e2e="user-bio"]')?.innerText || '')
@@ -1066,22 +1073,14 @@
     const avatarUrl = document.querySelector('[data-e2e="user-avatar"] img')?.src || ''
     const sampleTitles = Array.from(document.querySelectorAll('[data-e2e="user-post-item"] img[alt], [data-e2e="user-post-item"] a[title]'))
       .map((el) => V().normalizeText(el.getAttribute('alt') || el.getAttribute('title') || ''))
-      .filter((t) => t.length >= 4)
-      .slice(0, 12)
+      .filter((t) => t.length >= 4).slice(0, 12)
     return {
       ok: true,
       channel: {
-        platform: 'tiktok',
-        channelUrl: options.channelUrl || location.href,
-        channelName: channelName || handle,
-        handle: handle.startsWith('@') ? handle : `@${handle}`,
-        bio,
-        avatarUrl,
-        followersCount,
-        totalLikesCount,
-        sampleTitles
+        platform: 'tiktok', channelUrl: options.channelUrl || location.href,
+        channelName: channelName || handle, handle: handle.startsWith('@') ? handle : `@${handle}`,
+        bio, avatarUrl, followersCount, totalLikesCount, sampleTitles
       }
     }
   }
-
 })()

@@ -1,11 +1,13 @@
 /*
   FILE NOTE
-  - Mục đích: Service Worker nền (Manifest V3) v3.5.0 — Đầy đủ, không cắt đoạn, chạy ổn định 24/7.
-  - Tính năng:
-    1. Đăng bài Facebook & TikTok đa tài khoản có cơ chế tự phục hồi 3 lần + theo dõi xét duyệt TikTok.
-    2. Cầu nối Vision AI (qwen3.5:4b) qua Admin Bridge Port + lưu kiến thức selector tự học.
-    3. Cào Viral Progressive (bên nào xong trước bắn VIRAL_BATCH_READY hiện ngay lên bảng): FB Bài viết >= 1K, FB Thước phim >= 10K, TikTok >= 1M (tùy chỉnh được).
-    4. Đầy đủ 4 tác vụ tự động mới: Xem video/bài viết N lần, Đọc bình luận, Quét hồ sơ kênh/trang cá nhân, Lướt feed theo thời gian.
+  - Mục đích: Service Worker nền (Manifest V3) v3.5.1 — Đầy đủ, ổn định 24/7.
+  - Khắc phục triệt để:
+    1. Bổ sung SW_SLEEP chuẩn thời gian thật + AI_SELF_HEAL + GET/SAVE/INVALIDATE_LEARNED_KNOWLEDGE + TEST_VISION_AI.
+    2. Đăng bài SONG SONG độc lập Facebook & TikTok (không khóa chéo nhau), hỗ trợ đăng Trang cá nhân hoặc Nhóm Facebook.
+    3. Cào Viral chuẩn ngưỡng mới: FB Bài viết >= 1K, FB Thước phim >= 5K, TikTok >= 1M, cuộn kiên trì 10–30 lần / 2–3 phút, bắn progressive VIRAL_BATCH_READY.
+    4. Lướt FB/TikTok chạy ĐÚNG thời gian (phút) và xem video tự động với độ trễ ngẫu nhiên như người thật.
+  - Liên kết trực tiếp: extension/vision-engine.js, extension/content-facebook.js, extension/content-tiktok.js, extension/content-admin-bridge.js
+  - Vùng ảnh hưởng khi sửa: Luồng điều phối Service Worker, đăng bài nền tảng mạng xã hội, cào dữ liệu viral và kết nối AI local.
 */
 
 const FB_POST_HOME_URL = 'https://www.facebook.com/me'
@@ -54,7 +56,7 @@ const VIRAL_TOPIC_PRESETS = {
   },
   anime: {
     label: 'Anime',
-    fbQuery: 'anime edit vietsub review',
+    fbQuery: 'anime vietsub review',
     ttQuery: 'anime edit vietsub',
     ttExploreTab: 'Anime'
   },
@@ -97,6 +99,10 @@ function getExtensionVersion() {
   return chrome.runtime.getManifest().version
 }
 
+function randomBetween(minMs, maxMs) {
+  return Math.round(minMs + Math.random() * Math.max(0, maxMs - minMs))
+}
+
 function pushLog(entry) {
   const item = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -127,7 +133,7 @@ function ensureKeepAlive() {
         return
       }
       try { chrome.runtime.getPlatformInfo(() => {}) } catch (_) {}
-    }, 18000)
+    }, 15000)
   } else if (activeJobs.size === 0 && keepAliveTimer) {
     clearInterval(keepAliveTimer)
     keepAliveTimer = null
@@ -186,7 +192,18 @@ async function saveLearnedKnowledge(patch) {
   return next
 }
 
-async function callAdminApiViaBridge(path, method = 'POST', body = null, timeoutMs = 35000) {
+async function invalidateLearnedKnowledgeKey(stepKey) {
+  if (!stepKey) return {}
+  const cur = await getLearnedKnowledge()
+  if (stepKey in cur) {
+    delete cur[stepKey]
+    await chrome.storage.local.set({ [STORAGE_KNOWLEDGE_KEY]: cur })
+    callAdminApiViaBridge('/api/admin/social/ai/knowledge', 'POST', { knowledge: cur }).catch(() => {})
+  }
+  return cur
+}
+
+async function callAdminApiViaBridge(path, method = 'POST', body = null, timeoutMs = 48000) {
   const bridgePort = Array.from(adminPorts).find((p) => p.name === 'omnicart-admin-bridge')
   if (!bridgePort) throw new Error('ADMIN_BRIDGE_NOT_CONNECTED')
   const fetchId = `bf-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -221,14 +238,8 @@ async function reinjectAdminBridges() {
   } catch (_) {}
 }
 
-chrome.runtime.onInstalled.addListener(() => {
-  setup247Alarms()
-  reinjectAdminBridges()
-})
-chrome.runtime.onStartup.addListener(() => {
-  setup247Alarms()
-  reinjectAdminBridges()
-})
+chrome.runtime.onInstalled.addListener(() => { setup247Alarms(); reinjectAdminBridges() })
+chrome.runtime.onStartup.addListener(() => { setup247Alarms(); reinjectAdminBridges() })
 setup247Alarms()
 
 // =========================================================================
@@ -275,7 +286,6 @@ async function processPendingVerifications() {
     for (const item of pending) {
       if (item.platform !== 'tiktok') continue
       item.checks = (item.checks || 0) + 1
-
       try {
         let tab = await findOrCreateTikTokPostTab()
         const onStudioPosts = Boolean(tab.url && /tiktok\.com\/tiktokstudio\/(content|home)?(\?|$)/i.test(tab.url))
@@ -289,10 +299,7 @@ async function processPendingVerifications() {
 
         if (check?.status === 'rejected') {
           const rejectEvent = {
-            postId: item.postId,
-            platform: 'tiktok',
-            status: 'failed',
-            rejected: true,
+            postId: item.postId, platform: 'tiktok', status: 'failed', rejected: true,
             error: check.error || 'Bài đăng TikTok bị từ chối duyệt.'
           }
           resolvedList.unshift(rejectEvent)
@@ -317,13 +324,9 @@ async function processPendingVerifications() {
 
         if (check?.status === 'published' && check.postUrl) {
           const resolvedEvent = {
-            postId: item.postId,
-            platform: 'tiktok',
-            status: 'published',
-            postUrl: check.postUrl,
-            realPostId: check.postId || `tiktok-${Date.now()}`,
-            privacy: item.privacy,
-            publishedTime: new Date().toISOString(),
+            postId: item.postId, platform: 'tiktok', status: 'published',
+            postUrl: check.postUrl, realPostId: check.postId || `tiktok-${Date.now()}`,
+            privacy: item.privacy, publishedTime: new Date().toISOString(),
             account: check.accountHandle || item.account
           }
           resolvedList.unshift(resolvedEvent)
@@ -361,8 +364,7 @@ chrome.runtime.onConnect.addListener(async (port) => {
   if (port.name !== 'omnicart-admin-bridge' && port.name !== 'omnicart-popup') return
   adminPorts.add(port)
   const [pendingVerifications, resolvedVerifications] = await Promise.all([
-    getPendingVerifications(),
-    getResolvedVerifications()
+    getPendingVerifications(), getResolvedVerifications()
   ])
   try {
     port.postMessage({
@@ -423,7 +425,7 @@ chrome.runtime.onConnect.addListener(async (port) => {
 // QUẢN LÝ TAB & PHỤC HỒI CHECKPOINT
 // =========================================================================
 
-async function waitForTabComplete(tabId, timeoutMs = 20000) {
+async function waitForTabComplete(tabId, timeoutMs = 24000) {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     try {
@@ -437,10 +439,10 @@ async function waitForTabComplete(tabId, timeoutMs = 20000) {
   throw new Error('TAB_LOAD_TIMEOUT')
 }
 
-async function navigateTabAndWait(tabId, url, settleMs = 2200) {
+async function navigateTabAndWait(tabId, url, settleMs = 2600) {
   await chrome.tabs.update(tabId, { url })
-  await waitForTabComplete(tabId, 24000)
-  await new Promise((r) => setTimeout(r, settleMs))
+  await waitForTabComplete(tabId, 26000)
+  await new Promise((r) => setTimeout(r, settleMs + randomBetween(200, 750)))
   return await chrome.tabs.get(tabId)
 }
 
@@ -454,7 +456,7 @@ async function sendTabMessageWithRetry(tabId, message, scriptFiles) {
     const receiverMissing = /receiving end does not exist|could not establish connection|no content script response|message port closed/i.test(err.message || '')
     if (receiverMissing && scriptFiles && chrome.scripting) {
       await chrome.scripting.executeScript({ target: { tabId }, files: Array.isArray(scriptFiles) ? scriptFiles : [scriptFiles] })
-      await new Promise((r) => setTimeout(r, 950))
+      await new Promise((r) => setTimeout(r, 1000))
       const retryRes = await chrome.tabs.sendMessage(tabId, message)
       if (retryRes) return retryRes
       throw new Error('NO_CONTENT_SCRIPT_RESPONSE')
@@ -472,13 +474,18 @@ function isScraperTabId(tabId) {
   )
 }
 
-async function findOrCreateFacebookPostTab() {
+async function findOrCreateFacebookPostTab(targetUrl = FB_POST_HOME_URL) {
   const tabs = await chrome.tabs.query({})
   const existing = tabs.find((tab) => !isScraperTabId(tab.id) && tab.url && /(^|\.)facebook\.com/i.test(new URL(tab.url).hostname))
-  if (existing) return existing
-  const created = await chrome.tabs.create({ url: FB_POST_HOME_URL, active: false })
-  await waitForTabComplete(created.id, 22000)
-  await new Promise((r) => setTimeout(r, 2400))
+  if (existing) {
+    if (targetUrl && targetUrl !== FB_POST_HOME_URL && !String(existing.url || '').startsWith(targetUrl.replace(/\/+$/, ''))) {
+      return await navigateTabAndWait(existing.id, targetUrl, 2600)
+    }
+    return existing
+  }
+  const created = await chrome.tabs.create({ url: targetUrl || FB_POST_HOME_URL, active: false })
+  await waitForTabComplete(created.id, 24000)
+  await new Promise((r) => setTimeout(r, 2600))
   return created
 }
 
@@ -489,12 +496,12 @@ async function findOrCreateTikTokPostTab() {
   )
   if (existing) return existing
   const created = await chrome.tabs.create({ url: TIKTOK_STUDIO_HOME_URL, active: false })
-  await waitForTabComplete(created.id, 22000)
-  await new Promise((r) => setTimeout(r, 2500))
+  await waitForTabComplete(created.id, 24000)
+  await new Promise((r) => setTimeout(r, 2700))
   return created
 }
 
-async function openOrReuseScraperTab(key, url, settleMs = 2600) {
+async function openOrReuseScraperTab(key, url, settleMs = 3000) {
   const existingId = scraperTabIds[key]
   if (existingId) {
     try {
@@ -506,8 +513,8 @@ async function openOrReuseScraperTab(key, url, settleMs = 2600) {
   }
   const created = await chrome.tabs.create({ url, active: false })
   scraperTabIds[key] = created.id
-  await waitForTabComplete(created.id, 24000)
-  await new Promise((r) => setTimeout(r, settleMs))
+  await waitForTabComplete(created.id, 26000)
+  await new Promise((r) => setTimeout(r, settleMs + randomBetween(300, 900)))
   return await chrome.tabs.get(created.id)
 }
 
@@ -587,6 +594,7 @@ async function preparePostPayload(postData, senderTabUrl) {
     title: String(postData.title || postData.headline || '').trim(),
     content: String(postData.content || postData.description || postData.caption || postData.body || '').trim(),
     hashtags: normalizeHashtagsField(postData.hashtags || postData.tags),
+    targetGroupUrl: String(postData.targetGroupUrl || '').trim(),
     privacy,
     imageDataUrl: await loadProductImageDataUrl(rawImage, senderTabUrl)
   }
@@ -603,17 +611,18 @@ function isConfirmedPostResponse(response, platform, requestedPrivacy) {
 // VISION AI CỨU CÁNH GIAO DIỆN (qwen3.5:4b) & TỰ HỌC SELECTOR
 // =========================================================================
 
-async function handleVisionAiAssist(message, sender) {
+async function handleVisionAiAssist(rawPayload, sender) {
+  const message = rawPayload?.payload || rawPayload || {}
   let screenshotBase64 = null
   try {
     if (sender?.tab?.active && sender?.tab?.windowId) {
-      screenshotBase64 = await chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: 'jpeg', quality: 60 })
+      screenshotBase64 = await chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: 'jpeg', quality: 65 })
     }
   } catch (_) {}
 
   try {
     const payload = {
-      platform: message.platform || 'tiktok',
+      platform: message.platform || 'facebook',
       stepKey: message.stepKey || '',
       goal: message.goal || '',
       url: message.url || sender?.tab?.url || '',
@@ -624,7 +633,7 @@ async function handleVisionAiAssist(message, sender) {
       screenshotBase64,
       elements: Array.isArray(message.elements) ? message.elements : []
     }
-    const res = await callAdminApiViaBridge('/api/admin/social/ai/vision-assist', 'POST', payload, 35000)
+    const res = await callAdminApiViaBridge('/api/admin/social/ai/vision-assist', 'POST', payload, 48000)
     if (res?.ok && res?.learnedRule && payload.stepKey) {
       await saveLearnedKnowledge({ [payload.stepKey]: res.learnedRule })
     }
@@ -635,12 +644,14 @@ async function handleVisionAiAssist(message, sender) {
 }
 
 // =========================================================================
-// ĐĂNG BÀI VỚI CHECKPOINT PHỤC HỒI 3 LẦN
+// ĐĂNG BÀI SONG SONG ĐỘC LẬP FACEBOOK & TIKTOK VỚI CHECKPOINT PHỤC HỒI
 // =========================================================================
 
 async function executeWithRecovery(platform, postData, senderTabUrl) {
-  if (activeJobs.has(platform)) return { ok: false, error: `${platform.toUpperCase()}_JOB_ALREADY_RUNNING` }
-  activeJobs.set(platform, { platform, startedAt: new Date().toISOString(), step: 'init' })
+  const jobKey = `post:${platform}`
+  if (activeJobs.has(jobKey)) return { ok: false, error: `${platform.toUpperCase()}_JOB_ALREADY_RUNNING` }
+  const checkpoint = { completedSteps: [], existingPermalinks: [], verifyOnly: false }
+  activeJobs.set(jobKey, { platform, startedAt: new Date().toISOString(), step: 'init', checkpoint })
   ensureKeepAlive()
 
   try {
@@ -650,17 +661,20 @@ async function executeWithRecovery(platform, postData, senderTabUrl) {
       ? ['vision-engine.js', 'content-media.js', 'content-facebook.js']
       : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
     const msgType = platform === 'facebook' ? 'FB_EXECUTE_POST' : 'TIKTOK_EXECUTE_POST'
+    const fbTargetUrl = (platform === 'facebook' && preparedPost.targetGroupUrl) ? preparedPost.targetGroupUrl : FB_POST_HOME_URL
 
     let response = null
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const tab = platform === 'facebook' ? await findOrCreateFacebookPostTab() : await findOrCreateTikTokPostTab()
+        const tab = platform === 'facebook'
+          ? await findOrCreateFacebookPostTab(fbTargetUrl)
+          : await findOrCreateTikTokPostTab()
         chrome.tabs.sendMessage(tab.id, { type: 'VISION_SET_CONFIG', config }).catch(() => {})
-        response = await sendTabMessageWithRetry(tab.id, { type: msgType, payload: preparedPost }, scripts)
+        response = await sendTabMessageWithRetry(tab.id, { type: msgType, payload: preparedPost, checkpoint }, scripts)
 
         if (response?.needsNavigation && response.targetUrl) {
           pushLog({ platform, step: 'recover', level: 'warn', message: `Phát hiện trang lệch/tải lại (lần ${attempt}/3), tự quay lại đúng trang...` })
-          await navigateTabAndWait(tab.id, response.targetUrl, 2600)
+          await navigateTabAndWait(tab.id, response.targetUrl, 2800)
           continue
         }
         break
@@ -668,7 +682,7 @@ async function executeWithRecovery(platform, postData, senderTabUrl) {
         const recoverable = /message port closed|tab_closed|receiving end|no content script/i.test(err.message || '')
         if (recoverable && attempt < 3) {
           pushLog({ platform, step: 'recover', level: 'warn', message: `Tab ${platform} vừa tải lại giữa chừng, đang tự nối lại (lần ${attempt + 1}/3)...` })
-          await new Promise((r) => setTimeout(r, 2000))
+          await new Promise((r) => setTimeout(r, 2200))
           continue
         }
         throw err
@@ -683,9 +697,7 @@ async function executeWithRecovery(platform, postData, senderTabUrl) {
 
     if (platform === 'tiktok' && response.pendingReview && preparedPost.postId) {
       await enqueuePendingVerification({
-        postId: preparedPost.postId,
-        platform: 'tiktok',
-        privacy: preparedPost.privacy,
+        postId: preparedPost.postId, platform: 'tiktok', privacy: preparedPost.privacy,
         titleProbe: response.titleProbe || preparedPost.title.slice(0, 40),
         account: response.account || ''
       })
@@ -697,13 +709,13 @@ async function executeWithRecovery(platform, postData, senderTabUrl) {
     pushLog({ platform, step: 'error', level: 'error', message: `Lỗi ${platform}: ${err.message}` })
     return { ok: false, error: err.message }
   } finally {
-    activeJobs.delete(platform)
+    activeJobs.delete(jobKey)
     ensureKeepAlive()
   }
 }
 
 // =========================================================================
-// CÀO BÀI VIRAL PROGRESSIVE (FB BÀI >= 1K • FB REELS >= 10K • TIKTOK >= 1M)
+// CÀO BÀI VIRAL PROGRESSIVE (FB BÀI >= 1K • FB REELS >= 5K • TIKTOK >= 1M)
 // =========================================================================
 
 function buildTopicSources(options = {}) {
@@ -721,20 +733,24 @@ function buildTopicSources(options = {}) {
   const fbQueries = expandedFb.length ? expandedFb : [customTopic || preset.fbQuery || label].filter(Boolean)
   const ttQueries = expandedTt.length ? expandedTt : [customTopic || preset.ttQuery || label].filter(Boolean)
 
-  const fbFeedSources = fbQueries.map((q) => `https://www.facebook.com/search/posts/?q=${encodeURIComponent(q)}`)
+  const fbFeedSources = [
+    ...fbQueries.map((q) => `https://www.facebook.com/search/top/?q=${encodeURIComponent(q)}`),
+    ...fbQueries.map((q) => `https://www.facebook.com/search/posts/?q=${encodeURIComponent(q)}`)
+  ]
   const fbReelSources = [
     ...fbQueries.map((q) => `https://www.facebook.com/search/videos/?q=${encodeURIComponent(q)}`),
     'https://www.facebook.com/reel/'
   ]
   const ttSources = [
     ...ttQueries.map((q) => `https://www.tiktok.com/search/video?q=${encodeURIComponent(q)}`),
+    ...ttQueries.map((q) => `https://www.tiktok.com/search?q=${encodeURIComponent(q)}`),
     'https://www.tiktok.com/explore'
   ]
   return { label, fbFeedSources, fbReelSources, ttSources, ttExploreTab: preset.ttExploreTab || '' }
 }
 
-async function scrapeFacebookViralStream(tabKey, sources, targetCount, minLikes, initialExcludeUrls, topicCfg, sourceLabel) {
-  const SLIDING_IDLE_MS = 5 * 60 * 1000
+async function scrapeFacebookViralStream(tabKey, sources, targetCount, minLikes, initialExcludeUrls, topicCfg, sourceLabel, emitBatch) {
+  const SLIDING_IDLE_MS = 3 * 60 * 1000
   const scripts = ['vision-engine.js', 'content-media.js', 'content-facebook.js']
   const config = await getVisionConfig()
   const list = Array.isArray(sources) && sources.length ? sources : ['https://www.facebook.com/']
@@ -744,11 +760,10 @@ async function scrapeFacebookViralStream(tabKey, sources, targetCount, minLikes,
   let lastFoundAt = Date.now()
   let sourceIdx = 0
 
-  while (allPosts.length < targetCount && Date.now() - lastFoundAt < SLIDING_IDLE_MS && sourceIdx < list.length * 2) {
-    const sourceUrl = list[sourceIdx % list.length]
-    sourceIdx++
+  while (allPosts.length < targetCount && Date.now() - lastFoundAt < SLIDING_IDLE_MS && sourceIdx < Math.min(list.length, 6)) {
+    const sourceUrl = list[sourceIdx++]
     try {
-      const tab = await openOrReuseScraperTab(tabKey, sourceUrl, 2800)
+      const tab = await openOrReuseScraperTab(tabKey, sourceUrl, 3400)
       chrome.tabs.sendMessage(tab.id, { type: 'VISION_SET_CONFIG', config }).catch(() => {})
       const res = await sendTabMessageWithRetry(
         tab.id,
@@ -757,7 +772,9 @@ async function scrapeFacebookViralStream(tabKey, sources, targetCount, minLikes,
           options: {
             targetCount: targetCount - allPosts.length,
             minLikes,
-            maxRoundsOnPage: 16,
+            minRoundsOnPage: 12,
+            maxRoundsOnPage: 28,
+            perSourceMaxMs: 150000,
             idleTimeoutMs: SLIDING_IDLE_MS,
             lastFoundAt,
             totalAlreadyFound: allPosts.length,
@@ -772,25 +789,28 @@ async function scrapeFacebookViralStream(tabKey, sources, targetCount, minLikes,
         return { ok: false, error: res.error, posts: allPosts, timedOut: false }
       }
       if (res?.lastFoundAt && res.lastFoundAt > lastFoundAt) lastFoundAt = res.lastFoundAt
+      const fresh = []
       for (const p of res?.posts || []) {
         if (allPosts.length >= targetCount) break
         const key = String(p.postUrl || '').trim().toLowerCase()
         if (key && !seenUrls.has(key)) {
           seenUrls.add(key)
           allPosts.push(p)
+          fresh.push(p)
           lastFoundAt = Date.now()
         }
       }
+      if (fresh.length > 0 && typeof emitBatch === 'function') emitBatch('facebook', sourceLabel, fresh)
       if (res?.timedOut) break
     } catch (_) {
-      await new Promise((r) => setTimeout(r, 1500))
+      await new Promise((r) => setTimeout(r, randomBetween(1800, 3200)))
     }
   }
   return { ok: true, posts: allPosts, timedOut: allPosts.length < targetCount && Date.now() - lastFoundAt >= SLIDING_IDLE_MS }
 }
 
-async function scrapeTikTokViralStream(sources, targetCount, minLikes, initialExcludeUrls, topicCfg) {
-  const SLIDING_IDLE_MS = 5 * 60 * 1000
+async function scrapeTikTokViralStream(sources, targetCount, minLikes, initialExcludeUrls, topicCfg, emitBatch) {
+  const SLIDING_IDLE_MS = 3 * 60 * 1000
   const scripts = ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
   const config = await getVisionConfig()
   const cursors = await getScrapeCursors()
@@ -803,11 +823,10 @@ async function scrapeTikTokViralStream(sources, targetCount, minLikes, initialEx
   let lastFoundAt = Date.now()
   let sourceIdx = 0
 
-  while (allPosts.length < targetCount && Date.now() - lastFoundAt < SLIDING_IDLE_MS && sourceIdx < list.length * 2) {
-    const sourceUrl = list[sourceIdx % list.length]
-    sourceIdx++
+  while (allPosts.length < targetCount && Date.now() - lastFoundAt < SLIDING_IDLE_MS && sourceIdx < Math.min(list.length, 6)) {
+    const sourceUrl = list[sourceIdx++]
     try {
-      const tab = await openOrReuseScraperTab('ttViral', sourceUrl, 3000)
+      const tab = await openOrReuseScraperTab('ttViral', sourceUrl, 3600)
       chrome.tabs.sendMessage(tab.id, { type: 'VISION_SET_CONFIG', config }).catch(() => {})
       const res = await sendTabMessageWithRetry(
         tab.id,
@@ -816,7 +835,9 @@ async function scrapeTikTokViralStream(sources, targetCount, minLikes, initialEx
           options: {
             targetCount: targetCount - allPosts.length,
             minLikes,
-            maxRoundsOnPage: 16,
+            minRoundsOnPage: 12,
+            maxRoundsOnPage: 28,
+            perSourceMaxMs: 150000,
             idleTimeoutMs: SLIDING_IDLE_MS,
             lastFoundAt,
             totalAlreadyFound: allPosts.length,
@@ -829,18 +850,21 @@ async function scrapeTikTokViralStream(sources, targetCount, minLikes, initialEx
         scripts
       )
       if (res?.lastFoundAt && res.lastFoundAt > lastFoundAt) lastFoundAt = res.lastFoundAt
+      const fresh = []
       for (const p of res?.posts || []) {
         if (allPosts.length >= targetCount) break
         const key = String(p.postUrl || '').trim().toLowerCase()
         if (key && !seenUrls.has(key)) {
           seenUrls.add(key)
           allPosts.push(p)
+          fresh.push(p)
           lastFoundAt = Date.now()
         }
       }
+      if (fresh.length > 0 && typeof emitBatch === 'function') emitBatch('tiktok', 'TikTok', fresh)
       if (res?.timedOut) break
     } catch (_) {
-      await new Promise((r) => setTimeout(r, 1500))
+      await new Promise((r) => setTimeout(r, randomBetween(1800, 3200)))
     }
   }
   return { ok: true, posts: allPosts, timedOut: allPosts.length < targetCount && Date.now() - lastFoundAt >= SLIDING_IDLE_MS }
@@ -856,7 +880,7 @@ async function scrapeBothViralPlatforms(options = {}) {
     const fbTarget = Number(options.fbCount) || 10
     const ttTarget = Number(options.tiktokCount) || 10
     const fbFeedMinLikes = Number(options.fbFeedMinLikes) || 1000
-    const fbReelMinLikes = Number(options.fbReelMinLikes) || 10000
+    const fbReelMinLikes = Number(options.fbReelMinLikes) || 5000
     const ttMinLikes = Number(options.tiktokMinLikes) || 1000000
     const fbSourceMode = String(options.fbSourceMode || 'both').toLowerCase()
     const targetPlatform = String(options.platform || 'both').toLowerCase()
@@ -864,9 +888,7 @@ async function scrapeBothViralPlatforms(options = {}) {
     const topicCfg = buildTopicSources(options)
 
     pushLog({
-      platform: 'system',
-      step: 'scrape_both',
-      level: 'info',
+      platform: 'system', step: 'scrape_both', level: 'info',
       message: `🔥 Cào Viral (${topicCfg.label || 'Tất cả'} • FB bài ≥${fbFeedMinLikes.toLocaleString('vi-VN')} • FB Reels ≥${fbReelMinLikes.toLocaleString('vi-VN')} • TikTok ≥${ttMinLikes.toLocaleString('vi-VN')})...`
     })
 
@@ -880,18 +902,15 @@ async function scrapeBothViralPlatforms(options = {}) {
     }
 
     const fbFeedPromise = (targetPlatform !== 'tiktok' && (fbSourceMode === 'feed' || fbSourceMode === 'both'))
-      ? scrapeFacebookViralStream('fbFeed', topicCfg.fbFeedSources, fbSourceMode === 'feed' ? fbTarget : Math.ceil(fbTarget / 2), fbFeedMinLikes, excludeUrls, topicCfg, 'FB Trang chủ')
-          .then((res) => { emitBatch('facebook', 'FB Trang chủ', res.posts); return res })
+      ? scrapeFacebookViralStream('fbFeed', topicCfg.fbFeedSources, fbSourceMode === 'feed' ? fbTarget : Math.ceil(fbTarget / 2), fbFeedMinLikes, excludeUrls, topicCfg, 'FB Bài viết', emitBatch)
       : Promise.resolve({ ok: true, posts: [], timedOut: false })
 
     const fbReelPromise = (targetPlatform !== 'tiktok' && (fbSourceMode === 'reels' || fbSourceMode === 'both'))
-      ? scrapeFacebookViralStream('fbReels', topicCfg.fbReelSources, fbSourceMode === 'reels' ? fbTarget : Math.floor(fbTarget / 2), fbReelMinLikes, excludeUrls, topicCfg, 'FB Thước phim')
-          .then((res) => { emitBatch('facebook', 'FB Thước phim', res.posts); return res })
+      ? scrapeFacebookViralStream('fbReels', topicCfg.fbReelSources, fbSourceMode === 'reels' ? fbTarget : Math.floor(fbTarget / 2), fbReelMinLikes, excludeUrls, topicCfg, 'FB Thước phim', emitBatch)
       : Promise.resolve({ ok: true, posts: [], timedOut: false })
 
     const ttPromise = (targetPlatform !== 'facebook')
-      ? scrapeTikTokViralStream(topicCfg.ttSources, ttTarget, ttMinLikes, excludeUrls, topicCfg)
-          .then((res) => { emitBatch('tiktok', 'TikTok', res.posts); return res })
+      ? scrapeTikTokViralStream(topicCfg.ttSources, ttTarget, ttMinLikes, excludeUrls, topicCfg, emitBatch)
       : Promise.resolve({ ok: true, posts: [], timedOut: false })
 
     const [fbFeedRes, fbReelsRes, ttRes] = await Promise.all([fbFeedPromise, fbReelPromise, ttPromise])
@@ -900,21 +919,12 @@ async function scrapeBothViralPlatforms(options = {}) {
     const combined = [...facebookPosts, ...tiktokPosts]
 
     pushLog({
-      platform: 'system',
-      step: 'scrape_done',
-      level: combined.length > 0 ? 'success' : 'warn',
+      platform: 'system', step: 'scrape_done', level: combined.length > 0 ? 'success' : 'warn',
       message: `✅ Hoàn tất cào Viral → FB Bài viết: ${(fbFeedRes?.posts || []).length} • FB Reels: ${(fbReelsRes?.posts || []).length} • TikTok: ${tiktokPosts.length}`
     })
     return {
-      ok: true,
-      facebookPosts,
-      tiktokPosts,
-      posts: combined,
-      streamed: true,
-      timedOut: {
-        facebook: Boolean(fbFeedRes?.timedOut || fbReelsRes?.timedOut),
-        tiktok: Boolean(ttRes?.timedOut)
-      }
+      ok: true, facebookPosts, tiktokPosts, posts: combined, streamed: true,
+      timedOut: { facebook: Boolean(fbFeedRes?.timedOut || fbReelsRes?.timedOut), tiktok: Boolean(ttRes?.timedOut) }
     }
   } finally {
     activeJobs.delete('scrape_viral')
@@ -923,7 +933,7 @@ async function scrapeBothViralPlatforms(options = {}) {
 }
 
 // =========================================================================
-// CÀO 5 HỘI NHÓM FACEBOOK & 4 TÁC VỤ TỰ ĐỘNG HÓA MỚI
+// CÀO 5 HỘI NHÓM FACEBOOK & 4 TÁC VỤ TỰ ĐỘNG (ĐÚNG THỜI GIAN + DELAY NGẪU NHIÊN)
 // =========================================================================
 
 async function scrapeFacebookGroupsJob(options = {}) {
@@ -954,16 +964,11 @@ async function scrapeFacebookGroupsJob(options = {}) {
     const collected = []
     for (const src of candidateUrls) {
       if (collected.length >= targetCount) break
-      const tab = await openOrReuseScraperTab('fbGroups', src.url, 2800)
+      const tab = await openOrReuseScraperTab('fbGroups', src.url, 3200)
       chrome.tabs.sendMessage(tab.id, { type: 'VISION_SET_CONFIG', config }).catch(() => {})
       const res = await sendTabMessageWithRetry(tab.id, {
         type: 'FB_SCRAPE_GROUPS',
-        options: {
-          targetCount: targetCount - collected.length,
-          excludeUrls: seenUrls,
-          excludeNames: seenNames,
-          category: customKeyword || src.label
-        }
+        options: { targetCount: targetCount - collected.length, excludeUrls: seenUrls, excludeNames: seenNames, category: customKeyword || src.label }
       }, scripts)
       if (res?.error === 'FACEBOOK_LOGIN_REQUIRED') return { ok: false, error: res.error, groups: collected }
       for (const g of res?.groups || []) {
@@ -984,27 +989,42 @@ async function scrapeFacebookGroupsJob(options = {}) {
 }
 
 async function runAutoWatchTask(options = {}) {
-  const platform = String(options.platform || 'tiktok').toLowerCase()
-  const repeatCount = Math.max(1, Math.min(50, Number(options.repeatCount) || 5))
-  const dwellSeconds = Math.max(3, Math.min(120, Number(options.dwellSeconds) || 8))
-  const targetUrl = String(options.url || '').trim() || (platform === 'facebook' ? 'https://www.facebook.com/reel/' : 'https://www.tiktok.com/foryou')
-  const scripts = platform === 'facebook' ? ['vision-engine.js', 'content-media.js', 'content-facebook.js'] : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
-  const tabKey = platform === 'facebook' ? 'fbReels' : 'ttViral'
+  const jobKey = `watch:${options.platform || 'tiktok'}`
+  activeJobs.set(jobKey, { platform: options.platform || 'tiktok', startedAt: new Date().toISOString(), step: 'auto_watch' })
+  ensureKeepAlive()
+  try {
+    const platform = String(options.platform || 'tiktok').toLowerCase()
+    const repeatCount = Math.max(1, Math.min(50, Number(options.repeatCount) || 5))
+    const dwellSeconds = Math.max(3, Math.min(120, Number(options.dwellSeconds) || 8))
+    const customUrl = String(options.url || '').trim()
+    const startUrl = customUrl || (platform === 'facebook' ? 'https://www.facebook.com/reel/' : 'https://www.tiktok.com/foryou')
+    const scripts = platform === 'facebook' ? ['vision-engine.js', 'content-media.js', 'content-facebook.js'] : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
+    const tabKey = platform === 'facebook' ? 'fbReels' : 'ttViral'
 
-  pushLog({ platform, step: 'auto_watch', level: 'info', message: `👁️ Bắt đầu xem ${repeatCount} lần (${dwellSeconds}s/lần)...` })
-  let watched = 0
-  for (let i = 1; i <= repeatCount; i++) {
-    const tab = await openOrReuseScraperTab(tabKey, targetUrl, 2200)
-    await sendTabMessageWithRetry(
-      tab.id,
-      { type: platform === 'facebook' ? 'FB_WATCH_ITEM' : 'TT_WATCH_ITEM', options: { dwellSeconds, stepIndex: i, total: repeatCount } },
-      scripts
-    ).catch(() => {})
-    watched++
-    pushLog({ platform, step: 'auto_watch', level: 'info', message: `👁️ Đã xem xong lượt ${watched}/${repeatCount}.` })
+    pushLog({ platform, step: 'auto_watch', level: 'info', message: `👁️ Bắt đầu xem ${repeatCount} lượt (~${dwellSeconds}s/lượt ngẫu nhiên)...` })
+    let tab = await openOrReuseScraperTab(tabKey, startUrl, 2800)
+    let watched = 0
+
+    for (let i = 1; i <= repeatCount; i++) {
+      if (customUrl && i > 1) {
+        tab = await navigateTabAndWait(tab.id, customUrl, 2200)
+      }
+      const res = await sendTabMessageWithRetry(
+        tab.id,
+        { type: platform === 'facebook' ? 'FB_WATCH_ITEM' : 'TT_WATCH_ITEM', options: { dwellSeconds, stepIndex: i, total: repeatCount, advanceNext: !customUrl } },
+        scripts
+      ).catch(() => null)
+      watched++
+      const actualSec = Math.round((res?.watchedMs || dwellSeconds * 1000) / 1000)
+      pushLog({ platform, step: 'auto_watch', level: 'info', message: `👁️ Đã xem xong lượt ${watched}/${repeatCount} (${actualSec}s).` })
+      if (i < repeatCount) await new Promise((r) => setTimeout(r, randomBetween(900, 2400)))
+    }
+    pushLog({ platform, step: 'done', level: 'success', message: `✅ Hoàn tất xem tự động ${watched}/${repeatCount} lượt!` })
+    return { ok: true, watched, repeatCount, platform }
+  } finally {
+    activeJobs.delete(jobKey)
+    ensureKeepAlive()
   }
-  pushLog({ platform, step: 'done', level: 'success', message: `✅ Hoàn tất xem tự động ${watched}/${repeatCount} lượt!` })
-  return { ok: true, watched, repeatCount, platform }
 }
 
 async function runScrapePostComments(options = {}) {
@@ -1016,7 +1036,7 @@ async function runScrapePostComments(options = {}) {
   const scripts = isFb ? ['vision-engine.js', 'content-media.js', 'content-facebook.js'] : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
 
   pushLog({ platform, step: 'scrape_comments', level: 'info', message: `💬 Đang mở bài và đọc tối đa ${maxComments} bình luận...` })
-  const tab = await openOrReuseScraperTab(isFb ? 'fbFeed' : 'ttViral', url, 3200)
+  const tab = await openOrReuseScraperTab(isFb ? 'fbFeed' : 'ttViral', url, 3600)
   const res = await sendTabMessageWithRetry(tab.id, { type: isFb ? 'FB_SCRAPE_COMMENTS' : 'TT_SCRAPE_COMMENTS', options: { maxComments } }, scripts)
   pushLog({ platform, step: 'done', level: 'success', message: `✅ Đã đọc ${(res?.comments || []).length} bình luận.` })
   return { ok: true, platform, postTitle: res?.postTitle || '', comments: res?.comments || [] }
@@ -1034,46 +1054,80 @@ async function runScrapeChannelProfiles(options = {}) {
     const scripts = isFb ? ['vision-engine.js', 'content-media.js', 'content-facebook.js'] : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
     pushLog({ platform, step: 'scan_channel', level: 'info', message: `🕵️ Đang soi kênh ${i + 1}/${urls.length}...` })
     try {
-      const tab = await openOrReuseScraperTab(isFb ? 'fbFeed' : 'ttViral', url, 3000)
+      const tab = await openOrReuseScraperTab(isFb ? 'fbFeed' : 'ttViral', url, 3400)
       const res = await sendTabMessageWithRetry(tab.id, { type: isFb ? 'FB_SCRAPE_CHANNEL' : 'TT_SCRAPE_CHANNEL', options: { channelUrl: url } }, scripts)
       if (res?.channel) results.push(res.channel)
+      if (i < urls.length - 1) await new Promise((r) => setTimeout(r, randomBetween(1100, 2600)))
     } catch (_) {}
   }
-  pushLog({ platform: 'system', step: 'done', level: 'success', message: `✅ Đã quét xong ${results.length}/${urls.length} kênh/trang cá nhân.` })
+  pushLog({ platform: 'system', step: 'done', level: 'success', message: `✅ Đã quét xong ${results.length}/${urls.length} kênh/trang.` })
   return { ok: true, channels: results }
 }
 
 async function runSurfAndCollect(options = {}) {
-  const platform = String(options.platform || 'tiktok').toLowerCase()
-  const durationMinutes = Math.max(1, Math.min(30, Number(options.durationMinutes) || 2))
-  const targetTopic = String(options.topic || '').trim()
-  const isFb = platform === 'facebook'
-  const scripts = isFb ? ['vision-engine.js', 'content-media.js', 'content-facebook.js'] : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
-  const startUrl = isFb
-    ? (options.fbMode === 'reels' ? 'https://www.facebook.com/reel/' : 'https://www.facebook.com/')
-    : 'https://www.tiktok.com/explore'
+  const jobKey = `surf:${options.platform || 'tiktok'}`
+  activeJobs.set(jobKey, { platform: options.platform || 'tiktok', startedAt: new Date().toISOString(), step: 'surf' })
+  ensureKeepAlive()
+  try {
+    const platform = String(options.platform || 'tiktok').toLowerCase()
+    const durationMinutes = Math.max(1, Math.min(30, Number(options.durationMinutes) || 2))
+    const targetTopic = String(options.topic || '').trim()
+    const isFb = platform === 'facebook'
+    const scripts = isFb ? ['vision-engine.js', 'content-media.js', 'content-facebook.js'] : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
+    const startUrl = isFb
+      ? (options.fbMode === 'reels' ? 'https://www.facebook.com/reel/' : (targetTopic ? `https://www.facebook.com/search/top/?q=${encodeURIComponent(targetTopic)}` : 'https://www.facebook.com/'))
+      : (targetTopic ? `https://www.tiktok.com/search/video?q=${encodeURIComponent(targetTopic)}` : 'https://www.tiktok.com/explore')
 
-  pushLog({ platform, step: 'surf', level: 'info', message: `🧭 Đang lướt ${platform.toUpperCase()} trong ${durationMinutes} phút để lọc bài đứng top...` })
-  const tab = await openOrReuseScraperTab(isFb ? 'fbFeed' : 'ttViral', startUrl, 2800)
-  const res = await sendTabMessageWithRetry(
-    tab.id,
-    {
-      type: isFb ? 'FB_SCRAPE_VIRAL' : 'TIKTOK_SCRAPE_VIRAL',
-      options: {
-        targetCount: 40,
-        minLikes: isFb ? 500 : 10000,
-        maxRoundsOnPage: Math.min(90, durationMinutes * 18),
-        idleTimeoutMs: durationMinutes * 60 * 1000,
-        hardDurationMs: durationMinutes * 60 * 1000,
-        topicLabel: targetTopic,
-        sourceKind: options.fbMode === 'reels' ? 'reels' : 'feed',
-        excludeUrls: []
+    const totalMs = durationMinutes * 60 * 1000
+    const endAt = Date.now() + totalMs
+    const collected = []
+    const seenUrls = new Set()
+
+    pushLog({ platform, step: 'surf', level: 'info', message: `🧭 Bắt đầu lướt ${platform.toUpperCase()} trong đúng ${durationMinutes} phút...` })
+    let tab = await openOrReuseScraperTab(isFb ? 'fbFeed' : 'ttViral', startUrl, 3400)
+
+    while (Date.now() < endAt) {
+      const remainingMs = endAt - Date.now()
+      const sliceMs = Math.min(remainingMs, 55000)
+      try {
+        const res = await sendTabMessageWithRetry(
+          tab.id,
+          {
+            type: isFb ? 'FB_SCRAPE_VIRAL' : 'TIKTOK_SCRAPE_VIRAL',
+            options: {
+              targetCount: 150,
+              minLikes: isFb ? 300 : 5000,
+              minRoundsOnPage: 12,
+              maxRoundsOnPage: 24,
+              perSourceMaxMs: sliceMs,
+              strictDurationMs: sliceMs,
+              idleTimeoutMs: sliceMs + 10000,
+              topicLabel: targetTopic,
+              sourceKind: options.fbMode === 'reels' ? 'reels' : 'feed',
+              excludeUrls: Array.from(seenUrls)
+            }
+          },
+          scripts
+        )
+        for (const p of res?.posts || []) {
+          const key = String(p.postUrl || '').trim().toLowerCase()
+          if (key && !seenUrls.has(key)) { seenUrls.add(key); collected.push(p) }
+        }
+      } catch (_) {}
+
+      const leftSec = Math.max(0, Math.round((endAt - Date.now()) / 1000))
+      if (leftSec > 5) {
+        pushLog({ platform, step: 'surf', level: 'info', message: `🧭 Đã thu thập ${collected.length} bài — còn ${Math.floor(leftSec / 60)}p ${leftSec % 60}s...` })
+        await new Promise((r) => setTimeout(r, randomBetween(1400, 3000)))
       }
-    },
-    scripts
-  )
-  pushLog({ platform, step: 'done', level: 'success', message: `✅ Lướt xong ${durationMinutes} phút — thu thập ${(res?.posts || []).length} bài.` })
-  return { ok: true, platform, durationMinutes, posts: res?.posts || [] }
+    }
+
+    pushLog({ platform, step: 'done', level: 'success', message: `✅ Lướt xong đủ ${durationMinutes} phút — thu thập ${collected.length} bài.` })
+    return { ok: true, platform, durationMinutes, posts: collected }
+  } finally {
+    activeJobs.delete(jobKey)
+    ensureKeepAlive()
+  }
 }
 
 // =========================================================================
@@ -1083,30 +1137,28 @@ async function runSurfAndCollect(options = {}) {
 async function dispatchCommand(message, sender = {}) {
   const type = message?.type
   switch (type) {
+    case 'SW_SLEEP': {
+      const waitMs = Math.min(25000, Math.max(10, Math.round(Number(message.ms) || 100)))
+      await new Promise((resolve) => setTimeout(resolve, waitMs))
+      return { ok: true, sleptMs: waitMs }
+    }
     case 'PING': {
       const [vision, pending] = await Promise.all([getVisionConfig(), getPendingVerifications()])
       return {
-        ok: true,
-        installed: true,
-        version: getExtensionVersion(),
-        visionEnabled: true,
-        pacingMode: vision.pacingMode,
-        pendingVerificationsCount: pending.length
+        ok: true, installed: true, version: getExtensionVersion(),
+        visionEnabled: true, pacingMode: vision.pacingMode, pendingVerificationsCount: pending.length
       }
     }
     case 'CHECK_STATUS': {
       const [allTabs, vision, pending] = await Promise.all([chrome.tabs.query({}), getVisionConfig(), getPendingVerifications()])
       return {
-        ok: true,
-        version: getExtensionVersion(),
+        ok: true, version: getExtensionVersion(),
         tabs: {
           admin: allTabs.some((t) => t.url && /^http:\/\/(localhost|127\.0\.0\.1):5174/i.test(t.url)),
           facebook: allTabs.some((t) => t.url && /(^|\.)facebook\.com/i.test(t.url)),
           tiktok: allTabs.some((t) => t.url && /(^|\.)tiktok\.com/i.test(t.url))
         },
-        vision,
-        activeJobs: Array.from(activeJobs.values()),
-        pendingVerifications: pending
+        vision, activeJobs: Array.from(activeJobs.values()), pendingVerifications: pending
       }
     }
     case 'AUTO_POST': {
@@ -1128,20 +1180,45 @@ async function dispatchCommand(message, sender = {}) {
       return await runSurfAndCollect(message)
     case 'OPEN_SINGLE_TAB':
       return await openOrReuseSingleViewTab(message.url, message.platform)
+    case 'AI_SELF_HEAL':
     case 'VISION_AI_ASSIST':
     case 'VISION_AI_ANALYZE':
       return await handleVisionAiAssist(message, sender)
-    case 'GET_LEARNED_KNOWLEDGE':
-      return { ok: true, knowledge: await getLearnedKnowledge() }
-    case 'SAVE_LEARNED_KNOWLEDGE':
-      return { ok: true, knowledge: await saveLearnedKnowledge(message.patch || {}) }
+    case 'TEST_VISION_AI': {
+      const testRes = await handleVisionAiAssist({
+        platform: 'system', stepKey: 'vision:health_check',
+        goal: 'Kiểm tra kết nối Vision AI qwen3.5:4b',
+        url: ADMIN_DEFAULT_ORIGIN, errorReason: 'Health check',
+        elements: [{ id: 1, tag: 'button', role: 'button', text: 'Đăng', label: 'Đăng', x: 100, y: 100, w: 80, h: 36 }]
+      }, sender)
+      return { ok: Boolean(testRes?.ok), message: testRes?.ok ? `Kết nối tốt (${testRes.generatedBy || 'qwen3.5:4b'})` : (testRes?.error || 'Chưa kết nối được Ollama / Tab Admin') }
+    }
+    case 'GET_LEARNED_KNOWLEDGE': {
+      const knowledge = await getLearnedKnowledge()
+      return { ok: true, rule: message.stepKey ? (knowledge[message.stepKey] || null) : null, knowledge }
+    }
+    case 'SAVE_LEARNED_KNOWLEDGE': {
+      const patch = message.stepKey && message.rule ? { [message.stepKey]: message.rule } : (message.patch || {})
+      return { ok: true, knowledge: await saveLearnedKnowledge(patch) }
+    }
+    case 'INVALIDATE_LEARNED_KNOWLEDGE':
+      return { ok: true, knowledge: await invalidateLearnedKnowledgeKey(message.stepKey) }
     case 'CHECK_PENDING_NOW': {
       await processPendingVerifications()
       return { ok: true, pending: await getPendingVerifications() }
     }
     case 'JOB_STEP_PROGRESS': {
-      const job = activeJobs.get(message.platform)
-      if (job) job.step = message.step
+      const job = activeJobs.get(`post:${message.platform}`) || activeJobs.get(message.platform)
+      if (job) {
+        job.step = message.step
+        if (job.checkpoint && message.extra) {
+          if (message.extra.checkpointStep && !job.checkpoint.completedSteps.includes(message.extra.checkpointStep)) {
+            job.checkpoint.completedSteps.push(message.extra.checkpointStep)
+          }
+          if (message.extra.checkpointStep === 'submitted') job.checkpoint.verifyOnly = true
+          if (Array.isArray(message.extra.existingPermalinks)) job.checkpoint.existingPermalinks = message.extra.existingPermalinks
+        }
+      }
       pushLog({
         platform: message.platform || 'system',
         step: message.step || 'step',
@@ -1162,10 +1239,7 @@ async function dispatchCommand(message, sender = {}) {
         ? ['vision-engine.js', 'content-media.js', 'content-facebook.js']
         : ['vision-engine.js', 'content-media.js', 'content-tiktok.js']
       return {
-        ok: true,
-        platform,
-        tabId: tab.id,
-        url: tab.url,
+        ok: true, platform, tabId: tab.id, url: tab.url,
         inspection: await sendTabMessageWithRetry(tab.id, { type: isFb ? 'FB_INSPECT_VISION' : 'TIKTOK_INSPECT_VISION' }, scripts)
       }
     }
