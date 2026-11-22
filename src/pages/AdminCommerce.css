@@ -112,9 +112,19 @@ html[data-admin-theme='dark'] .admin-voucher-filters button.is-active{background
 @media(max-width:1100px){.voucher-management .admin-voucher-list article{grid-template-columns:minmax(0,1fr) auto}.voucher-management .admin-voucher-list article>span{grid-column:1}.voucher-management .voucher-editor-actions{justify-content:flex-end}}
 @media(max-width:500px){.voucher-management .admin-voucher-list article{grid-template-columns:1fr}.voucher-management .voucher-editor-actions{justify-content:flex-start}}
 
-.admin-commerce-head,.admin-order-detail>header{display:flex;justify-content:space-between;align-items:center;gap:16px}.admin-table-scroll{overflow:auto}.admin-order-table{width:100%;border-collapse:collapse}.admin-order-table th,.admin-order-table td{padding:13px 9px;border-bottom:1px solid var(--admin-line,#d9e3db);text-align:left;vertical-align:top}.admin-order-table small{display:block;font-size:12px}.admin-order-detail{margin-top:20px}.admin-order-detail form,.admin-payment-settings{display:grid;gap:12px;margin-top:18px;max-width:660px}.admin-order-detail label,.admin-payment-settings label{display:grid;gap:5px;margin:10px 0}.admin-order-detail input,.admin-order-detail textarea,.admin-payment-settings input,.admin-payment-settings select{padding:10px;border:1px solid #a1b8a8;border-radius:8px;width:100%;color:inherit;background:transparent}.admin-confirm-check{display:flex!important;align-items:center;gap:9px!important}.admin-confirm-check input{width:18px;height:18px;flex-shrink:0}.admin-order-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:16px}.admin-order-detail button,.admin-payment-settings button,.admin-order-table button,.admin-commerce-head>button{padding:9px 13px;border:1px solid #94b59d;background:#306c47;color:#fff;border-radius:8px;cursor:pointer}.admin-order-detail button:disabled,.admin-payment-settings button:disabled{opacity:.55;cursor:wait}.admin-fee-list>div{display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid #8fa796}.admin-fee-list dd{margin:0;font-weight:700}.admin-policy{margin:15px 0;padding:14px;border-radius:10px;background:var(--admin-panel,#edf5ed)}html[data-admin-theme=dark] .admin-order-table td{color:#e9f3ed}html[data-admin-theme=dark] .admin-order-table small{color:#c1d8c8}@media(max-width:640px){.admin-commerce-head{align-items:flex-start}.admin-order-table{min-width:720px}.admin-fee-list>div{font-size:13px}}
+.admin-commerce-head,.admin-order-detail>header{display:flex;justify-content:space-between;align-items:center;gap:16px}.admin-table-scroll{overflow:auto}.admin-order-table{width:100%;border-collapse:collapse}.admin-order-table th,.admin-order-table td{padding:13px 9px;border-bottom:1px solid var(--admin-line,#d9e3db);text-align:left;vertical-align:top}.admin-order-table small{display:block;font-size:12px}.admin-order-detail{margin:22px 0 26px 0 !important;padding:clamp(18px, 2.5vw, 24px) !important;border-radius:18px !important;background:linear-gradient(155deg, #f0f6f2 0%, #f7faf8 100%) !important;border:1.5px solid #bdd8c7 !important;box-shadow:0 10px 28px rgba(20,55,38,0.07),0 2px 6px rgba(20,55,38,0.03) !important}.admin-order-detail form,.admin-payment-settings{display:grid;gap:12px;margin-top:18px;max-width:660px}.admin-order-detail label,.admin-payment-settings label{display:grid;gap:5px;margin:10px 0}.admin-order-detail input,.admin-order-detail textarea,.admin-payment-settings input,.admin-payment-settings select{padding:10px 13px;border:1.5px solid #b5d2c0;border-radius:10px;width:100%;color:inherit;background:#ffffff;box-sizing:border-box}.admin-confirm-check{display:flex!important;align-items:center;gap:9px!important}.admin-confirm-check input{width:18px;height:18px;flex-shrink:0}.admin-order-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:16px}.admin-order-detail button,.admin-payment-settings button,.admin-order-table button,.admin-commerce-head>button{padding:9px 13px;border:1px solid #94b59d;background:#306c47;color:#fff;border-radius:8px;cursor:pointer}.admin-order-detail button:disabled,.admin-payment-settings button:disabled{opacity:.55;cursor:wait}.admin-fee-list>div{display:flex;justify-content:space-between;gap:16px;padding:12px 16px;border:1.5px solid #d0e4d7;border-radius:12px;background:#ffffff;margin-bottom:8px}.admin-fee-list dd{margin:0;font-weight:700}.admin-policy{margin:18px 0;padding:14px 18px;border-radius:12px;border:1.5px solid #d0e4d7;background:#ffffff}html[data-admin-theme=dark] .admin-order-table td{color:#e9f3ed}html[data-admin-theme=dark] .admin-order-table small{color:#c1d8c8}@media(max-width:640px){.admin-commerce-head{align-items:flex-start}.admin-order-table{min-width:720px}.admin-fee-list>div{font-size:13px}}
 
 /* Dark mode comprehensive coverage for Commerce & Orders */
+html[data-admin-theme="dark"] .admin-order-detail {
+  background: linear-gradient(160deg, #163829 0%, #0e241a 100%) !important;
+  border-color: rgba(74, 222, 128, 0.35) !important;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.65), 0 0 24px rgba(74, 222, 128, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+html[data-admin-theme="dark"] .admin-fee-list > div,
+html[data-admin-theme="dark"] .admin-policy {
+  background: rgba(8, 22, 15, 0.75) !important;
+  border-color: rgba(74, 222, 128, 0.22) !important;
+}
 html[data-admin-theme="dark"] .admin-commerce-form input,
 html[data-admin-theme="dark"] .admin-commerce-form select,
 html[data-admin-theme="dark"] .admin-commerce-list textarea,
@@ -122,9 +132,10 @@ html[data-admin-theme="dark"] .admin-order-detail input,
 html[data-admin-theme="dark"] .admin-order-detail textarea,
 html[data-admin-theme="dark"] .admin-payment-settings input,
 html[data-admin-theme="dark"] .admin-payment-settings select {
-  background: #0d1e15;
-  color: #edf7ef;
-  border-color: #2a523a;
+  background: #08170f !important;
+  color: #f0fdf4 !important;
+  border: 1.5px solid #255539 !important;
+  border-radius: 10px !important;
 }
 html[data-admin-theme="dark"] .admin-commerce-form input:focus,
 html[data-admin-theme="dark"] .admin-commerce-form select:focus,
@@ -133,8 +144,9 @@ html[data-admin-theme="dark"] .admin-order-detail input:focus,
 html[data-admin-theme="dark"] .admin-order-detail textarea:focus,
 html[data-admin-theme="dark"] .admin-payment-settings input:focus,
 html[data-admin-theme="dark"] .admin-payment-settings select:focus {
-  border-color: #4ade80;
-  outline: none;
+  border-color: #4ade80 !important;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.28) !important;
+  outline: none !important;
 }
 html[data-admin-theme="dark"] .admin-clickable-row:hover {
   background: #193828;

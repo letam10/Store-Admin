@@ -1085,48 +1085,69 @@ select option,
 }
 
 /* ==========================================================================
-   6.1 BỔ SUNG GIAO DIỆN LIGHT MODE CHO CÁC MODULE VẬN HÀNH (LUXURY EMERALD)
+   6.1 BỔ SUNG GIAO DIỆN LIGHT MODE CHO CÁC MODULE VẬN HÀNH & FORM/PANEL CONTRAST
    ========================================================================== */
-.admin-detail-panel {
-  background: #f7faf8 !important;
-  border: 1px solid #d4e5d8 !important;
+.admin-detail-panel,
+.admin-product-editor,
+.admin-record-editor,
+.side-banner-panel {
+  background: linear-gradient(155deg, #f0f6f2 0%, #f7faf8 100%) !important;
+  border: 1.5px solid #bdd8c7 !important;
   border-radius: 18px !important;
-  padding: 22px !important;
-  box-shadow: 0 4px 16px rgba(20, 55, 38, 0.04) !important;
-}
-.admin-detail-panel > button {
-  border: 1px solid #c8dcd0 !important;
-  border-radius: 9px !important;
-  background: #ffffff !important;
-  color: #355b43 !important;
-  padding: 7px 12px !important;
-  font-weight: 600 !important;
-  transition: all 0.15s ease !important;
-}
-.admin-detail-panel > button:hover {
-  background: #eef7f1 !important;
-  border-color: #2e8658 !important;
+  padding: clamp(18px, 2.5vw, 24px) !important;
+  margin: 22px 0 26px 0 !important;
+  box-shadow: 0 10px 28px rgba(20, 55, 38, 0.07), 0 2px 6px rgba(20, 55, 38, 0.03) !important;
   color: #123223 !important;
 }
+
+.admin-detail-panel + .admin-detail-panel,
+.admin-module-card > form + *,
+.admin-module-card > * + form,
+.admin-module-card > section + section {
+  margin-top: 24px !important;
+}
+
+.admin-detail-panel > button {
+  border: 1.5px solid #bdd7c6 !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+  color: #1b5635 !important;
+  padding: 8px 14px !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 6px rgba(20, 55, 38, 0.06) !important;
+  transition: all 0.18s ease !important;
+}
+.admin-detail-panel > button:hover {
+  background: #e7f3ec !important;
+  border-color: #256b47 !important;
+  color: #0d281a !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 12px rgba(20, 55, 38, 0.12) !important;
+}
+
 .admin-detail-panel dl div {
-  border-bottom: 1px solid #e2ece4 !important;
+  background: #ffffff !important;
+  border: 1px solid #d4e6db !important;
+  border-radius: 12px !important;
+  padding: 11px 16px !important;
+  margin-bottom: 8px !important;
+  box-shadow: 0 1px 3px rgba(20, 55, 38, 0.03) !important;
 }
 .admin-detail-panel dt {
-  color: #5c7767 !important;
+  color: #4a7059 !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  margin-bottom: 3px !important;
 }
 .admin-detail-panel dd {
   color: #123223 !important;
-  font-weight: 700 !important;
+  font-size: 13.5px !important;
+  font-weight: 800 !important;
+  margin: 0 !important;
 }
 
-.admin-product-editor,
-.admin-record-editor {
-  background: #f8fbf8 !important;
-  border: 1px solid #d4e5d8 !important;
-  border-radius: 18px !important;
-  padding: 22px !important;
-  box-shadow: 0 4px 16px rgba(20, 55, 38, 0.04) !important;
-}
 .admin-editor-grid label {
   color: #355b43 !important;
   font-weight: 700 !important;
@@ -1135,9 +1156,13 @@ select option,
 .admin-editor-grid input,
 .admin-editor-grid select,
 .admin-editor-grid textarea {
-  border: 1px solid #cad9ce !important;
-  border-radius: 9px !important;
-  padding: 9px 12px !important;
+  background: #ffffff !important;
+  border: 1.5px solid #b5d2c0 !important;
+  border-radius: 10px !important;
+  padding: 10px 13px !important;
+  color: #123223 !important;
+  font-size: 13px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
   transition: all 0.18s ease !important;
 }
 .admin-editor-grid input:focus,
@@ -1616,43 +1641,77 @@ html[data-admin-theme="dark"] .admin-search-results p {
 }
 
 /* ==========================================================================
-   8.3 DARK MODE EDITORS, PANELS & DETAILS
+   8.3 DARK MODE EDITORS, PANELS & DETAILS (ELEVATED EMERALD CONTRAST)
    ========================================================================== */
-html[data-admin-theme="dark"] .admin-detail-panel {
-  background: linear-gradient(160deg, #13271d 0%, #0f2118 100%) !important;
-  border-color: #284c37 !important;
+html[data-admin-theme="dark"] .admin-detail-panel,
+html[data-admin-theme="dark"] .admin-product-editor,
+html[data-admin-theme="dark"] .admin-record-editor,
+html[data-admin-theme="dark"] .side-banner-panel {
+  background: linear-gradient(160deg, #163829 0%, #0e241a 100%) !important;
+  border: 1.5px solid rgba(74, 222, 128, 0.35) !important;
   color: #e8f5ec !important;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5) !important;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.65), 0 0 24px rgba(74, 222, 128, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
 }
 html[data-admin-theme="dark"] .admin-detail-panel > button {
-  background: #162f22 !important;
-  border-color: #2b543c !important;
-  color: #c8e5cd !important;
+  background: #142e20 !important;
+  border: 1.5px solid rgba(74, 222, 128, 0.35) !important;
+  color: #d1fae5 !important;
+  padding: 8px 14px !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3) !important;
+  transition: all 0.18s ease !important;
 }
 html[data-admin-theme="dark"] .admin-detail-panel > button:hover {
-  background: #1f4230 !important;
-  color: #f0fdf4 !important;
+  background: #1e4530 !important;
+  color: #ffffff !important;
   border-color: #4ade80 !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 14px rgba(74, 222, 128, 0.22) !important;
 }
 html[data-admin-theme="dark"] .admin-detail-panel dl div {
-  border-bottom-color: #1f3f2d !important;
+  background: rgba(8, 22, 15, 0.75) !important;
+  border: 1px solid rgba(74, 222, 128, 0.22) !important;
+  border-radius: 12px !important;
+  padding: 11px 16px !important;
+  margin-bottom: 8px !important;
 }
 html[data-admin-theme="dark"] .admin-detail-panel dt {
-  color: #8bbfa0 !important;
+  color: #86efac !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  margin-bottom: 3px !important;
 }
 html[data-admin-theme="dark"] .admin-detail-panel dd {
-  color: #f0fdf4 !important;
+  color: #ffffff !important;
+  font-size: 13.5px !important;
+  font-weight: 800 !important;
+  margin: 0 !important;
 }
 
-html[data-admin-theme="dark"] .admin-product-editor,
-html[data-admin-theme="dark"] .admin-record-editor {
-  background: linear-gradient(160deg, #12261b 0%, #0d1e16 100%) !important;
-  border-color: #284c37 !important;
-  color: #e8f5ec !important;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4) !important;
-}
 html[data-admin-theme="dark"] .admin-editor-grid label {
-  color: #a3c9b2 !important;
+  color: #9ec5ad !important;
+  font-weight: 700 !important;
+  font-size: 12px !important;
+}
+html[data-admin-theme="dark"] .admin-editor-grid input,
+html[data-admin-theme="dark"] .admin-editor-grid select,
+html[data-admin-theme="dark"] .admin-editor-grid textarea {
+  background: #08170f !important;
+  border: 1.5px solid #255539 !important;
+  border-radius: 10px !important;
+  color: #f0fdf4 !important;
+  padding: 10px 13px !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+  transition: all 0.18s ease !important;
+}
+html[data-admin-theme="dark"] .admin-editor-grid input:focus,
+html[data-admin-theme="dark"] .admin-editor-grid select:focus,
+html[data-admin-theme="dark"] .admin-editor-grid textarea:focus {
+  border-color: #4ade80 !important;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.28) !important;
+  outline: none !important;
 }
 html[data-admin-theme="dark"] .admin-editor-actions .button-secondary {
   background: #14281f !important;

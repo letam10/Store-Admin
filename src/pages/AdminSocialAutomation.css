@@ -48,7 +48,7 @@
 .social-alert--success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
 
 .social-info-banner { padding: 13px 16px; border-radius: 12px; background: rgba(46, 134, 88, 0.08); border: 1px solid var(--admin-border-light, #dce7df); font-size: 12.5px; line-height: 1.55; }
-.social-panel { padding: 22px; background: #ffffff; border: 1px solid var(--admin-border-light, #dce7df); border-radius: 16px; box-shadow: 0 4px 16px rgba(18, 50, 35, 0.04); }
+.social-panel { padding: clamp(18px, 2.5vw, 24px); margin: 22px 0 26px 0 !important; background: linear-gradient(155deg, #f0f6f2 0%, #f7faf8 100%) !important; border: 1.5px solid #bdd8c7 !important; border-radius: 18px !important; box-shadow: 0 10px 28px rgba(20, 55, 38, 0.07), 0 2px 6px rgba(20, 55, 38, 0.03) !important; }
 .social-panel__heading { margin-bottom: 16px; }
 .social-panel__heading h3, .social-panel__head-row h3 { margin: 0; font-size: 16.5px; font-weight: 800; color: var(--admin-text-dark, #123223); }
 .social-panel__head-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -56,9 +56,9 @@
 .social-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; margin-bottom: 20px; }
 .social-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .social-field label { font-size: 12px; font-weight: 700; color: var(--admin-text-dark, #123223); }
-.social-input, .social-select, .social-textarea { width: 100%; padding: 9px 12px; border: 1px solid var(--admin-border-light, #dce7df); border-radius: 10px; background: #fbfdfc; color: var(--admin-text-dark, #123223); font: inherit; font-size: 13px; outline: none; }
-.social-input:focus, .social-select:focus, .social-textarea:focus { border-color: #2e8658; box-shadow: 0 0 0 3px rgba(46, 134, 88, 0.15); }
-.social-checkbox-group { padding: 12px 14px; background: #f7faf8; border-radius: 10px; border: 1px solid var(--admin-border-light, #dce7df); }
+.social-input, .social-select, .social-textarea { width: 100%; padding: 10px 13px; border: 1.5px solid #b5d2c0; border-radius: 10px; background: #ffffff; color: var(--admin-text-dark, #123223); font: inherit; font-size: 13px; outline: none; box-sizing: border-box; }
+.social-input:focus, .social-select:focus, .social-textarea:focus { border-color: #2e8658; box-shadow: 0 0 0 3px rgba(46, 134, 88, 0.18); }
+.social-checkbox-group { padding: 12px 14px; background: #ffffff; border-radius: 12px; border: 1.5px solid #d0e4d7; box-shadow: 0 1px 3px rgba(20, 55, 38, 0.03); }
 .social-checkbox-label { display: flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
 .social-checkbox-label input[type="checkbox"] { width: 16px; height: 16px; accent-color: #2e8658; }
 
@@ -158,14 +158,19 @@
 .social-modal-body-content { white-space: pre-wrap; line-height: 1.6; font-size: 13.5px; margin-top: 8px; padding: 12px; background: #f8faf9; border-radius: 10px; border: 1px solid #dce7df; }
 
 /* DARK MODE ĐỒNG BỘ HOÀN HẢO */
-html[data-admin-theme="dark"] .social-panel { background: #102a1e !important; border-color: #28543a !important; color: #edf7ef !important; }
+html[data-admin-theme="dark"] .social-panel {
+  background: linear-gradient(160deg, #163829 0%, #0e241a 100%) !important;
+  border: 1.5px solid rgba(74, 222, 128, 0.35) !important;
+  color: #edf7ef !important;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.65), 0 0 24px rgba(74, 222, 128, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
 html[data-admin-theme="dark"] .social-panel h3 { color: #f0fdf4 !important; }
 html[data-admin-theme="dark"] .social-subnav, html[data-admin-theme="dark"] .admin-ai-tab-switch, html[data-admin-theme="dark"] .auto-pills { background: #0b1e15 !important; border-color: #28543a !important; }
 html[data-admin-theme="dark"] .social-subnav-btn, html[data-admin-theme="dark"] .admin-ai-tab-btn, html[data-admin-theme="dark"] .auto-pill { color: #92bda2 !important; }
 html[data-admin-theme="dark"] .social-subnav-btn.is-active, html[data-admin-theme="dark"] .admin-ai-tab-btn.is-active, html[data-admin-theme="dark"] .auto-pill.is-active { background: #1d573a !important; color: #ffffff !important; }
 html[data-admin-theme="dark"] .social-field label { color: #daf0e0 !important; }
-html[data-admin-theme="dark"] .social-input, html[data-admin-theme="dark"] .social-select, html[data-admin-theme="dark"] .social-textarea, html[data-admin-theme="dark"] .social-sort-select { background: #0a1b13 !important; border-color: #28543a !important; color: #edf7ef !important; }
-html[data-admin-theme="dark"] .social-checkbox-group, html[data-admin-theme="dark"] .social-subform-card, html[data-admin-theme="dark"] .social-info-banner { background: #0c2117 !important; border-color: #28543a !important; color: #daf0e0 !important; }
+html[data-admin-theme="dark"] .social-input, html[data-admin-theme="dark"] .social-select, html[data-admin-theme="dark"] .social-textarea, html[data-admin-theme="dark"] .social-sort-select { background: #08170f !important; border: 1.5px solid #255539 !important; color: #edf7ef !important; }
+html[data-admin-theme="dark"] .social-checkbox-group, html[data-admin-theme="dark"] .social-subform-card, html[data-admin-theme="dark"] .social-info-banner { background: rgba(8, 22, 15, 0.75) !important; border: 1.5px solid rgba(74, 222, 128, 0.22) !important; color: #daf0e0 !important; }
 html[data-admin-theme="dark"] .social-table-shell, html[data-admin-theme="dark"] .social-viral-column { background: #0c2017 !important; border-color: #28543a !important; }
 html[data-admin-theme="dark"] .social-table th { background: #0a1a12 !important; color: #86efac !important; border-bottom-color: #28543a !important; }
 html[data-admin-theme="dark"] .social-table td { border-bottom-color: #193b29 !important; color: #edf7ef !important; }
