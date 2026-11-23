@@ -47,7 +47,7 @@
 
 .admin-workspace-card {
   display: grid;
-  grid-template-columns: 268px minmax(0, 1fr);
+  grid-template-columns: 296px minmax(0, 1fr);
   width: 100%;
   height: 100vh;
   min-height: 0;
@@ -101,7 +101,7 @@
 .admin-sidebar {
   position: relative;
   top: auto;
-  width: 268px;
+  width: 296px;
   height: 100%;
   min-height: 0;
   display: flex;
@@ -134,12 +134,13 @@
   display: flex;
   align-items: center;
   gap: 3px;
-  padding: 6px 10px 22px;
-  font-size: 27px;
+  padding: 6px 6px 22px;
+  font-size: 25px;
   font-weight: 900;
-  letter-spacing: -1.4px;
+  letter-spacing: -1.2px;
   color: #ffffff;
   text-decoration: none;
+  white-space: nowrap;
 }
 .admin-brand span {
   color: #4ade80;
