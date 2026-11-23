@@ -2396,4 +2396,529 @@ html[data-admin-theme="dark"] .admin-staff-edit-btn:hover {
   transform: translateY(-1px) !important;
 }
 
+/* ==========================================================================
+   10. CHUẨN HÓA FORM & PANEL: KHOẢNG CÁCH, ĐỘ TƯƠNG PHẢN & ĐỒNG BỘ THEME
+   Giải quyết triệt để phản hồi:
+   1. Khoảng cách (margin/spacing) giữa các panel và form khi bật lên.
+   2. Tương phản phân lớp rõ rệt: nền form nổi khối, input sáng/tối sắc nét,
+      không bị chìm chung màu giao diện.
+   3. Đồng bộ 100% khi đổi màu giao diện (Theme switch Light/Dark & Presets).
+   ========================================================================== */
+
+/* 10.1 Khoảng cách và phân tầng giữa các form, panel khi hiển thị */
+.admin-product-editor,
+.admin-record-editor,
+.admin-detail-panel,
+.admin-staff-form,
+.admin-customer-detail,
+.admin-order-detail,
+.voucher-management #voucher-editor,
+.admin-offer-form {
+  margin: 22px 0 26px 0 !important;
+  padding: 24px 26px !important;
+  border-radius: 18px !important;
+  box-sizing: border-box !important;
+  position: relative !important;
+  clear: both !important;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* Khoảng cách khi có nhiều panel/form xuất hiện cạnh nhau */
+.admin-detail-panel + .admin-detail-panel,
+.admin-detail-panel + .admin-product-editor,
+.admin-detail-panel + .admin-record-editor,
+.admin-detail-panel + .admin-staff-form,
+.admin-product-editor + .admin-detail-panel,
+.admin-record-editor + .admin-detail-panel,
+.admin-staff-form + .admin-detail-panel,
+.admin-module-head + .admin-product-editor,
+.admin-module-head + .admin-record-editor,
+.admin-module-head + .admin-detail-panel,
+.admin-module-head + .admin-staff-form,
+.admin-product-editor + .admin-module-toolbar,
+.admin-record-editor + .admin-module-toolbar,
+.admin-staff-form + .admin-table-wrap,
+.admin-detail-panel + .admin-table-wrap,
+.admin-detail-panel + .admin-module-toolbar {
+  margin-top: 26px !important;
+}
+
+/* 10.2 Tương phản phân lớp nền Form & Panel ở Giao diện Sáng (Light mode) */
+.admin-product-editor,
+.admin-record-editor,
+.admin-detail-panel,
+.admin-staff-form,
+.admin-customer-detail,
+.admin-order-detail,
+.voucher-management #voucher-editor,
+.admin-offer-form {
+  background: linear-gradient(175deg, #f2f7f4 0%, #e9f2ec 100%) !important;
+  border: 1.5px solid #bcdac7 !important;
+  box-shadow: 0 8px 26px rgba(20, 55, 38, 0.08), 0 2px 6px rgba(20, 55, 38, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.85) !important;
+  color: #163e29 !important;
+}
+
+/* Chữ mô tả và chỉ dẫn trên đầu form */
+.admin-product-editor > p,
+.admin-record-editor > p,
+.admin-detail-panel > p,
+.admin-customer-detail p,
+.admin-order-detail p {
+  color: #3b604d !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  line-height: 1.55 !important;
+  margin-bottom: 16px !important;
+}
+
+/* Tiêu đề trong panel chi tiết */
+.admin-detail-panel h3,
+.admin-customer-detail h3,
+.admin-order-detail h3 {
+  color: #103321 !important;
+  font-size: 18px !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.4px !important;
+  margin-top: 2px !important;
+  margin-bottom: 16px !important;
+}
+
+/* Nhãn trường dữ liệu (Label) rõ nét, không bị chìm */
+.admin-editor-grid label,
+.admin-commerce-form label,
+.admin-staff-form label:not(.admin-staff-active-toggle),
+.admin-order-detail label,
+.admin-offer-form label {
+  color: #133a25 !important;
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.2px !important;
+  display: grid !important;
+  gap: 6px !important;
+}
+
+/* Các ô Input, Select, Textarea bên trong form: Nền trắng tinh tương phản nổi bật */
+.admin-editor-grid input,
+.admin-editor-grid select,
+.admin-editor-grid textarea,
+.admin-commerce-form input,
+.admin-commerce-form select,
+.admin-commerce-list textarea,
+.admin-staff-form input:not([type="checkbox"]),
+.admin-order-detail input,
+.admin-order-detail textarea,
+.admin-offer-form input {
+  background: #ffffff !important;
+  border: 1.5px solid #bcd7c5 !important;
+  border-radius: 10px !important;
+  padding: 10px 13px !important;
+  color: #113421 !important;
+  font-size: 13.5px !important;
+  box-shadow: 0 1px 3px rgba(18, 50, 35, 0.05), inset 0 1px 2px rgba(0, 0, 0, 0.02) !important;
+  transition: all 0.2s ease !important;
+}
+
+.admin-editor-grid input:focus,
+.admin-editor-grid select:focus,
+.admin-editor-grid textarea:focus,
+.admin-commerce-form input:focus,
+.admin-commerce-form select:focus,
+.admin-commerce-list textarea:focus,
+.admin-staff-form input:focus,
+.admin-order-detail input:focus,
+.admin-order-detail textarea:focus,
+.admin-offer-form input:focus {
+  border-color: #257045 !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(37, 112, 69, 0.18), 0 2px 8px rgba(37, 112, 69, 0.1) !important;
+  background: #ffffff !important;
+}
+
+/* Danh sách chi tiết DL DT DD trong admin-detail-panel */
+.admin-detail-panel dl div {
+  padding: 10px 0 !important;
+  border-bottom: 1px solid #d4e5d8 !important;
+}
+.admin-detail-panel dt {
+  color: #4f735e !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+}
+.admin-detail-panel dd {
+  color: #123421 !important;
+  font-size: 13.5px !important;
+  font-weight: 700 !important;
+  margin-top: 3px !important;
+}
+
+/* Nút bấm hành động của Form: phân cấp Primary / Secondary rõ ràng */
+.admin-editor-actions,
+.voucher-editor-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  margin-top: 18px !important;
+  padding-top: 6px !important;
+}
+
+.admin-editor-actions button:not(.button-secondary),
+.voucher-editor-actions button:not(.button-secondary):not(.table-action),
+.admin-commerce-form button[type="submit"] {
+  background: linear-gradient(135deg, #1b5e39 0%, #287d4f 100%) !important;
+  border: 1px solid #1b5e39 !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  padding: 10px 20px !important;
+  border-radius: 10px !important;
+  box-shadow: 0 4px 14px rgba(27, 94, 57, 0.28) !important;
+  cursor: pointer !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.admin-editor-actions button:not(.button-secondary):hover,
+.voucher-editor-actions button:not(.button-secondary):not(.table-action):hover,
+.admin-commerce-form button[type="submit"]:hover {
+  background: linear-gradient(135deg, #164f30 0%, #216842 100%) !important;
+  box-shadow: 0 6px 18px rgba(27, 94, 57, 0.35) !important;
+  transform: translateY(-1px) !important;
+}
+
+.admin-editor-actions .button-secondary,
+.voucher-editor-actions .button-secondary,
+.admin-detail-panel > button {
+  background: #ffffff !important;
+  border: 1.5px solid #c5dccf !important;
+  color: #1f4b32 !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  padding: 10px 18px !important;
+  border-radius: 10px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+
+.admin-editor-actions .button-secondary:hover,
+.voucher-editor-actions .button-secondary:hover,
+.admin-detail-panel > button:hover {
+  background: #f1f7f3 !important;
+  border-color: #257045 !important;
+  color: #143825 !important;
+  transform: translateY(-1px) !important;
+}
+
+/* 10.3 Tương phản phân lớp nền Form & Panel ở Giao diện Tối (Dark mode) */
+html[data-admin-theme="dark"] .admin-product-editor,
+html[data-admin-theme="dark"] .admin-record-editor,
+html[data-admin-theme="dark"] .admin-detail-panel,
+html[data-admin-theme="dark"] .admin-staff-form,
+html[data-admin-theme="dark"] .admin-customer-detail,
+html[data-admin-theme="dark"] .admin-order-detail,
+html[data-admin-theme="dark"] .voucher-management #voucher-editor,
+html[data-admin-theme="dark"] .admin-offer-form {
+  background: linear-gradient(165deg, #132a1e 0%, #0c1a13 100%) !important;
+  border: 1.5px solid #285438 !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+  color: #eaf6ee !important;
+}
+
+html[data-admin-theme="dark"] .admin-product-editor > p,
+html[data-admin-theme="dark"] .admin-record-editor > p,
+html[data-admin-theme="dark"] .admin-detail-panel > p,
+html[data-admin-theme="dark"] .admin-customer-detail p,
+html[data-admin-theme="dark"] .admin-order-detail p {
+  color: #a4ceb5 !important;
+}
+
+html[data-admin-theme="dark"] .admin-detail-panel h3,
+html[data-admin-theme="dark"] .admin-customer-detail h3,
+html[data-admin-theme="dark"] .admin-order-detail h3 {
+  color: #f0faf4 !important;
+}
+
+html[data-admin-theme="dark"] .admin-editor-grid label,
+html[data-admin-theme="dark"] .admin-commerce-form label,
+html[data-admin-theme="dark"] .admin-staff-form label:not(.admin-staff-active-toggle),
+html[data-admin-theme="dark"] .admin-order-detail label,
+html[data-admin-theme="dark"] .admin-offer-form label {
+  color: #bbf0cc !important;
+}
+
+/* Ô nhập liệu trong Form ở Dark mode: nền tối sâu, viền và chữ sáng rõ rệt */
+html[data-admin-theme="dark"] .admin-editor-grid input,
+html[data-admin-theme="dark"] .admin-editor-grid select,
+html[data-admin-theme="dark"] .admin-editor-grid textarea,
+html[data-admin-theme="dark"] .admin-commerce-form input,
+html[data-admin-theme="dark"] .admin-commerce-form select,
+html[data-admin-theme="dark"] .admin-commerce-list textarea,
+html[data-admin-theme="dark"] .admin-staff-form input:not([type="checkbox"]),
+html[data-admin-theme="dark"] .admin-order-detail input,
+html[data-admin-theme="dark"] .admin-order-detail textarea,
+html[data-admin-theme="dark"] .admin-offer-form input {
+  background: #08150f !important;
+  border: 1.5px solid #275238 !important;
+  color: #f0faf3 !important;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6) !important;
+}
+
+html[data-admin-theme="dark"] .admin-editor-grid input:focus,
+html[data-admin-theme="dark"] .admin-editor-grid select:focus,
+html[data-admin-theme="dark"] .admin-editor-grid textarea:focus,
+html[data-admin-theme="dark"] .admin-commerce-form input:focus,
+html[data-admin-theme="dark"] .admin-commerce-form select:focus,
+html[data-admin-theme="dark"] .admin-commerce-list textarea:focus,
+html[data-admin-theme="dark"] .admin-staff-form input:focus,
+html[data-admin-theme="dark"] .admin-order-detail input:focus,
+html[data-admin-theme="dark"] .admin-order-detail textarea:focus,
+html[data-admin-theme="dark"] .admin-offer-form input:focus {
+  border-color: #4ade80 !important;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.25) !important;
+  background: #0b1c14 !important;
+}
+
+html[data-admin-theme="dark"] .admin-detail-panel dl div {
+  border-bottom-color: #1f452e !important;
+}
+html[data-admin-theme="dark"] .admin-detail-panel dt {
+  color: #8bbfa0 !important;
+}
+html[data-admin-theme="dark"] .admin-detail-panel dd {
+  color: #eaf7ee !important;
+}
+
+/* Nút bấm hành động của Form ở Dark mode */
+html[data-admin-theme="dark"] .admin-editor-actions button:not(.button-secondary),
+html[data-admin-theme="dark"] .voucher-editor-actions button:not(.button-secondary):not(.table-action),
+html[data-admin-theme="dark"] .admin-commerce-form button[type="submit"] {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%) !important;
+  border-color: #4ade80 !important;
+  color: #042111 !important;
+  box-shadow: 0 4px 16px rgba(34, 197, 94, 0.35) !important;
+}
+
+html[data-admin-theme="dark"] .admin-editor-actions button:not(.button-secondary):hover,
+html[data-admin-theme="dark"] .voucher-editor-actions button:not(.button-secondary):not(.table-action):hover,
+html[data-admin-theme="dark"] .admin-commerce-form button[type="submit"]:hover {
+  background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%) !important;
+  box-shadow: 0 6px 20px rgba(34, 197, 94, 0.5) !important;
+}
+
+html[data-admin-theme="dark"] .admin-editor-actions .button-secondary,
+html[data-admin-theme="dark"] .voucher-editor-actions .button-secondary,
+html[data-admin-theme="dark"] .admin-detail-panel > button {
+  background: #142a1f !important;
+  border: 1.5px solid #285438 !important;
+  color: #bbf0cc !important;
+}
+
+html[data-admin-theme="dark"] .admin-editor-actions .button-secondary:hover,
+html[data-admin-theme="dark"] .voucher-editor-actions .button-secondary:hover,
+html[data-admin-theme="dark"] .admin-detail-panel > button:hover {
+  background: #1b3d2b !important;
+  border-color: #4ade80 !important;
+  color: #ffffff !important;
+}
+
+/* 10.4 Đồng bộ chuyển đổi Theme cho toàn bộ các Panel khác trong hệ thống */
+html[data-admin-theme="dark"] .admin-module-card {
+  background: #0f2218 !important;
+  border-color: #234833 !important;
+  color: #eaf5ee !important;
+}
+html[data-admin-theme="dark"] .admin-module-card h2,
+html[data-admin-theme="dark"] .admin-module-card h3 {
+  color: #f2faf5 !important;
+}
+html[data-admin-theme="dark"] .admin-module-card > p,
+html[data-admin-theme="dark"] .admin-module-head p {
+  color: #9bbfa8 !important;
+}
+
+/* Thẻ KPI & Insight thống kê */
+html[data-admin-theme="dark"] .admin-kpi-grid article,
+html[data-admin-theme="dark"] .admin-crud-insights > div,
+html[data-admin-theme="dark"] .people-summary > div {
+  background: #132a1e !important;
+  border-color: #275237 !important;
+  color: #eaf5ee !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3) !important;
+}
+html[data-admin-theme="dark"] .admin-kpi-grid span,
+html[data-admin-theme="dark"] .admin-crud-insights small,
+html[data-admin-theme="dark"] .people-summary small {
+  color: #9abfa7 !important;
+}
+html[data-admin-theme="dark"] .admin-kpi-grid strong,
+html[data-admin-theme="dark"] .people-summary strong {
+  color: #ffffff !important;
+}
+html[data-admin-theme="dark"] .admin-kpi-grid small,
+html[data-admin-theme="dark"] .admin-crud-insights b {
+  color: #4ade80 !important;
+}
+html[data-admin-theme="dark"] .admin-crud-insights span {
+  color: #82a890 !important;
+}
+
+/* Danh sách xem sản phẩm (Product Views) */
+html[data-admin-theme="dark"] .admin-view-list article {
+  background: #132a1e !important;
+  border-color: #275237 !important;
+  color: #eaf5ee !important;
+}
+html[data-admin-theme="dark"] .admin-view-list strong {
+  color: #ffffff !important;
+}
+html[data-admin-theme="dark"] .admin-view-list small {
+  color: #9abfa7 !important;
+}
+html[data-admin-theme="dark"] .admin-view-list img,
+html[data-admin-theme="dark"] .admin-view-symbol {
+  background: #0c1c14 !important;
+}
+html[data-admin-theme="dark"] .admin-view-rank {
+  color: #4ade80 !important;
+}
+html[data-admin-theme="dark"] .admin-view-list article > b:last-child {
+  color: #86efac !important;
+}
+
+/* Bảng cột CSKH (Support Workspace) */
+html[data-admin-theme="dark"] .support-column {
+  background: #0c1a13 !important;
+  border: 1px solid #234833 !important;
+  color: #eaf5ee !important;
+}
+html[data-admin-theme="dark"] .support-column article {
+  background: #132a1e !important;
+  border-color: #275237 !important;
+  color: #eaf5ee !important;
+}
+html[data-admin-theme="dark"] .support-column header span {
+  background: #1b3d2b !important;
+  color: #86efac !important;
+}
+html[data-admin-theme="dark"] .support-column article span,
+html[data-admin-theme="dark"] .support-column article small {
+  color: #9abfa7 !important;
+}
+
+/* Thẻ loại đơn hàng, yêu cầu & khách hàng */
+html[data-admin-theme="dark"] .order-type-grid article,
+html[data-admin-theme="dark"] .people-request-list article,
+html[data-admin-theme="dark"] .customer-grid article,
+html[data-admin-theme="dark"] .promo-admin-grid article {
+  background: #132a1e !important;
+  border-color: #275237 !important;
+  color: #eaf5ee !important;
+}
+html[data-admin-theme="dark"] .order-type-grid dt,
+html[data-admin-theme="dark"] .people-request-list small,
+html[data-admin-theme="dark"] .people-request-list span,
+html[data-admin-theme="dark"] .customer-grid small {
+  color: #9abfa7 !important;
+}
+html[data-admin-theme="dark"] .order-type-grid dd {
+  color: #ffffff !important;
+}
+html[data-admin-theme="dark"] .customer-avatar {
+  background: #0c1c14 !important;
+  color: #4ade80 !important;
+}
+html[data-admin-theme="dark"] .customer-grid article > span {
+  background: #1b3d2b !important;
+  color: #86efac !important;
+}
+
+/* Tab chuyển đổi CSKH & Cài đặt thẻ thành viên */
+.cskh-mode-switch {
+  display: flex !important;
+  gap: 8px !important;
+  margin-bottom: 22px !important;
+  padding: 6px !important;
+  border-radius: 12px !important;
+  background: #e8f2eb !important;
+  border: 1px solid #c3dbc9 !important;
+}
+.cskh-mode-switch button {
+  padding: 9px 16px !important;
+  border-radius: 9px !important;
+  border: 1px solid transparent !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+.cskh-mode-switch button.is-active {
+  background: #ffffff !important;
+  color: #164f30 !important;
+  border-color: #bcd7c5 !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08) !important;
+}
+html[data-admin-theme="dark"] .cskh-mode-switch {
+  background: #0c1c14 !important;
+  border-color: #244b34 !important;
+}
+html[data-admin-theme="dark"] .cskh-mode-switch button {
+  color: #9ec5ad !important;
+}
+html[data-admin-theme="dark"] .cskh-mode-switch button.is-active {
+  background: #1b422d !important;
+  color: #4ade80 !important;
+  border-color: #3b7b55 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+}
+
+/* Thẻ chính sách khuyến mãi & Vòng quay */
+html[data-admin-theme="dark"] .promo-admin-grid > section {
+  background: #11261b !important;
+  border-color: #254d35 !important;
+}
+html[data-admin-theme="dark"] .promo-admin-grid code,
+html[data-admin-theme="dark"] .promo-admin-grid strong {
+  color: #86efac !important;
+}
+html[data-admin-theme="dark"] .reward-policy-grid > div {
+  background: #132a1e !important;
+  border-color: #275237 !important;
+  color: #eaf5ee !important;
+}
+html[data-admin-theme="dark"] .reward-policy-grid b {
+  color: #ffffff !important;
+}
+html[data-admin-theme="dark"] .reward-policy-grid small {
+  color: #9abfa7 !important;
+}
+
+/* Thẻ tác vụ nhanh & Danh sách voucher */
+html[data-admin-theme="dark"] .admin-task-list div {
+  background: #132a1e !important;
+  color: #eaf5ee !important;
+}
+html[data-admin-theme="dark"] .admin-task-list b {
+  background: #1c3d2b !important;
+  color: #86efac !important;
+}
+html[data-admin-theme="dark"] .admin-voucher-list article {
+  background: #132a1e !important;
+  border-color: #275237 !important;
+  color: #eaf5ee !important;
+}
+html[data-admin-theme="dark"] .admin-voucher-list b {
+  color: #ffffff !important;
+}
+html[data-admin-theme="dark"] .admin-voucher-list small,
+html[data-admin-theme="dark"] .admin-voucher-list span {
+  color: #9abfa7 !important;
+}
+html[data-admin-theme="dark"] .admin-voucher-list code {
+  background: #0c1c14 !important;
+  color: #4ade80 !important;
+  border: 1px solid #254d35 !important;
+}
+
+
 
