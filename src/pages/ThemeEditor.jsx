@@ -95,7 +95,7 @@ function AdminThemePreview({ theme, mode }) {
   return <div className="theme-preview theme-preview--admin" style={variables}>
     <div className="theme-admin-preview__corner theme-admin-preview__corner--top" />
     <div className="theme-admin-preview__corner theme-admin-preview__corner--bottom" />
-    <aside className="theme-admin-preview__sidebar"><strong>OmniCart. <small>QUẢN TRỊ</small></strong><button type="button" className="is-active">✦ Giao diện</button><button type="button">◫ Hàng hóa</button><button type="button">★ Đánh giá</button></aside>
+    <aside className="theme-admin-preview__sidebar"><strong>OmniCart. <small>Dashboard</small></strong><button type="button" className="is-active">✦ Giao diện</button><button type="button">◫ Hàng hóa</button><button type="button">★ Đánh giá</button></aside>
     <main className="theme-admin-preview__main"><small>GIAO DIỆN QUẢN TRỊ</small><h3>Không gian quản trị</h3><p>Màu thanh bên, bảng điều khiển và nút đang chọn được xem trước tại đây.</p><div className="theme-admin-preview__card"><b>Chỉnh giao diện</b><span>Sáng / Tối · Xem trước</span><button type="button">Đang chọn</button></div></main>
   </div>
 }

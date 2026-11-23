@@ -489,9 +489,9 @@ export default function Admin() {
     <main className="admin-shell admin-shell--workspace">
       <div className="admin-workspace-card">
       <aside className="admin-sidebar">
-        <a className="admin-brand" href="/admin" aria-label="OmniCart Quản trị">
+        <a className="admin-brand" href="/admin" aria-label="OmniCart Dashboard">
           <img src="/brand-logo-square.jpg" alt="OmniCart" style={{ width: '32px', height: '32px', borderRadius: '7px', objectFit: 'cover', marginRight: '6px' }} />
-          <span>OmniCart</span><small>{language === 'en' ? 'ADMIN' : 'QUẢN TRỊ'}</small>
+          <span>OmniCart</span><small className="admin-brand-badge">Dashboard</small>
         </a>
         <div className="admin-sidebar__profile"><span>{String(session.username || 'A').slice(0, 1).toUpperCase()}</span><div><b>{session.username}</b><small>{session.role === 'staff' ? 'Nhân viên' : 'Quản trị viên'}</small></div></div>
         <nav aria-label="Điều hướng quản trị">
