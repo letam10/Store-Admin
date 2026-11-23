@@ -1,11 +1,11 @@
 /*
   FILE NOTE
-  - Mục đích: Dịch vụ AI Local qwen3.5:4b cho Tự động hóa MXH v3.5.1:
+  - Mục đích: Dịch vụ AI Local qwen3.5:4b cho Tự động hóa MXH v3.5.2:
     1. Viết bài sạch tự nhiên (loại bỏ sạch ký hiệu Markdown ** thừa trên FB/TikTok).
-    2. Mắt Vision AI cứu cánh giao diện (DiagnoseExtensionUiAsync): timeout 45s, format json chuẩn, nhận diện nút "bạn đang nghĩ gì", đối tượng bài viết và lưu/xong.
-    3. Mở rộng từ khóa đa dạng, phân loại xu hướng & lọc trùng bài Viral, tạo ý tưởng bán hàng, nhận diện ảnh sản phẩm, phân tích bình luận & lọc kênh.
+    2. Mắt Vision AI cứu cánh giao diện (DiagnoseExtensionUiAsync): timeout 45s, format json chuẩn.
+    3. Mở rộng từ khóa đa dạng, phân loại xu hướng & lọc trùng bài Viral, giữ toàn bộ 100% bài viết khi phân tích lướt feed.
   - Liên kết trực tiếp: server-dotnet/Controllers/AdminSocialController.cs, server-dotnet/Models/SocialCampaign.cs
-  - Vùng ảnh hưởng khi sửa: Backend xử lý AI cho tạo bài viết, mở rộng từ khóa, phân loại viral, chẩn đoán vision UI cho extension.
+  - Vùng ảnh hưởng khi sửa: Backend xử lý AI cho tạo bài viết, mở rộng từ khóa, phân loại viral, phân tích phiên lướt feed.
 */
 
 using System.Globalization;
@@ -556,7 +556,7 @@ public sealed class SocialCopywriterService(IConfiguration configuration)
         var topTopics = classified.Posts.GroupBy(p => string.IsNullOrWhiteSpace(p.Category) ? "Xu hướng chung" : p.Category)
             .Select(g => new { topic = g.Key, postCount = g.Count(), totalLikes = g.Sum(x => (long)x.LikesCount), topPostTitle = g.OrderByDescending(x => x.LikesCount).First().Title })
             .OrderByDescending(x => x.totalLikes).ThenByDescending(x => x.postCount).Take(8).ToArray();
-        return new { ok = true, platform = req.Platform, durationMinutes = req.DurationMinutes, scannedCount = posts.Count, matchedCount = classified.Posts.Count, topTopics, topPosts = classified.Posts.OrderByDescending(p => p.LikesCount).Take(25).ToArray(), generatedBy = classified.GeneratedBy };
+        return new { ok = true, platform = req.Platform, durationMinutes = req.DurationMinutes, scannedCount = posts.Count, matchedCount = classified.Posts.Count, topTopics, topPosts = classified.Posts.OrderByDescending(p => p.LikesCount).ToArray(), generatedBy = classified.GeneratedBy };
     }
 
     private async Task<string?> TryGenerateWithOllamaAsync(string prompt, int maxTokens, CancellationToken ct)

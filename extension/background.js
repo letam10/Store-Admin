@@ -1,11 +1,10 @@
 /*
   FILE NOTE
-  - Mục đích: Service Worker điều phối ngầm OmniVision v3.5.1 cho Chrome Extension Manifest V3.
+  - Mục đích: Service Worker điều phối ngầm OmniVision v3.5.2 cho Chrome Extension Manifest V3.
   - Nâng cấp:
-    1. Quản lý cờ dừng riêng cho từng nền tảng (viralStopFlags, surfStopFlags) hỗ trợ nút ⏹ Dừng FB / ⏹ Dừng TikTok / ⏹ Dừng lướt.
-    2. Cập nhật buildTopicSources hỗ trợ ttSourceMode ('explore' vs 'search').
-    3. Luồng cào bài viral chạy kiên trì đến khi đủ mục tiêu hoặc có lệnh dừng.
-    4. Sửa triệt để runSurfAndCollect chạy đúng số phút cài đặt theo đồng hồ thật, lướt mượt từng bước.
+    1. Sửa triệt để lỗi onConnect Extension context invalidated bằng cách gắn listeners đồng bộ ngay lập tức.
+    2. Đánh thức giấc ngủ SW_SLEEP & runSurfAndCollect tức thì khi có lệnh dừng (surfWakeups).
+    3. Bổ sung LIVE_VIRAL_POST bắn progressive VIRAL_BATCH_READY về Admin ngay khi bắt được bài mới.
   - Liên kết trực tiếp: extension/manifest.json, extension/vision-engine.js, extension/content-facebook.js, extension/content-tiktok.js
   - Vùng ảnh hưởng khi sửa: Toàn bộ điều phối ngầm các tác vụ đăng bài, cào viral, xem video, lướt feed, cầu nối API với Store-Admin Web API.
 */
@@ -93,6 +92,8 @@ const scraperTabIds = { fbFeed: null, fbReels: null, ttViral: null, fbGroups: nu
 const singleViewTabIds = { facebook: null, tiktok: null }
 const viralStopFlags = { facebook: false, tiktok: false }
 const surfStopFlags = { facebook: false, tiktok: false }
+const surfWakeups = { facebook: null, tiktok: null }
+const viralLiveContext = { topic: 'all', topicLabel: '' }
 const bridgeApiWaiters = new Map()
 let keepAliveTimer = null
 let verificationCheckInFlight = false
@@ -362,65 +363,74 @@ async function processPendingVerifications() {
 // PERSISTENT PORT TỚI STORE-ADMIN
 // =========================================================================
 
-chrome.runtime.onConnect.addListener(async (port) => {
-  if (port.name !== 'omnicart-admin-bridge' && port.name !== 'omnicart-popup') return
+chrome.runtime.onConnect.addListener((port) => {
+  if (!port || (port.name !== 'omnicart-admin-bridge' && port.name !== 'omnicart-popup')) return
   adminPorts.add(port)
-  const [pendingVerifications, resolvedVerifications] = await Promise.all([
-    getPendingVerifications(), getResolvedVerifications()
-  ])
+
   try {
-    port.postMessage({
-      type: 'BRIDGE_HELLO',
-      version: getExtensionVersion(),
-      activeJobs: Array.from(activeJobs.values()),
-      pendingVerifications,
-      resolvedVerifications,
-      recentLogs: recentLogs.slice(0, 18)
+    port.onDisconnect.addListener(() => { adminPorts.delete(port) })
+    port.onMessage.addListener(async (msg) => {
+      if (!msg) return
+      if (msg.type === 'HEARTBEAT') {
+        try { port.postMessage({ type: 'HEARTBEAT_ACK', ts: Date.now(), version: getExtensionVersion() }) } catch (_) {}
+        return
+      }
+      if (msg.type === 'ACK_RESOLVED_VERIFICATION' && msg.postId) {
+        await saveResolvedVerifications((await getResolvedVerifications()).filter((r) => r.postId !== msg.postId))
+        return
+      }
+      if (msg.type === 'BRIDGE_API_FETCH_RESULT' && msg.fetchId) {
+        const waiter = bridgeApiWaiters.get(msg.fetchId)
+        if (waiter) {
+          bridgeApiWaiters.delete(msg.fetchId)
+          if (msg.ok) waiter.resolve(msg.data)
+          else waiter.reject(new Error(msg.error || 'BRIDGE_API_ERROR'))
+        }
+        return
+      }
+      if (msg.type === 'ADMIN_COMMAND' && msg.requestId) {
+        try {
+          const result = await dispatchCommand(msg.command, { tab: port.sender?.tab })
+          port.postMessage({
+            type: 'ADMIN_COMMAND_RESULT',
+            requestId: msg.requestId,
+            ok: result?.ok === true,
+            data: result,
+            error: result?.ok === true ? null : (result?.error || 'COMMAND_FAILED')
+          })
+        } catch (err) {
+          try {
+            port.postMessage({
+              type: 'ADMIN_COMMAND_RESULT',
+              requestId: msg.requestId,
+              ok: false,
+              data: null,
+              error: err.message || String(err)
+            })
+          } catch (_) {}
+        }
+      }
     })
-  } catch (_) {}
+  } catch (_) {
+    adminPorts.delete(port)
+    return
+  }
 
-  port.onMessage.addListener(async (msg) => {
-    if (!msg) return
-    if (msg.type === 'HEARTBEAT') {
-      port.postMessage({ type: 'HEARTBEAT_ACK', ts: Date.now(), version: getExtensionVersion() })
-      return
-    }
-    if (msg.type === 'ACK_RESOLVED_VERIFICATION' && msg.postId) {
-      await saveResolvedVerifications((await getResolvedVerifications()).filter((r) => r.postId !== msg.postId))
-      return
-    }
-    if (msg.type === 'BRIDGE_API_FETCH_RESULT' && msg.fetchId) {
-      const waiter = bridgeApiWaiters.get(msg.fetchId)
-      if (waiter) {
-        bridgeApiWaiters.delete(msg.fetchId)
-        if (msg.ok) waiter.resolve(msg.data)
-        else waiter.reject(new Error(msg.error || 'BRIDGE_API_ERROR'))
-      }
-      return
-    }
-    if (msg.type === 'ADMIN_COMMAND' && msg.requestId) {
+  Promise.all([getPendingVerifications(), getResolvedVerifications()])
+    .then(([pendingVerifications, resolvedVerifications]) => {
+      if (!adminPorts.has(port)) return
       try {
-        const result = await dispatchCommand(msg.command, { tab: port.sender?.tab })
         port.postMessage({
-          type: 'ADMIN_COMMAND_RESULT',
-          requestId: msg.requestId,
-          ok: result?.ok === true,
-          data: result,
-          error: result?.ok === true ? null : (result?.error || 'COMMAND_FAILED')
+          type: 'BRIDGE_HELLO',
+          version: getExtensionVersion(),
+          activeJobs: Array.from(activeJobs.values()),
+          pendingVerifications,
+          resolvedVerifications,
+          recentLogs: recentLogs.slice(0, 18)
         })
-      } catch (err) {
-        port.postMessage({
-          type: 'ADMIN_COMMAND_RESULT',
-          requestId: msg.requestId,
-          ok: false,
-          data: null,
-          error: err.message || String(err)
-        })
-      }
-    }
-  })
-
-  port.onDisconnect.addListener(() => adminPorts.delete(port))
+      } catch (_) { adminPorts.delete(port) }
+    })
+    .catch(() => {})
 })
 
 // =========================================================================
@@ -893,6 +903,8 @@ async function scrapeBothViralPlatforms(options = {}) {
     const targetPlatform = String(options.platform || 'both').toLowerCase()
     const excludeUrls = Array.isArray(options.excludeUrls) ? options.excludeUrls : []
     const topicCfg = buildTopicSources(options)
+    viralLiveContext.topic = options.topic || 'all'
+    viralLiveContext.topicLabel = topicCfg.label || ''
 
     pushLog({
       platform: 'system', step: 'scrape_both', level: 'info',
@@ -1138,7 +1150,10 @@ async function runSurfAndCollect(options = {}) {
         platform, step: 'surf', level: 'info',
         message: `🧭 Lướt lượt #${stepIndex} (${Math.floor(elapsedSec / 60)}p${String(elapsedSec % 60).padStart(2, '0')}s / ${Math.floor(totalSec / 60)}p00s) · Đã gặp ${collected.length} bài`
       })
-      await new Promise((r) => setTimeout(r, clampedWait))
+      await new Promise((resolve) => {
+        const t = setTimeout(() => { surfWakeups[platform] = null; resolve() }, clampedWait)
+        surfWakeups[platform] = () => { clearTimeout(t); surfWakeups[platform] = null; resolve() }
+      })
     }
 
     const stoppedManual = surfStopFlags[platform]
@@ -1216,8 +1231,23 @@ async function dispatchCommand(message, sender = {}) {
     }
     case 'STOP_SURF': {
       const p = String(message.platform || 'all').toLowerCase()
-      if (p === 'facebook' || p === 'all') surfStopFlags.facebook = true
-      if (p === 'tiktok' || p === 'all') surfStopFlags.tiktok = true
+      if (p === 'facebook' || p === 'all') { surfStopFlags.facebook = true; surfWakeups.facebook?.() }
+      if (p === 'tiktok' || p === 'all') { surfStopFlags.tiktok = true; surfWakeups.tiktok?.() }
+      return { ok: true }
+    }
+    case 'LIVE_VIRAL_POST': {
+      if (message.post?.postUrl) {
+        broadcastToAdmins({
+          type: 'VIRAL_BATCH_READY',
+          payload: {
+            platform: message.platform || message.post.platform,
+            sourceLabel: message.sourceLabel || 'Viral',
+            topic: viralLiveContext.topic,
+            topicLabel: viralLiveContext.topicLabel,
+            posts: [message.post]
+          }
+        })
+      }
       return { ok: true }
     }
     case 'OPEN_SINGLE_TAB':

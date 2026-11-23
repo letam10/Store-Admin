@@ -1,9 +1,9 @@
 /*
   FILE NOTE
-  - Mục đích: Bộ 5 Panel Tự động hóa MXH v3.5.1 (AdminSocialPowerPanels).
+  - Mục đích: Bộ 5 Panel Tự động hóa MXH v3.5.2 (AdminSocialPowerPanels).
   - Nâng cấp:
-    1. Trong customViralCfg thêm ttSourceMode: 'explore' và dropdown Nguồn TikTok (Khám phá / Từ khóa).
-    2. Trong surfCfg thêm ttSourceMode: 'explore', hiển thị tùy chọn Nguồn TikTok và ô tìm kiếm khi chọn search, thêm nút ⏹ Dừng lướt tức thì khi surfBusy.
+    1. Nhận thêm prop onSurfSaved và gọi onSurfSaved?.() sau khi phân tích lướt để đồng bộ sang Tab Nhật ký.
+    2. Hỗ trợ hiển thị nút dừng lướt và lọc bài theo thời gian.
   - Liên kết trực tiếp: src/pages/AdminSocialAutomation.jsx, src/pages/AdminSocialAutomation.css
   - Vùng ảnh hưởng khi sửa: Giao diện Panel Lấy bài Viral tùy chỉnh và Panel Lướt theo thời gian thực tế.
 */
@@ -196,7 +196,7 @@ export function SmartProductVisionPanel({ csrfToken, onProductCreated, onSelectF
   )
 }
 
-export function AutomationSuitePanels({ csrfToken, sendExtensionMessage, viralPosts, onCustomViralScrape, onOpenSingleTab, showNotice }) {
+export function AutomationSuitePanels({ csrfToken, sendExtensionMessage, viralPosts, onCustomViralScrape, onOpenSingleTab, showNotice, onSurfSaved }) {
   const [watchCfg, setWatchCfg] = useState({ platform: 'tiktok', url: '', repeatCount: 5, dwellSeconds: 8 })
   const [watchBusy, setWatchBusy] = useState(false)
 
@@ -288,6 +288,7 @@ export function AutomationSuitePanels({ csrfToken, sendExtensionMessage, viralPo
         })
       })
       setSurfResult(analyzed)
+      onSurfSaved?.()
       showNotice(`✅ Lướt đủ ${surfCfg.durationMinutes} phút — lọc được ${analyzed.matchedCount} bài!`)
     } catch (err) { showNotice(err.message, 'error') }
     finally { setSurfBusy(false) }

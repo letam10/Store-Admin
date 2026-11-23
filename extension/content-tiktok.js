@@ -1,9 +1,9 @@
 /*
   FILE NOTE
-  - Mục đích: Content Script OmniVision v3.5.1 cho TikTok Studio & TikTok Web 2026.
+  - Mục đích: Content Script OmniVision v3.5.2 cho TikTok Studio & TikTok Web 2026.
   - Nâng cấp:
-    1. Hỗ trợ cờ dừng cào ABORT_SCRAPE và lướt mượt từng bước TT_SURF_STEP.
-    2. Cải tiến cào video viral và chuyển danh mục khám phá mượt mà.
+    1. Đánh thức giấc ngủ ngay lập tức khi người dùng bấm dừng ABORT_SCRAPE bằng abortAllWaits().
+    2. Cuộn giữa thẻ chờ ảnh nạp xong chống ảnh đen do lazy load khi mạng chậm và bắn LIVE_VIRAL_POST tức thì về bảng Admin.
   - Liên kết trực tiếp: extension/vision-engine.js, extension/content-media.js, extension/background.js
   - Vùng ảnh hưởng khi sửa: Toàn bộ tương tác tự động với TikTok Studio và TikTok Web (cào video viral, xem video, lướt feed).
 */
@@ -68,6 +68,7 @@
     }
     if (message.type === 'ABORT_SCRAPE') {
       scrapeAborted = true
+      V()?.abortAllWaits?.()
       sendResponse({ ok: true })
       return false
     }
@@ -941,6 +942,14 @@
           const metrics = extractTikTokCardMetrics(card)
           if (metrics.likes < minLikes) continue
 
+          if (scrapeAborted) break
+          // Cuộn thẻ video vào tầm nhìn & chờ mạng lag tải xong ảnh bìa thật (tránh ảnh đen!)
+          try { card.scrollIntoView({ behavior: 'auto', block: 'center' }) } catch (_) {}
+          await M().waitFor(() => {
+            const imgs = Array.from(card.querySelectorAll('img[src]')).filter((i) => !/avatar/i.test(i.alt || ''))
+            return imgs.some((i) => i.src && !i.src.startsWith('data:') && i.complete && i.naturalWidth >= 80)
+          }, 4500, 280)
+
           const imgAlt = V().normalizeText(card.querySelector('img[alt]')?.getAttribute('alt') || '')
           const descEl = card.querySelector('[data-e2e="explore-card-desc"], [data-e2e="search-card-desc"], [data-e2e="video-desc"], a[title], h1')
           const descTxt = V().normalizeText(descEl?.getAttribute?.('title') || descEl?.innerText || descEl?.textContent || '')
@@ -956,7 +965,7 @@
 
           seenUrls.add(urlKey)
           lastFoundAt = Date.now()
-          collected.push({
+          const itemObj = {
             id: `tt-viral-${Date.now()}-${collected.length}`,
             title: V().truncateClean(bestCaption, 115),
             platform: 'tiktok',
@@ -970,7 +979,9 @@
             authorName: authorHandleClean,
             authorUrl,
             createdAt: new Date().toISOString()
-          })
+          }
+          collected.push(itemObj)
+          chrome.runtime.sendMessage({ type: 'LIVE_VIRAL_POST', platform: 'tiktok', sourceLabel: 'TikTok', post: itemObj }, () => { void chrome.runtime.lastError })
           V().reportStep('tiktok', 'scrape_viral', `TikTok Viral: ${totalAlreadyFound + collected.length} bài (❤️ ${metrics.likes.toLocaleString('vi-VN')})`)
         } catch (_) {}
       }

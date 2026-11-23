@@ -1,12 +1,13 @@
 /*
   FILE NOTE
-  - Mục đích: Trang quản trị Tự động hóa Mạng xã hội v3.5.1 (AdminSocialAutomation).
+  - Mục đích: Trang quản trị Tự động hóa Mạng xã hội v3.5.2 (AdminSocialAutomation).
   - Nâng cấp:
-    1. Bổ sung chọn nguồn cào TikTok (Khám phá / Từ khóa) và 2 nút ⏹ Dừng FB & ⏹ Dừng TikTok độc lập.
-    2. Cập nhật state scrapingPlatformBusy và hàm handleStopViralPlatform.
-    3. Hỗ trợ truyền ttSourceMode vào lệnh FETCH_REAL_VIRAL cho Chrome Extension.
+    1. Sắp xếp Mới lấy nhất (newest) mặc định cho cả 2 cột Viral FB & TikTok.
+    2. Bổ sung referrerPolicy="no-referrer" cho ảnh thumbnail, hiển thị giờ lấy bài.
+    3. Nút ⏹ Dừng FB và ⏹ Dừng TikTok luôn bấm được.
+    4. Thêm Panel Dữ liệu Lướt theo thời gian đầy đủ ở Tab Nhật ký & Báo cáo.
   - Liên kết trực tiếp: src/pages/AdminSocialPowerPanels.jsx, src/pages/AdminSocialAutomation.css, src/pages/socialPrivacy.js, src/api/chat.js
-  - Vùng ảnh hưởng khi sửa: Toàn bộ giao diện tab Quản lý MXH, bảng bài viral song song 2 cột, luồng gọi extension cào bài và dừng tác vụ.
+  - Vùng ảnh hưởng khi sửa: Toàn bộ giao diện tab Quản lý MXH, bảng bài viral song song 2 cột, bảng lịch sử lướt ở tab nhật ký.
 */
 
 import { useEffect, useState, useMemo, useRef } from 'react'
@@ -94,8 +95,11 @@ export default function AdminSocialAutomation({ csrfToken }) {
   const [viralSearch, setViralSearch] = useState('')
   const [aiCleaningViral, setAiCleaningViral] = useState(false)
   const [customViralTopic, setCustomViralTopic] = useState('')
-  const [fbViralSort, setFbViralSort] = useState('likes_desc')
-  const [ttViralSort, setTtViralSort] = useState('likes_desc')
+  const [fbViralSort, setFbViralSort] = useState('newest')
+  const [ttViralSort, setTtViralSort] = useState('newest')
+  const [surfHistory, setSurfHistory] = useState([])
+  const [surfHistoryFilter, setSurfHistoryFilter] = useState('all')
+  const [surfHistorySort, setSurfHistorySort] = useState('newest')
   const [scrapingViralBusy, setScrapingViralBusy] = useState(false)
 
   const [extensionConnected, setExtensionConnected] = useState(false)
@@ -246,6 +250,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
         apiJson('/api/admin/social/viral'),
         apiJson('/api/admin/products?offset=0&limit=100').catch(() => null)
       ])
+      apiJson('/api/admin/social/surf-history').then((res) => { if (res?.posts) setSurfHistory(res.posts) }).catch(() => {})
       if (resStats?.stats) setStats(resStats.stats)
       if (resSettings?.settings) {
         const nextPrivacy = resSettings.settings.privacy === 'public' ? 'public' : 'only_me'
@@ -316,6 +321,12 @@ export default function AdminSocialAutomation({ csrfToken }) {
         }).catch(() => null)
         if (classified?.ok && Array.isArray(classified.posts)) postsToSave = classified.posts
         if (postsToSave.length > 0) {
+          postsToSave = postsToSave.map((p) => ({
+            ...p,
+            likesCount: Math.min(200000000, Math.max(0, Math.round(Number(p.likesCount) || 0))),
+            commentsCount: Math.min(200000000, Math.max(0, Math.round(Number(p.commentsCount) || 0))),
+            sharesCount: Math.min(200000000, Math.max(0, Math.round(Number(p.sharesCount) || 0)))
+          }))
           const saved = await apiJson('/api/admin/social/viral/import-real', {
             method: 'POST', headers: { 'x-csrf-token': csrfToken },
             body: JSON.stringify({ posts: postsToSave })
@@ -815,6 +826,8 @@ export default function AdminSocialAutomation({ csrfToken }) {
   }, [groups, groupSearch, groupSort])
 
   const sortViralList = (list, mode) => [...list].sort((a, b) => {
+    if (mode === 'newest') return Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0)
+    if (mode === 'oldest') return Date.parse(a.createdAt || 0) - Date.parse(b.createdAt || 0)
     if (mode === 'name_asc') return String(a.title || '').localeCompare(String(b.title || ''), 'vi')
     if (mode === 'name_desc') return String(b.title || '').localeCompare(String(a.title || ''), 'vi')
     if (mode === 'likes_asc') return Number(a.likesCount || 0) - Number(b.likesCount || 0)
@@ -986,6 +999,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
             onCustomViralScrape={(cfg) => { setActiveSubTab('groups'); handleScrapeRealViralThroughExtension(cfg) }}
             onOpenSingleTab={handleOpenViralSingleTab}
             showNotice={showNotice}
+            onSurfSaved={() => apiJson('/api/admin/social/surf-history').then((r) => r?.posts && setSurfHistory(r.posts)).catch(() => {})}
           />
         </div>
       )}
@@ -1234,12 +1248,14 @@ export default function AdminSocialAutomation({ csrfToken }) {
                   <span>📘 Facebook (Bài ≥1K • Reels ≥5K)</span>
                   <div className="social-viral-head-tools">
                     <select aria-label="Sắp xếp bài viral Facebook" className="social-sort-select social-sort-select--mini" value={fbViralSort} onChange={e => setFbViralSort(e.target.value)}>
+                      <option value="newest">🕒 Mới lấy nhất</option>
+                      <option value="oldest">🕒 Cũ nhất</option>
                       <option value="likes_desc">Like ↓</option>
                       <option value="likes_asc">Like ↑</option>
                       <option value="name_asc">A → Z</option>
                     </select>
                     <span className="social-viral-count">{facebookViralAll.length} bài</span>
-                    <button type="button" className="social-action-btn social-action-btn--danger" style={{ padding: '4px 9px' }} disabled={!scrapingPlatformBusy.facebook && !scrapingViralBusy} onClick={() => handleStopViralPlatform('facebook')}>⏹ Dừng FB</button>
+                    <button type="button" className="social-action-btn social-action-btn--danger" style={{ padding: '4px 9px' }} onClick={() => handleStopViralPlatform('facebook')}>⏹ Dừng FB</button>
                   </div>
                 </div>
                 <div className="social-table-shell social-table-shell--compact">
@@ -1254,11 +1270,12 @@ export default function AdminSocialAutomation({ csrfToken }) {
                             <td>
                               <div className="viral-card-cell">
                                 {v.thumbnailUrl
-                                  ? <img src={v.thumbnailUrl} alt={v.title} className="viral-thumb-lg" onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                                  ? <img src={v.thumbnailUrl} alt={v.title} referrerPolicy="no-referrer" className="viral-thumb-lg" onError={(e) => { e.currentTarget.style.display = 'none' }} />
                                   : <div className="viral-thumb-lg viral-thumb-lg--fb">📘</div>}
                                 <div className="viral-card-meta">
                                   <div className="viral-card-title">{v.title}</div>
                                   {v.authorName && <div className="viral-card-author">👤 {v.authorUrl ? <a href={v.authorUrl} target="_blank" rel="noopener noreferrer">{v.authorName}</a> : v.authorName}</div>}
+                                  {v.createdAt && <div style={{ fontSize: '11px', color: '#64748b' }}>🕒 {formatTime(v.createdAt)}</div>}
                                   <div className="viral-card-badges">
                                     <span className="channel-tag channel-tag--facebook">{v.category || 'Xu hướng FB'}</span>
                                     <span className="viral-kind-badge">{isFacebookReelItem(v) ? '🎬 Reels' : '🏠 Bài viết'}</span>
@@ -1290,12 +1307,14 @@ export default function AdminSocialAutomation({ csrfToken }) {
                   <span>🎵 TikTok (≥ 1M Tim)</span>
                   <div className="social-viral-head-tools">
                     <select aria-label="Sắp xếp bài viral TikTok" className="social-sort-select social-sort-select--mini" value={ttViralSort} onChange={e => setTtViralSort(e.target.value)}>
+                      <option value="newest">🕒 Mới lấy nhất</option>
+                      <option value="oldest">🕒 Cũ nhất</option>
                       <option value="likes_desc">Tim ↓</option>
                       <option value="likes_asc">Tim ↑</option>
                       <option value="name_asc">A → Z</option>
                     </select>
                     <span className="social-viral-count">{tiktokViralAll.length} bài</span>
-                    <button type="button" className="social-action-btn social-action-btn--danger" style={{ padding: '4px 9px' }} disabled={!scrapingPlatformBusy.tiktok && !scrapingViralBusy} onClick={() => handleStopViralPlatform('tiktok')}>⏹ Dừng TikTok</button>
+                    <button type="button" className="social-action-btn social-action-btn--danger" style={{ padding: '4px 9px' }} onClick={() => handleStopViralPlatform('tiktok')}>⏹ Dừng TikTok</button>
                   </div>
                 </div>
                 <div className="social-table-shell social-table-shell--compact">
@@ -1310,11 +1329,12 @@ export default function AdminSocialAutomation({ csrfToken }) {
                             <td>
                               <div className="viral-card-cell">
                                 {v.thumbnailUrl
-                                  ? <img src={v.thumbnailUrl} alt={v.title} className="viral-thumb-lg" onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                                  ? <img src={v.thumbnailUrl} alt={v.title} referrerPolicy="no-referrer" className="viral-thumb-lg" onError={(e) => { e.currentTarget.style.display = 'none' }} />
                                   : <div className="viral-thumb-lg viral-thumb-lg--tt">🎵</div>}
                                 <div className="viral-card-meta">
                                   <div className="viral-card-title">{v.title}</div>
                                   {v.authorName && <div className="viral-card-author">👤 {v.authorUrl ? <a href={v.authorUrl} target="_blank" rel="noopener noreferrer">{v.authorName}</a> : v.authorName}</div>}
+                                  {v.createdAt && <div style={{ fontSize: '11px', color: '#64748b' }}>🕒 {formatTime(v.createdAt)}</div>}
                                   <div className="viral-card-badges">
                                     <span className="channel-tag channel-tag--tiktok">{v.category || 'Xu hướng TikTok'}</span>
                                     {tags.map((t) => <span key={t} className="viral-hashtag-chip viral-hashtag-chip--tt">{t}</span>)}
@@ -1358,82 +1378,153 @@ export default function AdminSocialAutomation({ csrfToken }) {
 
       {/* TAB 4: NHẬT KÝ & BÁO CÁO EXCEL */}
       {activeSubTab === 'logs' && (
-        <section className="social-panel">
-          <div className="social-panel__heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-            <h3>📋 Nhật ký & Báo cáo</h3>
-            <button type="button" className="social-action-btn social-action-btn--danger" onClick={handleClearAllPostLogs} disabled={loading || posts.length === 0} style={{ fontSize: '12px', padding: '7px 12px' }}>
-              🗑️ Xóa tất cả ({posts.length})
-            </button>
-          </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <section className="social-panel">
+            <div className="social-panel__heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+              <h3>📋 Nhật ký & Báo cáo</h3>
+              <button type="button" className="social-action-btn social-action-btn--danger" onClick={handleClearAllPostLogs} disabled={loading || posts.length === 0} style={{ fontSize: '12px', padding: '7px 12px' }}>
+                🗑️ Xóa tất cả ({posts.length})
+              </button>
+            </div>
 
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
-            <select className="social-select" style={{ width: '200px' }} value={postFilterStatus} onChange={e => setPostFilterStatus(e.target.value)}>
-              <option value="all">Tất cả trạng thái</option>
-              <option value="published">🟢 Đã đăng</option>
-              <option value="pending_review">⏳ Đang xét duyệt</option>
-              <option value="internal_draft">📝 Bản nháp</option>
-              <option value="unverified">⚠️ Chưa xác minh</option>
-              <option value="failed">🔴 Lỗi / Từ chối duyệt</option>
-            </select>
-            <select className="social-select" style={{ width: '150px' }} value={postFilterPlatform} onChange={e => setPostFilterPlatform(e.target.value)}>
-              <option value="all">Tất cả kênh</option>
-              <option value="facebook">Facebook</option>
-              <option value="tiktok">TikTok</option>
-            </select>
-            <button type="button" className="social-action-btn social-action-btn--primary" onClick={handleExportExcel}>📊 Xuất Excel (.xlsx)</button>
-            <span className="social-muted-text" style={{ marginLeft: 'auto' }}>{filteredPosts.length}/{posts.length} bài</span>
-          </div>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <select className="social-select" style={{ width: '200px' }} value={postFilterStatus} onChange={e => setPostFilterStatus(e.target.value)}>
+                <option value="all">Tất cả trạng thái</option>
+                <option value="published">🟢 Đã đăng</option>
+                <option value="pending_review">⏳ Đang xét duyệt</option>
+                <option value="internal_draft">📝 Bản nháp</option>
+                <option value="unverified">⚠️ Chưa xác minh</option>
+                <option value="failed">🔴 Lỗi / Từ chối duyệt</option>
+              </select>
+              <select className="social-select" style={{ width: '150px' }} value={postFilterPlatform} onChange={e => setPostFilterPlatform(e.target.value)}>
+                <option value="all">Tất cả kênh</option>
+                <option value="facebook">Facebook</option>
+                <option value="tiktok">TikTok</option>
+              </select>
+              <button type="button" className="social-action-btn social-action-btn--primary" onClick={handleExportExcel}>📊 Xuất Excel (.xlsx)</button>
+              <span className="social-muted-text" style={{ marginLeft: 'auto' }}>{filteredPosts.length}/{posts.length} bài</span>
+            </div>
 
-          <div className="social-table-shell">
-            <table className="social-table">
-              <thead><tr><th>Thời gian</th><th>Kênh</th><th>Sản phẩm</th><th>Nội dung</th><th>Trạng thái</th><th>Tương tác</th><th>Link</th><th>Hành động</th></tr></thead>
-              <tbody>
-                {filteredPosts.map(p => (
-                  <tr key={p.id}>
-                    <td style={{ whiteSpace: 'nowrap' }}><strong>{formatTime(p.publishedTime || p.triggerTime)}</strong></td>
-                    <td><span className={'channel-tag channel-tag--' + p.platform}>{p.platform}</span></td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <img src={p.productImage || '/products/bag.svg'} alt={p.productName} className="social-product-thumb" onError={e => { e.currentTarget.src = '/products/bag.svg' }} />
-                        <div><strong>{p.productName}</strong><div style={{ fontSize: '11px', color: '#2e8658', fontWeight: 700 }}>{Number(p.productPrice).toLocaleString('vi-VN')}đ</div></div>
-                      </div>
-                    </td>
-                    <td>
-                      <div style={{ maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600 }}>{p.title}</div>
-                      <button type="button" className="social-modal-open-btn" onClick={() => setSelectedPostModal(p)}>Xem ↗</button>
-                    </td>
-                    <td>
-                      <span className={'status-tag status-tag--' + p.status} title={p.errorMessage || ''}>
-                        {p.status === 'published' ? '🟢 Đã đăng'
-                          : p.status === 'pending_review' ? '⏳ Đang xét duyệt'
-                            : p.status === 'unverified' ? '⚠️ Chưa xác minh'
-                              : p.status === 'internal_draft' ? '📝 Bản nháp'
-                                : p.status === 'failed' && /từ chối/i.test(p.errorMessage || '') ? '🔴 Bị từ chối duyệt' : '🔴 Lỗi'}
-                      </span>
-                    </td>
-                    <td style={{ fontSize: '11.5px', whiteSpace: 'nowrap' }}>👍 {p.likesCount} · 🔁 {p.sharesCount} · 💬 {p.commentsCount}</td>
-                    <td>
-                      {p.postUrl
-                        ? <a href={p.postUrl} target="_blank" rel="noopener noreferrer" className="social-action-btn social-table-link">Mở bài ↗</a>
-                        : <span className="social-muted-text">{p.status === 'pending_review' ? 'Đang xét duyệt...' : '—'}</span>}
-                      {p.errorMessage && <small className="social-muted-text" style={{ display: 'block', maxWidth: '185px', whiteSpace: 'normal', color: '#f87171' }}>{p.errorMessage}</small>}
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: '4px' }}>
-                        <button type="button" className="social-action-btn" onClick={() => handleCopyPost(p)}>{copiedPostId === p.id ? '✓' : '📋'}</button>
-                        {p.status !== 'pending_review' && (
-                          <button type="button" className="social-action-btn social-action-btn--primary" onClick={() => handleRealAutoPostThroughExtension(p)} disabled={postingBusy[p.platform]}>🚀</button>
-                        )}
-                        <button type="button" className="social-action-btn social-action-btn--danger" onClick={() => handleDeletePost(p.id)}>✕</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {filteredPosts.length === 0 && <tr><td colSpan={8} className="social-table-empty">Chưa có nhật ký.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </section>
+            <div className="social-table-shell">
+              <table className="social-table">
+                <thead><tr><th>Thời gian</th><th>Kênh</th><th>Sản phẩm</th><th>Nội dung</th><th>Trạng thái</th><th>Tương tác</th><th>Link</th><th>Hành động</th></tr></thead>
+                <tbody>
+                  {filteredPosts.map(p => (
+                    <tr key={p.id}>
+                      <td style={{ whiteSpace: 'nowrap' }}><strong>{formatTime(p.publishedTime || p.triggerTime)}</strong></td>
+                      <td><span className={'channel-tag channel-tag--' + p.platform}>{p.platform}</span></td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <img src={p.productImage || '/products/bag.svg'} alt={p.productName} className="social-product-thumb" onError={e => { e.currentTarget.src = '/products/bag.svg' }} />
+                          <div><strong>{p.productName}</strong><div style={{ fontSize: '11px', color: '#2e8658', fontWeight: 700 }}>{Number(p.productPrice).toLocaleString('vi-VN')}đ</div></div>
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600 }}>{p.title}</div>
+                        <button type="button" className="social-modal-open-btn" onClick={() => setSelectedPostModal(p)}>Xem ↗</button>
+                      </td>
+                      <td>
+                        <span className={'status-tag status-tag--' + p.status} title={p.errorMessage || ''}>
+                          {p.status === 'published' ? '🟢 Đã đăng'
+                            : p.status === 'pending_review' ? '⏳ Đang xét duyệt'
+                              : p.status === 'unverified' ? '⚠️ Chưa xác minh'
+                                : p.status === 'internal_draft' ? '📝 Bản nháp'
+                                  : p.status === 'failed' && /từ chối/i.test(p.errorMessage || '') ? '🔴 Bị từ chối duyệt' : '🔴 Lỗi'}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: '11.5px', whiteSpace: 'nowrap' }}>👍 {p.likesCount} · 🔁 {p.sharesCount} · 💬 {p.commentsCount}</td>
+                      <td>
+                        {p.postUrl
+                          ? <a href={p.postUrl} target="_blank" rel="noopener noreferrer" className="social-action-btn social-table-link">Mở bài ↗</a>
+                          : <span className="social-muted-text">{p.status === 'pending_review' ? 'Đang xét duyệt...' : '—'}</span>}
+                        {p.errorMessage && <small className="social-muted-text" style={{ display: 'block', maxWidth: '185px', whiteSpace: 'normal', color: '#f87171' }}>{p.errorMessage}</small>}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button type="button" className="social-action-btn" onClick={() => handleCopyPost(p)}>{copiedPostId === p.id ? '✓' : '📋'}</button>
+                          {p.status !== 'pending_review' && (
+                            <button type="button" className="social-action-btn social-action-btn--primary" onClick={() => handleRealAutoPostThroughExtension(p)} disabled={postingBusy[p.platform]}>🚀</button>
+                          )}
+                          <button type="button" className="social-action-btn social-action-btn--danger" onClick={() => handleDeletePost(p.id)}>✕</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredPosts.length === 0 && <tr><td colSpan={8} className="social-table-empty">Chưa có nhật ký.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* PANEL DỮ LIỆU LƯỚT THEO THỜI GIAN ĐẦY ĐỦ */}
+          <section className="social-panel">
+            <div className="social-panel__head-row" style={{ marginBottom: '14px' }}>
+              <h3>🧭 Dữ liệu Lướt theo thời gian ({surfHistory.length} bài)</h3>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <select className="social-sort-select" value={surfHistoryFilter} onChange={e => setSurfHistoryFilter(e.target.value)}>
+                  <option value="all">Tất cả kênh</option>
+                  <option value="facebook">Facebook</option>
+                  <option value="tiktok">TikTok</option>
+                </select>
+                <select className="social-sort-select" value={surfHistorySort} onChange={e => setSurfHistorySort(e.target.value)}>
+                  <option value="newest">🕒 Mới lấy nhất</option>
+                  <option value="likes_desc">❤️ Tim / Like ↓</option>
+                  <option value="name_asc">A → Z</option>
+                </select>
+                <button
+                  type="button"
+                  className="social-action-btn social-action-btn--danger"
+                  disabled={!surfHistory.length}
+                  onClick={async () => {
+                    if (!window.confirm(`Xóa toàn bộ ${surfHistory.length} bài đã lướt?`)) return
+                    await apiJson('/api/admin/social/surf-history', { method: 'DELETE', headers: { 'x-csrf-token': csrfToken } })
+                    setSurfHistory([])
+                  }}
+                >
+                  🗑️ Xóa ({surfHistory.length})
+                </button>
+              </div>
+            </div>
+            <div className="social-table-shell">
+              <table className="social-table">
+                <thead><tr><th>#</th><th>Kênh</th><th>Bài viết / Video</th><th>Tương tác</th><th>Thời gian lấy</th><th>Link</th></tr></thead>
+                <tbody>
+                  {sortViralList(
+                    surfHistory.filter((p) => surfHistoryFilter === 'all' || String(p.platform || '').toLowerCase() === surfHistoryFilter),
+                    surfHistorySort
+                  ).map((item, idx) => (
+                    <tr key={item.id || item.postUrl || idx}>
+                      <td><strong>{idx + 1}</strong></td>
+                      <td><span className={'channel-tag channel-tag--' + (item.platform === 'tiktok' ? 'tiktok' : 'facebook')}>{item.platform}</span></td>
+                      <td>
+                        <div className="viral-card-cell">
+                          {item.thumbnailUrl
+                            ? <img src={item.thumbnailUrl} alt={item.title} referrerPolicy="no-referrer" className="viral-thumb-lg" onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                            : <div className="viral-thumb-lg viral-thumb-lg--tt">{item.platform === 'facebook' ? '📘' : '🎵'}</div>}
+                          <div className="viral-card-meta">
+                            <div className="viral-card-title">{item.title}</div>
+                            {item.authorName && <div className="viral-card-author">👤 {item.authorName}</div>}
+                            <div className="viral-card-badges">
+                              <span className="channel-tag channel-tag--facebook">{item.category || 'Xu hướng'}</span>
+                              {extractHashtagChips(item).map((t) => <span key={t} className="viral-hashtag-chip">{t}</span>)}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="viral-metrics-cell">
+                        <div>{item.platform === 'facebook' ? '👍' : '❤️'} <strong>{Number(item.likesCount || 0).toLocaleString('vi-VN')}</strong></div>
+                        <div>💬 <strong>{Number(item.commentsCount || 0).toLocaleString('vi-VN')}</strong></div>
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap', fontSize: '11.5px' }}>{formatTime(item.createdAt)}</td>
+                      <td><button type="button" className="social-action-btn social-table-link" onClick={() => handleOpenViralSingleTab(item.postUrl, item.platform)}>Mở ↗</button></td>
+                    </tr>
+                  ))}
+                  {surfHistory.length === 0 && <tr><td colSpan={6} className="social-table-empty">Chưa có dữ liệu lướt theo thời gian.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
       )}
 
       {selectedPostModal && (

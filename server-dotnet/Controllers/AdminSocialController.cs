@@ -1,6 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Bộ điều khiển API Tự động hóa MXH v3.5 (tích hợp toàn diện AI Local qwen3.5:4b: Vision cứu cánh giao diện, lưu kiến thức tự học, ý tưởng bán hàng từ Viral, đăng SP từ ảnh, phân tích bình luận, lọc kênh theo chủ đề, phân tích lướt feed, gợi ý kho & giá).
+  - Mục đích: Bộ điều khiển API Tự động hóa MXH v3.5.2 (tích hợp AI Local qwen3.5:4b, quản lý chiến dịch MXH, viral posts và lưu/đọc/xóa lịch sử lướt theo thời gian vào SQL Server).
+  - Liên kết trực tiếp: server-dotnet/Services/SocialCopywriterService.cs, server-dotnet/Data/StoreDb.cs, src/pages/AdminSocialAutomation.jsx
+  - Vùng ảnh hưởng khi sửa: Toàn bộ API endpoint quản trị mạng xã hội (/api/admin/social/*), bao gồm import viral, phân tích lướt và lịch sử lướt.
 */
 
 using System.Text.RegularExpressions;
@@ -370,7 +372,44 @@ public sealed class AdminSocialController(
     public async Task<IActionResult> AnalyzeSurf([FromBody] AnalyzeSurfFeedRequest request)
     {
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
-        return Ok(await copywriter.AnalyzeSurfSessionAsync(request));
+        var result = await copywriter.AnalyzeSurfSessionAsync(request);
+
+        // Lưu toàn bộ bài vừa lướt vào lịch sử bền vững để hiển thị bên Tab Nhật ký & Báo cáo
+        var incoming = request.Posts ?? [];
+        if (incoming.Count > 0)
+        {
+            var existing = ReadSurfHistory();
+            var byUrl = existing.ToDictionary(p => (p.PostUrl ?? "").Trim().ToLowerInvariant(), p => p, StringComparer.OrdinalIgnoreCase);
+            var nowIso = DateTimeOffset.UtcNow.ToString("o");
+            foreach (var post in incoming)
+            {
+                if (string.IsNullOrWhiteSpace(post.PostUrl)) continue;
+                post.CreatedAt = string.IsNullOrWhiteSpace(post.CreatedAt) ? nowIso : post.CreatedAt;
+                byUrl[post.PostUrl.Trim().ToLowerInvariant()] = post;
+            }
+            var merged = byUrl.Values.OrderByDescending(p => p.CreatedAt).Take(500).ToList();
+            db.SetSetting("social.surf.history", System.Text.Json.JsonSerializer.Serialize(merged));
+        }
+        return Ok(result);
+    }
+
+    [HttpGet("surf-history")]
+    public IActionResult GetSurfHistory() => Ok(new { ok = true, posts = ReadSurfHistory() });
+
+    [HttpDelete("surf-history")]
+    public IActionResult ClearSurfHistory()
+    {
+        if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
+        db.SetSetting("social.surf.history", "[]");
+        return Ok(new { ok = true });
+    }
+
+    private List<SocialViralPost> ReadSurfHistory()
+    {
+        var raw = db.GetSetting("social.surf.history");
+        if (string.IsNullOrWhiteSpace(raw)) return [];
+        try { return System.Text.Json.JsonSerializer.Deserialize<List<SocialViralPost>>(raw) ?? []; }
+        catch { return []; }
     }
 
     private static bool IsAnyLoggedInRealPermalink(string platform, string postUrl)

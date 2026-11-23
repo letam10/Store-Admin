@@ -1,7 +1,9 @@
 /*
   FILE NOTE
-  - Mục đích: Lõi nhận thức thị giác & mô phỏng hành vi người thật chạy ngầm 24/7 (OmniVision Engine v3.5.1).
-  - Nâng cấp: Mở rộng smoothScrollToTop, cuộn mượt từng nấc scrollPageDownForFeed, ưu tiên từ khóa goal và tăng maxItems trong buildRichInteractiveMap/askSelfHealingAI.
+  - Mục đích: Lõi nhận thức thị giác & mô phỏng hành vi người thật chạy ngầm 24/7 (OmniVision Engine v3.5.2).
+  - Nâng cấp:
+    1. Đánh thức sleep() tức thì khi nhận lệnh dừng (abortAllWaits, activeSleepResolvers).
+    2. Sửa triệt để parseHumanCount chặn đọc nhầm thời gian (47m, 137b) thành triệu/tỷ gây lỗi lưu bài.
   - Liên kết trực tiếp: extension/background.js, extension/content-facebook.js, extension/content-tiktok.js
   - Vùng ảnh hưởng khi sửa: Khả năng nhận thức thị giác, tự sửa lỗi DOM và độ trễ hành vi người thật trên Facebook và TikTok.
 */
@@ -18,6 +20,15 @@
   let pacingMode = 'normal'
   let currentMarkLookup = new Map()
 
+  const activeSleepResolvers = new Set()
+
+  function abortAllWaits() {
+    for (const finish of Array.from(activeSleepResolvers)) {
+      try { finish() } catch (_) {}
+    }
+    activeSleepResolvers.clear()
+  }
+
   function sleep(ms) {
     const duration = Math.max(0, Math.round(Number(ms) || 0))
     if (duration <= 0) return Promise.resolve()
@@ -28,16 +39,16 @@
         if (done) return
         done = true
         clearTimeout(localTimer)
+        activeSleepResolvers.delete(finish)
         resolve()
       }
+      activeSleepResolvers.add(finish)
       const localTimer = setTimeout(finish, duration)
       if (duration >= 150 && typeof chrome !== 'undefined' && chrome.runtime?.id) {
         try {
           chrome.runtime.sendMessage({ type: 'SW_SLEEP', ms: Math.min(duration, 25000) }, (res) => {
             void chrome.runtime.lastError
-            if (res?.ok === true && Date.now() - startedAt >= duration * 0.85) {
-              finish()
-            }
+            if (res?.ok === true && Date.now() - startedAt >= duration * 0.85) finish()
           })
         } catch (_) {}
       }
@@ -176,22 +187,28 @@
     return formatPostText(`${body}\n\n${missingTags.join(' ')}`, maxLen)
   }
 
-  function parseHumanCount(raw) {
-    const str = normalizeText(raw).toLowerCase()
-    if (!str) return 0
-    const unitMatch = str.match(/(\d+(?:[.,]\d+)?)\s*(triệu|nghìn|ngàn|tỷ|tỉ|tr|k|n|m|b)(?:\b|[^\p{L}])/iu)
+  function parseHumanCount(raw, options = {}) {
+    const original = normalizeText(raw)
+    if (!original) return 0
+    // Bỏ qua chuỗi thời gian kiểu "47m", "2h", "3d", "15 phút", "2 giờ"
+    if (/^\d+\s*(?:giây|phút|giờ|ngày|tuần|tháng|năm|sec|min|hr|hrs|h|d|w)$/i.test(original)) return 0
+    if (/^\d{1,2}m$/.test(original)) return 0 // "47m" chữ thường không có dấu thập phân là 47 phút!
+
+    const maxSafe = Number(options.maxSafe) || 500000000
+    const unitMatch = original.match(/(\d+(?:[.,]\d+)?)\s*(triệu|nghìn|ngàn|tr|k|n|m)(?:\b|[^\p{L}])/iu)
     if (unitMatch) {
       const num = parseFloat(unitMatch[1].replace(',', '.'))
       const unit = unitMatch[2].toLowerCase()
       if (!Number.isFinite(num)) return 0
-      if (unit === 'k' || unit === 'n' || unit === 'nghìn' || unit === 'ngàn') return Math.round(num * 1000)
-      if (unit === 'm' || unit === 'tr' || unit === 'triệu') return Math.round(num * 1000000)
-      if (unit === 'b' || unit === 'tỷ' || unit === 'tỉ') return Math.round(num * 1000000000)
+      let val = 0
+      if (unit === 'k' || unit === 'n' || unit === 'nghìn' || unit === 'ngàn') val = Math.round(num * 1000)
+      else if (unit === 'm' || unit === 'tr' || unit === 'triệu') val = Math.round(num * 1000000)
+      return Math.min(maxSafe, Math.max(0, val))
     }
-    const plainMatch = str.match(/(?:^|[^\d])(\d{1,3}(?:[.,\s]\d{3})+|\d+)(?:$|[^\d])/)
+    const plainMatch = original.match(/(?:^|[^\d])(\d{1,3}(?:[.,\s]\d{3})+|\d{1,7})(?:$|[^\d])/)
     if (plainMatch) {
       const num = parseInt(plainMatch[1].replace(/[^\d]/g, ''), 10)
-      return Number.isFinite(num) ? num : 0
+      return Number.isFinite(num) ? Math.min(maxSafe, Math.max(0, num)) : 0
     }
     return 0
   }
@@ -992,6 +1009,7 @@
     captureVisualImageSnapshot, findNewlyRenderedMedia,
     buildStableSelector, buildRichInteractiveMap, getElementByMarkId,
     reportStep, showHudStatus, clearHud, applyConfig,
-    getLearnedRule, saveLearnedRule, invalidateLearnedRule, findByLearnedRule, askSelfHealingAI
+    getLearnedRule, saveLearnedRule, invalidateLearnedRule, findByLearnedRule, askSelfHealingAI,
+    abortAllWaits
   }
 })()
