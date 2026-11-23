@@ -1,0 +1,447 @@
+/*
+  FILE NOTE
+  - Mục đích: Hệ thống design tokens và keyframes chuyển động (animation) tập trung cho toàn bộ ứng dụng Store-Admin.
+  - Tối ưu 60fps: Chỉ animate transform và opacity, hỗ trợ prefers-reduced-motion, không gây layout shift.
+*/
+
+:root {
+  --duration-fast: 150ms;
+  --duration-base: 250ms;
+  --duration-slow: 400ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ==========================================================================
+   Keyframes: Entrance, Exit, Feedback, Shimmer
+   ========================================================================== */
+
+@keyframes adminFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes adminFadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes adminSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes adminSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes adminScaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes adminShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+
+@keyframes adminShimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes adminSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes adminPulseSlow {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes adminTopProgress {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* ==========================================================================
+   Utility Classes & Layout Animations
+   ========================================================================== */
+
+.anim-fade-in {
+  animation: adminFadeIn var(--duration-base) var(--ease-out) both;
+}
+
+.anim-slide-up {
+  animation: adminSlideUp var(--duration-base) var(--ease-out) both;
+}
+
+.anim-scale-in {
+  animation: adminScaleIn var(--duration-fast) var(--ease-out) both;
+}
+
+.is-shaking {
+  animation: adminShake 0.4s var(--ease-in-out) both !important;
+}
+
+/* Skeleton & Shimmer */
+.admin-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(224, 233, 226, 0.4) 25%,
+    rgba(224, 233, 226, 0.8) 37%,
+    rgba(224, 233, 226, 0.4) 63%
+  );
+  background-size: 400% 100%;
+  animation: adminShimmer 1.5s ease infinite;
+  border-radius: 8px;
+}
+
+html[data-admin-theme="dark"] .admin-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(24, 50, 36, 0.4) 25%,
+    rgba(40, 80, 58, 0.7) 37%,
+    rgba(24, 50, 36, 0.4) 63%
+  );
+  background-size: 400% 100%;
+}
+
+/* Top Progress Bar khi tải */
+.admin-top-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2.5px;
+  background: rgba(74, 222, 128, 0.2);
+  overflow: hidden;
+  z-index: 9999;
+}
+
+.admin-top-progress::after {
+  content: '';
+  display: block;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, #4ade80, #86efac, transparent);
+  animation: adminTopProgress 1.4s ease-in-out infinite;
+}
+
+/* Spinner cho nút thao tác */
+.admin-btn-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: adminSpin 0.65s linear infinite;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* ==========================================================================
+   1. Khung Layout & Sidebar
+   ========================================================================== */
+
+.admin-sidebar nav button {
+  position: relative;
+  transition: background-color var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out);
+}
+
+.admin-sidebar nav button:active {
+  transform: scale(0.98);
+}
+
+.admin-sidebar nav button::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 15%;
+  height: 70%;
+  width: 3.5px;
+  border-radius: 0 4px 4px 0;
+  background: #78af88;
+  transform: scaleY(0);
+  opacity: 0;
+  transition: transform var(--duration-fast) var(--ease-bounce),
+              opacity var(--duration-fast) var(--ease-out);
+}
+
+.admin-sidebar nav button.is-active::after {
+  transform: scaleY(1);
+  opacity: 1;
+}
+
+/* Header subtle elevation khi có nội dung bên dưới */
+.admin-header {
+  transition: box-shadow var(--duration-base) var(--ease-out);
+}
+
+/* Breadcrumb / Eyebrow fade nhẹ */
+.admin-header .admin-eyebrow {
+  animation: adminFadeIn var(--duration-fast) var(--ease-out) both;
+}
+
+/* ==========================================================================
+   2. Chuyển Trang & Workspace Route
+   ========================================================================== */
+
+.admin-workspace-content {
+  animation: adminSlideUp 0.22s var(--ease-out) both;
+  will-change: opacity, transform;
+}
+
+/* ==========================================================================
+   3. Dashboard & Thống Kê Stagger
+   ========================================================================== */
+
+.admin-kpi-grid article {
+  animation: adminSlideUp var(--duration-base) var(--ease-out) both;
+  transition: transform var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.admin-kpi-grid article:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(23, 55, 40, 0.12);
+}
+
+.admin-kpi-grid article:nth-child(1) { animation-delay: 0ms; }
+.admin-kpi-grid article:nth-child(2) { animation-delay: 40ms; }
+.admin-kpi-grid article:nth-child(3) { animation-delay: 80ms; }
+.admin-kpi-grid article:nth-child(4) { animation-delay: 120ms; }
+
+.admin-module-card {
+  animation: adminSlideUp 0.26s var(--ease-out) both;
+  transition: box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.admin-view-bar {
+  transition: width 0.5s var(--ease-out);
+  will-change: width;
+}
+
+/* ==========================================================================
+   4. Bảng Dữ Liệu (Stagger 12 hàng đầu tiên để bảo đảm 60fps)
+   ========================================================================== */
+
+.admin-table-wrap tbody tr {
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.admin-table-wrap tbody tr:hover {
+  background-color: rgba(45, 122, 82, 0.05);
+}
+
+html[data-admin-theme="dark"] .admin-table-wrap tbody tr:hover {
+  background-color: rgba(74, 222, 128, 0.08);
+}
+
+.admin-table-wrap tbody tr:nth-child(1) { animation: adminFadeIn 0.18s var(--ease-out) 0.01s both; }
+.admin-table-wrap tbody tr:nth-child(2) { animation: adminFadeIn 0.18s var(--ease-out) 0.02s both; }
+.admin-table-wrap tbody tr:nth-child(3) { animation: adminFadeIn 0.18s var(--ease-out) 0.03s both; }
+.admin-table-wrap tbody tr:nth-child(4) { animation: adminFadeIn 0.18s var(--ease-out) 0.04s both; }
+.admin-table-wrap tbody tr:nth-child(5) { animation: adminFadeIn 0.18s var(--ease-out) 0.05s both; }
+.admin-table-wrap tbody tr:nth-child(6) { animation: adminFadeIn 0.18s var(--ease-out) 0.06s both; }
+.admin-table-wrap tbody tr:nth-child(7) { animation: adminFadeIn 0.18s var(--ease-out) 0.07s both; }
+.admin-table-wrap tbody tr:nth-child(8) { animation: adminFadeIn 0.18s var(--ease-out) 0.08s both; }
+.admin-table-wrap tbody tr:nth-child(9) { animation: adminFadeIn 0.18s var(--ease-out) 0.09s both; }
+.admin-table-wrap tbody tr:nth-child(10) { animation: adminFadeIn 0.18s var(--ease-out) 0.10s both; }
+.admin-table-wrap tbody tr:nth-child(11) { animation: adminFadeIn 0.18s var(--ease-out) 0.11s both; }
+.admin-table-wrap tbody tr:nth-child(12) { animation: adminFadeIn 0.18s var(--ease-out) 0.12s both; }
+
+/* Hàng mới thêm highlight nhẹ */
+.admin-table-row--highlight {
+  animation: adminRowHighlight 1.5s var(--ease-out) both;
+}
+
+@keyframes adminRowHighlight {
+  0% {
+    background-color: rgba(74, 222, 128, 0.35);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* ==========================================================================
+   5. Nút Bấm, Tabs & Controls
+   ========================================================================== */
+
+button {
+  transition: transform var(--duration-fast) var(--ease-out),
+              background-color var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out),
+              opacity var(--duration-fast) var(--ease-out);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.975);
+}
+
+.table-action {
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.table-action:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+/* Tabs */
+.admin-ai-tab-btn,
+.customer-segments button,
+.appearance-preview-tabs button {
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.admin-ai-tab-btn:active,
+.customer-segments button:active,
+.appearance-preview-tabs button:active {
+  transform: scale(0.96);
+}
+
+/* ==========================================================================
+   6. Form & Input
+   ========================================================================== */
+
+input, select, textarea {
+  transition: border-color var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out),
+              background-color var(--duration-fast) var(--ease-out);
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: #2d7a52;
+  box-shadow: 0 0 0 3px rgba(45, 122, 82, 0.18);
+}
+
+html[data-admin-theme="dark"] input:focus,
+html[data-admin-theme="dark"] select:focus,
+html[data-admin-theme="dark"] textarea:focus {
+  border-color: #4ade80;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.22);
+}
+
+.admin-error {
+  animation: adminSlideDown var(--duration-fast) var(--ease-out) both,
+             adminShake 0.4s var(--ease-in-out) both;
+}
+
+/* ==========================================================================
+   7. Modals, Drawers & Dropdowns
+   ========================================================================== */
+
+.admin-detail-panel,
+.admin-search-results,
+.admin-product-editor,
+.admin-record-editor {
+  animation: adminScaleIn 0.2s var(--ease-out) both;
+  will-change: transform, opacity;
+}
+
+/* ==========================================================================
+   8. Toast & Realtime Thông Báo
+   ========================================================================== */
+
+.admin-realtime-bar {
+  animation: adminSlideDown var(--duration-base) var(--ease-out) both;
+  transition: all var(--duration-base) var(--ease-out);
+}
+
+.admin-live-dot::before {
+  content: '● ';
+  animation: adminPulseSlow 2s ease-in-out infinite;
+  display: inline-block;
+}
+
+/* ==========================================================================
+   9. Empty & Error States
+   ========================================================================== */
+
+.admin-empty {
+  animation: adminFadeIn var(--duration-base) var(--ease-out) both;
+}
+
+/* ==========================================================================
+   Accessibility: prefers-reduced-motion
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .admin-top-progress,
+  .admin-skeleton {
+    animation: none !important;
+  }
+
+  .admin-workspace-content,
+  .admin-kpi-grid article,
+  .admin-module-card,
+  .admin-table-wrap tbody tr,
+  .admin-detail-panel,
+  .admin-search-results {
+    animation: none !important;
+    transform: none !important;
+  }
+}

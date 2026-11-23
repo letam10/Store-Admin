@@ -13,7 +13,10 @@ export default function ConfirmRemoval({ name, onConfirm, onCancel }) {
   return <section className="admin-detail-panel" role="group" aria-label="Xác nhận xóa">
     <p>Bạn muốn xóa <strong>{name}</strong>?</p>
     <div className="admin-editor-actions">
-      <button type="button" disabled={busy} onClick={confirm}>{busy ? 'Đang xóa…' : 'Xác nhận xóa'}</button>
+      <button type="button" disabled={busy} onClick={confirm} className={busy ? 'is-busy' : ''}>
+        {busy && <span className="admin-btn-spinner" aria-hidden="true" />}
+        {busy ? 'Đang xóa…' : 'Xác nhận xóa'}
+      </button>
       <button type="button" disabled={busy} onClick={onCancel}>Giữ lại</button>
     </div>
   </section>

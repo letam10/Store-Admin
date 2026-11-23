@@ -505,6 +505,7 @@ export default function Admin() {
       </aside>
       <section className="admin-main">
         <div className="admin-main__card">
+        {busy && <div className="admin-top-progress" role="progressbar" aria-label="Đang xử lý…" />}
         <header className="admin-header">
           <div><p className="admin-eyebrow">{language === 'en' ? 'STORE ADMIN' : 'QUẢN TRỊ STORE'} / {currentLabel.toUpperCase()}</p><h1>{currentLabel}</h1></div>
           <div className="admin-global-search">
