@@ -26,6 +26,8 @@ public sealed record OfferRequest(int? DiscountPercent, int? StockCount);
 public sealed record PasswordForgotRequest(string? Email);
 // Vai trò kiểu PasswordResetRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
 public sealed record PasswordResetRequest(string? Token, string? Password);
+// Vai trò kiểu PasswordChangeRequest: đổi mật khẩu tài khoản người dùng đã đăng nhập.
+public sealed record PasswordChangeRequest(string? CurrentPassword, string? NewPassword);
 // Vai trò kiểu TwoFactorChallengeRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.
 public sealed record TwoFactorChallengeRequest(string? ChallengeId, string? Code);
 // Vai trò kiểu TwoFactorCodeRequest: gom dữ liệu hoặc hành vi thuộc cùng một trách nhiệm.

@@ -1654,6 +1654,17 @@ public sealed partial class StoreDb
         return true;
     }
 
+    public void UpdateCustomerPassword(long customerId, string salt, string hash)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE customers SET password_salt=@salt,password_hash=@hash WHERE id=@id";
+        command.Parameters.AddWithValue("@id", customerId);
+        command.Parameters.AddWithValue("@salt", salt);
+        command.Parameters.AddWithValue("@hash", hash);
+        command.ExecuteNonQuery();
+    }
+
     public void CreateLoginChallenge(string id, long customerId, DateTimeOffset expiresAt)
     {
         using var db = Open();

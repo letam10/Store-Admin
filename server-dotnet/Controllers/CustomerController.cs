@@ -135,6 +135,27 @@ public sealed partial class CustomerController(StoreDb db, IConfiguration config
         return Ok(new { ok = true });
     }
 
+    [HttpPost("password/change")]
+    public IActionResult ChangePassword(PasswordChangeRequest request)
+    {
+        if (!RequireAccount(out var customer, out var raw)) return Unauthorized(new { error = "LOGIN_REQUIRED" });
+        if (!CsrfValid(raw)) return StatusCode(StatusCodes.Status403Forbidden, new { error = "CSRF_INVALID" });
+        var currentPass = request.CurrentPassword ?? "";
+        var newPass = request.NewPassword ?? "";
+        if (string.IsNullOrEmpty(currentPass) || string.IsNullOrEmpty(newPass))
+            return BadRequest(new { error = "INVALID_PASSWORD" });
+        if (newPass.Length is < 8 or > 128)
+            return BadRequest(new { error = "INVALID_NEW_PASSWORD" });
+        var auth = db.FindCustomerAuth(customer.Username.ToLowerInvariant());
+        if (auth is null || !Tokens.VerifyPassword(currentPass, auth.Value.Salt, auth.Value.Hash))
+            return Unauthorized(new { error = "INVALID_CURRENT_PASSWORD" });
+        if (currentPass == newPass)
+            return BadRequest(new { error = "SAME_AS_OLD_PASSWORD" });
+        var (salt, hash) = Tokens.HashPassword(newPass);
+        db.UpdateCustomerPassword(customer.Id, salt, hash);
+        return Ok(new { ok = true });
+    }
+
     [HttpGet("google/start")]
     public IActionResult GoogleStart([FromQuery] string? next)
     {
