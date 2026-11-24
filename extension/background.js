@@ -1,10 +1,10 @@
 /*
   FILE NOTE
-  - Mục đích: Service Worker điều phối ngầm OmniVision v3.5.2 cho Chrome Extension Manifest V3.
+  - Mục đích: Service Worker điều phối ngầm OmniVision v3.5.6 cho Chrome Extension Manifest V3.
   - Nâng cấp:
-    1. Sửa triệt để lỗi onConnect Extension context invalidated bằng cách gắn listeners đồng bộ ngay lập tức.
-    2. Đánh thức giấc ngủ SW_SLEEP & runSurfAndCollect tức thì khi có lệnh dừng (surfWakeups).
-    3. Bổ sung LIVE_VIRAL_POST bắn progressive VIRAL_BATCH_READY về Admin ngay khi bắt được bài mới.
+    1. Đảm bảo cào đủ 10 bài viral cho cả Facebook và TikTok bằng cơ chế kết hợp song song Feed + Reels, khử trùng lặp và phân tách chính xác fbTarget / ttTarget.
+    2. Bổ sung broadcast SURF_SESSION_DONE khi hoàn tất phiên lướt, bảo toàn kết quả thu thập về Store-Admin ngay cả khi chuyển tab hoặc ngắt kết nối tạm thời.
+    3. Trả về cấu trúc dữ liệu lướt feed đầy đủ để lưu bền vững vào Admin và SQL Server.
   - Liên kết trực tiếp: extension/manifest.json, extension/vision-engine.js, extension/content-facebook.js, extension/content-tiktok.js
   - Vùng ảnh hưởng khi sửa: Toàn bộ điều phối ngầm các tác vụ đăng bài, cào viral, xem video, lướt feed, cầu nối API với Store-Admin Web API.
 */
@@ -746,22 +746,24 @@ function buildTopicSources(options = {}) {
     ? [
         ...fbQueries.map((q) => `https://www.facebook.com/search/top/?q=${encodeURIComponent(q)}`),
         ...fbQueries.map((q) => `https://www.facebook.com/search/posts/?q=${encodeURIComponent(q)}`),
-        'https://www.facebook.com/'
+        'https://www.facebook.com/',
+        'https://www.facebook.com/groups/feed/'
       ]
-    : VIRAL_TOPIC_PRESETS.all.fbFeedSources
+    : [...VIRAL_TOPIC_PRESETS.all.fbFeedSources, 'https://www.facebook.com/search/top/?q=viral', 'https://www.facebook.com/search/posts/?q=xu%20huong']
 
   const fbReelSources = fbQueries.length
     ? [...fbQueries.map((q) => `https://www.facebook.com/search/videos/?q=${encodeURIComponent(q)}`), 'https://www.facebook.com/reel/', 'https://www.facebook.com/watch/']
-    : VIRAL_TOPIC_PRESETS.all.fbReelSources
+    : [...VIRAL_TOPIC_PRESETS.all.fbReelSources, 'https://www.facebook.com/search/videos/?q=reels%20viral']
 
   const ttSources = ttSourceMode === 'explore'
-    ? ['https://www.tiktok.com/explore', 'https://www.tiktok.com/foryou']
+    ? ['https://www.tiktok.com/explore', 'https://www.tiktok.com/foryou', 'https://www.tiktok.com/search/video?q=viral%20xu%20h%C6%B0%E1%BB%9Bng']
     : (ttQueries.length
       ? [
           ...ttQueries.map((q) => `https://www.tiktok.com/search/video?q=${encodeURIComponent(q)}`),
-          ...ttQueries.map((q) => `https://www.tiktok.com/search?q=${encodeURIComponent(q)}`)
+          ...ttQueries.map((q) => `https://www.tiktok.com/search?q=${encodeURIComponent(q)}`),
+          'https://www.tiktok.com/explore'
         ]
-      : ['https://www.tiktok.com/explore'])
+      : ['https://www.tiktok.com/explore', 'https://www.tiktok.com/search/video?q=viral%20xu%20h%C6%B0%E1%BB%9Bng'])
 
   return { label, fbFeedSources, fbReelSources, ttSources, ttExploreTab: preset.ttExploreTab || '', ttSourceMode }
 }
@@ -923,12 +925,15 @@ async function scrapeBothViralPlatforms(options = {}) {
     if (targetPlatform !== 'tiktok') viralStopFlags.facebook = false
     if (targetPlatform !== 'facebook') viralStopFlags.tiktok = false
 
+    // Đặt mục tiêu cho mỗi nhánh cào đảm bảo khi gộp lại luôn đạt đủ fbTarget (mặc định 10 bài)
+    const fbStreamTarget = fbSourceMode === 'both' ? fbTarget : fbTarget
+
     const fbFeedPromise = (targetPlatform !== 'tiktok' && (fbSourceMode === 'feed' || fbSourceMode === 'both'))
-      ? scrapeFacebookViralStream('fbFeed', topicCfg.fbFeedSources, fbSourceMode === 'feed' ? fbTarget : Math.ceil(fbTarget / 2), fbFeedMinLikes, excludeUrls, topicCfg, 'FB Bài viết', emitBatch)
+      ? scrapeFacebookViralStream('fbFeed', topicCfg.fbFeedSources, fbStreamTarget, fbFeedMinLikes, excludeUrls, topicCfg, 'FB Bài viết', emitBatch)
       : Promise.resolve({ ok: true, posts: [], timedOut: false })
 
     const fbReelPromise = (targetPlatform !== 'tiktok' && (fbSourceMode === 'reels' || fbSourceMode === 'both'))
-      ? scrapeFacebookViralStream('fbReels', topicCfg.fbReelSources, fbSourceMode === 'reels' ? fbTarget : Math.floor(fbTarget / 2), fbReelMinLikes, excludeUrls, topicCfg, 'FB Thước phim', emitBatch)
+      ? scrapeFacebookViralStream('fbReels', topicCfg.fbReelSources, fbStreamTarget, fbReelMinLikes, excludeUrls, topicCfg, 'FB Thước phim', emitBatch)
       : Promise.resolve({ ok: true, posts: [], timedOut: false })
 
     const ttPromise = (targetPlatform !== 'facebook')
@@ -936,16 +941,37 @@ async function scrapeBothViralPlatforms(options = {}) {
       : Promise.resolve({ ok: true, posts: [], timedOut: false })
 
     const [fbFeedRes, fbReelsRes, ttRes] = await Promise.all([fbFeedPromise, fbReelPromise, ttPromise])
-    const facebookPosts = [...(fbFeedRes?.posts || []), ...(fbReelsRes?.posts || [])]
-    const tiktokPosts = ttRes?.posts || []
-    const combined = [...facebookPosts, ...tiktokPosts]
+
+    // Khử trùng lặp và đảm bảo thu thập đủ fbTarget bài Facebook và ttTarget bài TikTok
+    const fbSeen = new Set()
+    const facebookPosts = []
+    for (const p of [...(fbFeedRes?.posts || []), ...(fbReelsRes?.posts || [])]) {
+      const k = String(p.postUrl || '').trim().toLowerCase()
+      if (k && !fbSeen.has(k)) {
+        fbSeen.add(k)
+        facebookPosts.push(p)
+      }
+    }
+    const finalFacebookPosts = facebookPosts.slice(0, fbTarget)
+
+    const ttSeen = new Set()
+    const tiktokPosts = []
+    for (const p of (ttRes?.posts || [])) {
+      const k = String(p.postUrl || '').trim().toLowerCase()
+      if (k && !ttSeen.has(k)) {
+        ttSeen.add(k)
+        tiktokPosts.push(p)
+      }
+    }
+    const finalTikTokPosts = tiktokPosts.slice(0, ttTarget)
+    const combined = [...finalFacebookPosts, ...finalTikTokPosts]
 
     pushLog({
       platform: 'system', step: 'scrape_done', level: combined.length > 0 ? 'success' : 'warn',
-      message: `✅ Hoàn tất cào Viral → FB Bài viết: ${(fbFeedRes?.posts || []).length} • FB Reels: ${(fbReelsRes?.posts || []).length} • TikTok: ${tiktokPosts.length}`
+      message: `✅ Hoàn tất cào Viral → FB Bài viết: ${(fbFeedRes?.posts || []).length} • FB Reels: ${(fbReelsRes?.posts || []).length} (gộp ${finalFacebookPosts.length} bài) • TikTok: ${finalTikTokPosts.length} bài`
     })
     return {
-      ok: true, facebookPosts, tiktokPosts, posts: combined, streamed: true,
+      ok: true, facebookPosts: finalFacebookPosts, tiktokPosts: finalTikTokPosts, posts: combined, streamed: true,
       timedOut: { facebook: Boolean(fbFeedRes?.timedOut || fbReelsRes?.timedOut), tiktok: Boolean(ttRes?.timedOut) }
     }
   } finally {
@@ -1121,11 +1147,14 @@ async function runSurfAndCollect(options = {}) {
       if (switchExplore) sameCountSteps = 0
 
       try {
+        const stepMinLikes = options.minLikes
+          ? Number(options.minLikes)
+          : (targetTopic ? (isFb ? 15 : 50) : (isFb ? 50 : 250))
         const res = await sendTabMessageWithRetry(
           tab.id,
           {
             type: isFb ? 'FB_SURF_STEP' : 'TT_SURF_STEP',
-            options: { minLikes: isFb ? 300 : 5000, topicLabel: targetTopic, excludeUrls: Array.from(seenUrls), stepIndex, switchExplore }
+            options: { minLikes: stepMinLikes, topicLabel: targetTopic, excludeUrls: Array.from(seenUrls), stepIndex, switchExplore }
           },
           scripts
         )
@@ -1158,6 +1187,10 @@ async function runSurfAndCollect(options = {}) {
 
     const stoppedManual = surfStopFlags[platform]
     pushLog({ platform, step: 'done', level: 'success', message: stoppedManual ? `⏹ Đã dừng lướt — thu thập ${collected.length} bài.` : `✅ Đã lướt đủ ${durationMinutes} phút — thu thập ${collected.length} bài.` })
+    broadcastToAdmins({
+      type: 'SURF_SESSION_DONE',
+      payload: { platform, durationMinutes, topic: targetTopic, posts: collected, stoppedManual }
+    })
     return { ok: true, platform, durationMinutes, posts: collected, stoppedManual }
   } finally {
     activeJobs.delete(jobKey)

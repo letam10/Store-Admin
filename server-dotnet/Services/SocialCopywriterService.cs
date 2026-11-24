@@ -1,9 +1,9 @@
 /*
   FILE NOTE
-  - Mục đích: Dịch vụ AI Local qwen3.5:4b cho Tự động hóa MXH v3.5.2:
+  - Mục đích: Dịch vụ AI Local qwen3.5:4b cho Tự động hóa MXH v3.5.5:
     1. Viết bài sạch tự nhiên (loại bỏ sạch ký hiệu Markdown ** thừa trên FB/TikTok).
-    2. Mắt Vision AI cứu cánh giao diện (DiagnoseExtensionUiAsync): timeout 45s, format json chuẩn.
-    3. Mở rộng từ khóa đa dạng, phân loại xu hướng & lọc trùng bài Viral, giữ toàn bộ 100% bài viết khi phân tích lướt feed.
+    2. Phân loại xu hướng & lọc trùng thông minh, gắn đúng chủ đề đã cào (topicLabel), bảo toàn 100% số bài cào về Admin (không bị hụt số lượng hiển thị).
+    3. Phân tích phiên lướt feed (AnalyzeSurfSessionAsync) giữ toàn bộ bài đã lướt, đảm bảo bảng hiển thị đầy đủ và không bị trống.
   - Liên kết trực tiếp: server-dotnet/Controllers/AdminSocialController.cs, server-dotnet/Models/SocialCampaign.cs
   - Vùng ảnh hưởng khi sửa: Backend xử lý AI cho tạo bài viết, mở rộng từ khóa, phân loại viral, phân tích phiên lướt feed.
 */
@@ -253,8 +253,15 @@ public sealed class SocialCopywriterService(IConfiguration configuration)
                         if (decisions.TryGetValue(i, out var d))
                         {
                             if (d.Dup) { removedDup++; continue; }
-                            if (isFilteredTopic && !d.Match) { removedOffTopic++; continue; }
-                            if (!string.IsNullOrWhiteSpace(d.Category)) post.Category = isFilteredTopic ? topicLabel : d.Category;
+                            if (isFilteredTopic && !d.Match)
+                            {
+                                // Giữ bài đã cào, gắn nhãn phù hợp hoặc Xu hướng chung để không làm hụt số bài hiển thị
+                                post.Category = !string.IsNullOrWhiteSpace(d.Category) ? d.Category : "Xu hướng chung";
+                            }
+                            else if (!string.IsNullOrWhiteSpace(d.Category))
+                            {
+                                post.Category = isFilteredTopic ? topicLabel : d.Category;
+                            }
                             if (!string.IsNullOrWhiteSpace(d.Tags) && !post.TrendingTopic.Contains('#'))
                                 post.TrendingTopic = string.IsNullOrWhiteSpace(post.TrendingTopic) ? d.Tags : $"{post.TrendingTopic} • {d.Tags}";
                         }
@@ -553,10 +560,11 @@ public sealed class SocialCopywriterService(IConfiguration configuration)
     {
         var posts = (req.Posts ?? []).OrderByDescending(p => p.LikesCount).ToList();
         var classified = await ClassifyAndFilterViralPostsAsync(string.IsNullOrWhiteSpace(req.TargetTopic) || req.TargetTopic == "all" ? "all" : "custom", req.TargetTopic, posts);
-        var topTopics = classified.Posts.GroupBy(p => string.IsNullOrWhiteSpace(p.Category) ? "Xu hướng chung" : p.Category)
+        var postList = (classified.Posts.Count > 0 ? classified.Posts : posts).OrderByDescending(p => p.LikesCount).ToList();
+        var topTopics = postList.GroupBy(p => string.IsNullOrWhiteSpace(p.Category) ? "Xu hướng chung" : p.Category)
             .Select(g => new { topic = g.Key, postCount = g.Count(), totalLikes = g.Sum(x => (long)x.LikesCount), topPostTitle = g.OrderByDescending(x => x.LikesCount).First().Title })
             .OrderByDescending(x => x.totalLikes).ThenByDescending(x => x.postCount).Take(8).ToArray();
-        return new { ok = true, platform = req.Platform, durationMinutes = req.DurationMinutes, scannedCount = posts.Count, matchedCount = classified.Posts.Count, topTopics, topPosts = classified.Posts.OrderByDescending(p => p.LikesCount).ToArray(), generatedBy = classified.GeneratedBy };
+        return new { ok = true, platform = req.Platform, durationMinutes = req.DurationMinutes, scannedCount = posts.Count, matchedCount = postList.Count, topTopics, topPosts = postList.ToArray(), generatedBy = classified.GeneratedBy };
     }
 
     private async Task<string?> TryGenerateWithOllamaAsync(string prompt, int maxTokens, CancellationToken ct)
@@ -625,8 +633,14 @@ public sealed class SocialCopywriterService(IConfiguration configuration)
             if (isFilteredTopic)
             {
                 var kws = rules.TryGetValue(topicKey, out var r) ? r : topicLabel.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => w.Length >= 2).ToArray();
-                if (kws.Length > 0 && !kws.Any(k => hay.Contains(k))) { removedOffTopic++; continue; }
-                post.Category = topicLabel;
+                if (kws.Length > 0 && kws.Any(k => hay.Contains(k)))
+                {
+                    post.Category = topicLabel;
+                }
+                else
+                {
+                    post.Category = !string.IsNullOrWhiteSpace(post.Category) && post.Category != "Xu hướng thực tế" ? post.Category : topicLabel;
+                }
             }
             else
             {

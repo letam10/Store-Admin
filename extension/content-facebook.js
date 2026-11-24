@@ -1,11 +1,10 @@
 /*
   FILE NOTE
-  - Mục đích: Content Script OmniVision v3.5.2 cho Facebook Desktop 2026.
+  - Mục đích: Content Script OmniVision v3.5.6 cho Facebook Desktop 2026.
   - Nâng cấp:
-    1. Đánh thức giấc ngủ ngay khi người dùng bấm dừng ABORT_SCRAPE bằng abortAllWaits().
-    2. Chờ mạng chậm 120s khi đăng bài Facebook, kiểm tra đang tải lên để không báo lỗi sớm.
-    3. Trích xuất chỉ số tương tác chính xác tuyệt đối (lọc m/h/bỏ unit b/clamp 200M/chặn comment bất thường).
-    4. Gửi LIVE_VIRAL_POST tức thì về bảng Admin và cuộn giữa bài chờ ảnh nét khi cào bài viral.
+    1. Đảm bảo cào đủ 10 bài viral Facebook: tối ưu ngưỡng like thích ứng theo vòng (Reels: 1.5K/500 -> 1K -> 500 -> 250 -> 100 -> 50; Feed: 350/150 -> 250 -> 150 -> 80 -> 40 -> 20) kết hợp totalAlreadyFound.
+    2. Chuẩn hóa link postUrl bằng cleanFacebookUrl trước khi lưu itemObj để không bị sai lệch tham số URL khi deduplicate.
+    3. Hỗ trợ surfOneFacebookStep chuẩn hóa cleanFacebookUrl trong cả Feed và Reels.
   - Liên kết trực tiếp: extension/vision-engine.js, extension/content-media.js, extension/background.js
   - Vùng ảnh hưởng khi sửa: Toàn bộ tương tác tự động với Facebook desktop (đăng bài cá nhân/nhóm, cào bài viral/reels, xem video, cào nhóm, lướt feed).
 */
@@ -786,7 +785,7 @@
     try {
       const u = new URL(raw, location.origin)
       if (!/(^|\.)facebook\.com$/i.test(u.hostname)) return raw
-      const reelMatch = u.pathname.match(/\/reel\/(\d+)/i)
+      const reelMatch = u.pathname.match(/\/reel\/([A-Za-z0-9_-]+)/i)
       if (reelMatch) return `https://www.facebook.com/reel/${reelMatch[1]}`
       const next = new URL(`${u.origin}${u.pathname}`)
       for (const key of ['story_fbid', 'fbid', 'id', 'v', 'set', 'multi_permalinks']) {
@@ -809,7 +808,7 @@
       const p = url.pathname.toLowerCase()
       return (
         /\/posts\//.test(p) || /\/permalink\//.test(p) || /\/permalink\.php/.test(p) || /\/story\.php/.test(p) ||
-        /\/share\/[prmv]\//.test(p) || /\/reel\/\d+/.test(p) || /\/videos\/\d+/.test(p) ||
+        /\/share\/[prmv]\//.test(p) || /\/reel\/[a-z0-9_-]+/.test(p) || /\/videos\/[a-z0-9_-]+/.test(p) ||
         (/\/watch\/?/.test(p) && url.searchParams.has('v')) ||
         (/\/photo/.test(p) && url.searchParams.has('fbid')) ||
         url.searchParams.has('story_fbid') || url.searchParams.has('fbid') || url.searchParams.has('multi_permalinks')
@@ -942,8 +941,13 @@
 
   // Đọc chính xác cột dọc bên phải của Thước phim (Reels) Facebook: [👍 10,7K] [💬 96] [↗ 372]
   function extractActiveReelPost2026() {
-    if (!/\/reel\/\d+/i.test(location.pathname)) return null
-    const postUrl = cleanFacebookUrl(location.href)
+    if (!/\/reel\b/i.test(location.pathname)) return null
+    let postUrl = cleanFacebookUrl(location.href)
+    if (!/\/reel\/[A-Za-z0-9_-]+/i.test(postUrl)) {
+      const activeLink = document.querySelector('a[href*="/reel/"]')
+      if (activeLink?.href) postUrl = cleanFacebookUrl(activeLink.href)
+    }
+    if (!/\/reel\/[A-Za-z0-9_-]+/i.test(postUrl)) return null
     let likes = 0, comments = 0, shares = 0
 
     const buttons = Array.from(document.querySelectorAll('[role="button"], button')).filter((b) => {
@@ -1050,9 +1054,28 @@
         if (Date.now() - startedAt >= perSourceMaxMs) break
         if (Date.now() - lastFoundAt >= idleTimeoutMs) return { ok: true, posts: collected, timedOut: true, lastFoundAt }
 
+        // Ngưỡng like thích ứng đơn điệu cho FB Reels (hạ dần theo vòng và tiến trình tổng)
+        let effectiveReelMin = minLikes
+        if (collected.length < targetCount) {
+          const effRound = round + (totalAlreadyFound > 0 ? 3 : 0)
+          if (effRound >= 5) {
+            effectiveReelMin = Math.min(minLikes, 50)
+          } else if (effRound >= 4) {
+            effectiveReelMin = Math.min(minLikes, 100)
+          } else if (effRound >= 3) {
+            effectiveReelMin = Math.min(minLikes, 250)
+          } else if (effRound >= 2) {
+            effectiveReelMin = Math.min(minLikes, 500)
+          } else if (effRound >= 1) {
+            effectiveReelMin = Math.min(minLikes, 1000)
+          } else {
+            effectiveReelMin = Math.min(minLikes, topicLabel ? 500 : 1500)
+          }
+        }
+
         const curUrl = cleanFacebookUrl(location.href)
         const reel = extractActiveReelPost2026()
-        if (reel && reel.likes >= minLikes) {
+        if (reel && reel.likes >= effectiveReelMin) {
           const urlKey = reel.postUrl.toLowerCase()
           const fp = `${V().stripToMatchKey(reel.caption).slice(0, 42)}|${reel.likes}`
           if (!seenUrls.has(urlKey) && !seenFingerprints.has(fp)) {
@@ -1084,7 +1107,7 @@
         await advanceToNextFacebookReel(curUrl)
         if (cleanFacebookUrl(location.href) === curUrl) {
           stuckCount++
-          if (stuckCount >= 3) break
+          if (stuckCount >= 5) break
         } else stuckCount = 0
       }
       V().clearHud(2500)
@@ -1102,12 +1125,31 @@
 
       if (V().inspectPageHealth().isOffline) await V().waitForPageStable('facebook', { maxWaitMs: 25000 })
 
+      // Ngưỡng like thích ứng đơn điệu cho FB Bài viết (hạ dần theo vòng và tiến trình tổng)
+      let effectiveFeedMin = minLikes
+      if (collected.length < targetCount) {
+        const effRound = round + (totalAlreadyFound > 0 ? 3 : 0)
+        if (effRound >= 5) {
+          effectiveFeedMin = Math.min(minLikes, 20)
+        } else if (effRound >= 4) {
+          effectiveFeedMin = Math.min(minLikes, 40)
+        } else if (effRound >= 3) {
+          effectiveFeedMin = Math.min(minLikes, 80)
+        } else if (effRound >= 2) {
+          effectiveFeedMin = Math.min(minLikes, 150)
+        } else if (effRound >= 1) {
+          effectiveFeedMin = Math.min(minLikes, 250)
+        } else {
+          effectiveFeedMin = Math.min(minLikes, topicLabel ? 150 : 350)
+        }
+      }
+
       const cards = collectFeedArticleCards()
       for (const article of cards) {
         if (!strictDurationMs && collected.length >= targetCount) break
         try {
           const metrics = extractFeedPostMetrics2026(article)
-          if (metrics.likes < minLikes) continue
+          if (metrics.likes < effectiveFeedMin) continue
 
           if (scrapeAborted) break
           // Cuộn bài viết vào giữa tầm nhìn để Facebook nạp đầy đủ ảnh gốc & permalink khi mạng chậm
@@ -1143,7 +1185,7 @@
             title: V().truncateClean(rawText || `[${actualKindTag}] ${authorName || 'Bài Viral Facebook'}`, 115),
             platform: 'facebook',
             category: topicLabel || actualKindTag,
-            postUrl,
+            postUrl: cleanFacebookUrl(postUrl),
             summary: V().truncateClean(`${authorName ? `[${authorName}] ` : ''}${summaryText}`, 250),
             viralityScore: Math.min(99, 85 + Math.min(14, Math.floor(Math.log10(Math.max(10, metrics.likes)) * 3))),
             likesCount: metrics.likes, sharesCount: metrics.shares, commentsCount: metrics.comments,
@@ -1321,7 +1363,7 @@
 
   async function surfOneFacebookStep(options = {}) {
     scrapeAborted = false
-    const minLikes = Number(options.minLikes) || 300
+    const minLikes = Number(options.minLikes) > 0 ? Number(options.minLikes) : (options.topicLabel ? 10 : 50)
     const seenUrls = new Set((options.excludeUrls || []).map((u) => cleanFacebookUrl(u).toLowerCase()))
     const found = []
 
@@ -1353,7 +1395,7 @@
       const { authorName, authorUrl, thumbnailUrl } = extractArticleMediaAndAuthor(article)
       found.push({
         id: `fb-surf-${Date.now()}-${found.length}`, title: V().truncateClean(rawText || authorName || 'Bài Facebook', 115),
-        platform: 'facebook', category: options.topicLabel || 'Trang chủ', postUrl,
+        platform: 'facebook', category: options.topicLabel || 'Trang chủ', postUrl: cleanFacebookUrl(postUrl),
         summary: V().truncateClean(rawText || authorName, 220), likesCount: metrics.likes, commentsCount: metrics.comments, sharesCount: metrics.shares,
         trendingTopic: extractHashtagsFromText(rawText) || 'Trang chủ',
         thumbnailUrl: thumbnailUrl || '', authorName: authorName || '', authorUrl: authorUrl || '', createdAt: new Date().toISOString()

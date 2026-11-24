@@ -1,9 +1,10 @@
 /*
   FILE NOTE
-  - Mục đích: Bộ 5 Panel Tự động hóa MXH v3.5.2 (AdminSocialPowerPanels).
+  - Mục đích: Bộ 5 Panel Tự động hóa MXH v3.5.6 (AdminSocialPowerPanels).
   - Nâng cấp:
-    1. Nhận thêm prop onSurfSaved và gọi onSurfSaved?.() sau khi phân tích lướt để đồng bộ sang Tab Nhật ký.
-    2. Hỗ trợ hiển thị nút dừng lướt và lọc bài theo thời gian.
+    1. Nhận state surfResult, surfBusy, surfCfg và onSurfAndRank từ component cha (AdminSocialAutomation) để bảo toàn 100% dữ liệu và quá trình lướt khi chuyển qua lại giữa các tab.
+    2. Hàm normalizeSurfResult giải mã an toàn JSON string / object, chuẩn hóa hai chiều camelCase lẫn PascalCase từ C# backend/localStorage.
+    3. Hỗ trợ hiển thị trạng thái đã lưu vào Kho Viral cho từng bài lướt feed.
   - Liên kết trực tiếp: src/pages/AdminSocialAutomation.jsx, src/pages/AdminSocialAutomation.css
   - Vùng ảnh hưởng khi sửa: Giao diện Panel Lấy bài Viral tùy chỉnh và Panel Lướt theo thời gian thực tế.
 */
@@ -11,6 +12,54 @@ import { useEffect, useState } from 'react'
 import { apiJson } from '../api/chat'
 
 const money = (v) => new Intl.NumberFormat('vi-VN').format(Number(v || 0)) + 'đ'
+
+export function normalizeSurfResult(result) {
+  if (!result) return null
+  if (typeof result === 'string') {
+    try { result = JSON.parse(result) } catch (_) { return null }
+  }
+  if (!result || typeof result !== 'object') return null
+  const rawPosts = Array.isArray(result.topPosts)
+    ? result.topPosts
+    : (Array.isArray(result.TopPosts) ? result.TopPosts : (Array.isArray(result.posts) ? result.posts : []))
+  const topPosts = rawPosts.map((p, idx) => ({
+    id: p.id || p.Id || `surf-${Date.now()}-${idx}`,
+    title: p.title || p.Title || 'Bài viết lướt feed',
+    platform: String(p.platform || p.Platform || result.platform || result.Platform || 'tiktok').toLowerCase(),
+    category: p.category || p.Category || result.topic || result.Topic || 'Xu hướng lướt',
+    postUrl: p.postUrl || p.PostUrl || '',
+    summary: p.summary || p.Summary || p.title || p.Title || '',
+    likesCount: Number(p.likesCount ?? p.LikesCount ?? 0),
+    commentsCount: Number(p.commentsCount ?? p.CommentsCount ?? 0),
+    sharesCount: Number(p.sharesCount ?? p.SharesCount ?? 0),
+    trendingTopic: p.trendingTopic || p.TrendingTopic || '',
+    thumbnailUrl: p.thumbnailUrl || p.ThumbnailUrl || '',
+    authorName: p.authorName || p.AuthorName || '',
+    authorUrl: p.authorUrl || p.AuthorUrl || '',
+    createdAt: p.createdAt || p.CreatedAt || new Date().toISOString()
+  }))
+  const rawTopics = Array.isArray(result.topTopics)
+    ? result.topTopics
+    : (Array.isArray(result.TopTopics) ? result.TopTopics : [])
+  const topTopics = rawTopics.map((t) => ({
+    topic: t.topic || t.Topic || 'Chung',
+    postCount: Number(t.postCount ?? t.PostCount ?? 0),
+    totalLikes: Number(t.totalLikes ?? t.TotalLikes ?? 0),
+    topPostTitle: t.topPostTitle || t.TopPostTitle || ''
+  }))
+  return {
+    ...result,
+    ok: true,
+    platform: String(result.platform || result.Platform || 'tiktok').toLowerCase(),
+    topic: result.topic || result.Topic || 'Tất cả',
+    durationMinutes: Number(result.durationMinutes ?? result.DurationMinutes ?? 3),
+    scannedCount: Number(result.scannedCount ?? result.ScannedCount ?? topPosts.length),
+    matchedCount: Number(result.matchedCount ?? result.MatchedCount ?? topPosts.length),
+    topTopics,
+    topPosts,
+    generatedBy: result.generatedBy || result.GeneratedBy || 'OmniVision Extension'
+  }
+}
 
 export function ViralSalesIdeasPanel({ csrfToken, viralCount, onUseIdea }) {
   const [busy, setBusy] = useState(false)
@@ -196,7 +245,13 @@ export function SmartProductVisionPanel({ csrfToken, onProductCreated, onSelectF
   )
 }
 
-export function AutomationSuitePanels({ csrfToken, sendExtensionMessage, viralPosts, onCustomViralScrape, onOpenSingleTab, showNotice, onSurfSaved }) {
+export function AutomationSuitePanels({
+  csrfToken, sendExtensionMessage, viralPosts, onCustomViralScrape, onOpenSingleTab, showNotice, onSurfSaved,
+  surfResult: propSurfResult, setSurfResult: propSetSurfResult,
+  surfBusy: propSurfBusy, setSurfBusy: propSetSurfBusy,
+  surfCfg: propSurfCfg, setSurfCfg: propSetSurfCfg,
+  onSurfAndRank
+}) {
   const [watchCfg, setWatchCfg] = useState({ platform: 'tiktok', url: '', repeatCount: 5, dwellSeconds: 8 })
   const [watchBusy, setWatchBusy] = useState(false)
 
@@ -214,9 +269,92 @@ export function AutomationSuitePanels({ csrfToken, sendExtensionMessage, viralPo
   const [channelBusy, setChannelBusy] = useState(false)
   const [channelResults, setChannelResults] = useState(null)
 
-  const [surfCfg, setSurfCfg] = useState({ platform: 'tiktok', fbMode: 'feed', ttSourceMode: 'explore', durationMinutes: 3, topic: '' })
-  const [surfBusy, setSurfBusy] = useState(false)
-  const [surfResult, setSurfResult] = useState(null)
+  const [savedSurfPostUrls, setSavedSurfPostUrls] = useState(() => new Set())
+
+  const [localSurfCfg, setLocalSurfCfg] = useState({ platform: 'tiktok', fbMode: 'feed', ttSourceMode: 'explore', durationMinutes: 3, topic: '' })
+  const surfCfg = propSurfCfg !== undefined ? propSurfCfg : localSurfCfg
+  const setSurfCfg = propSetSurfCfg || setLocalSurfCfg
+
+  const [localSurfBusy, setLocalSurfBusy] = useState(false)
+  const surfBusy = propSurfBusy !== undefined ? propSurfBusy : localSurfBusy
+  const setSurfBusy = propSetSurfBusy || setLocalSurfBusy
+
+  const [localSurfResult, setLocalSurfResult] = useState(() => {
+    try {
+      const cached = typeof window !== 'undefined' ? localStorage.getItem('omnicart_last_surf_result') : null
+      return cached ? normalizeSurfResult(cached) : null
+    } catch (_) { return null }
+  })
+  const rawSurfResult = propSurfResult !== undefined ? propSurfResult : localSurfResult
+  const surfResult = normalizeSurfResult(rawSurfResult)
+  const setSurfResult = (val) => {
+    const norm = normalizeSurfResult(val)
+    if (propSetSurfResult) propSetSurfResult(norm)
+    else setLocalSurfResult(norm)
+  }
+
+  async function handleSaveSurfPostToViral(post) {
+    if (!post) return
+    const postUrl = post.postUrl || post.PostUrl || ''
+    try {
+      const title = post.title || post.Title || 'Bài lướt feed'
+      const postToSave = {
+        ...post,
+        id: post.id || post.Id || `surf-viral-${Date.now()}`,
+        title,
+        postUrl,
+        platform: String(post.platform || post.Platform || surfCfg.platform).toLowerCase(),
+        category: post.category || post.Category || surfCfg.topic || 'Xu hướng lướt',
+        thumbnailUrl: post.thumbnailUrl || post.ThumbnailUrl || '',
+        authorName: post.authorName || post.AuthorName || '',
+        authorUrl: post.authorUrl || post.AuthorUrl || '',
+        likesCount: Math.min(200000000, Math.max(0, Math.round(Number(post.likesCount ?? post.LikesCount) || 0))),
+        commentsCount: Math.min(200000000, Math.max(0, Math.round(Number(post.commentsCount ?? post.CommentsCount) || 0))),
+        sharesCount: Math.min(200000000, Math.max(0, Math.round(Number(post.sharesCount ?? post.SharesCount) || 0)))
+      }
+      await apiJson('/api/admin/social/viral/import-real', {
+        method: 'POST', headers: { 'x-csrf-token': csrfToken },
+        body: JSON.stringify({ posts: [postToSave] })
+      })
+      if (postUrl) setSavedSurfPostUrls(prev => new Set([...prev, postUrl.toLowerCase()]))
+      onSurfSaved?.()
+      showNotice(`✅ Đã lưu bài "${title.slice(0, 32)}..." vào Kho bài Viral!`)
+    } catch (err) { showNotice(err.message || 'Lỗi lưu bài vào Kho Viral.', 'error') }
+  }
+
+  async function handleSaveAllSurfToViral() {
+    const list = surfResult?.topPosts || []
+    if (!list.length) return
+    try {
+      const postsToSave = list.map((p, idx) => ({
+        ...p,
+        id: p.id || p.Id || `surf-viral-${Date.now()}-${idx}`,
+        title: p.title || p.Title || 'Bài lướt feed',
+        postUrl: p.postUrl || p.PostUrl || '',
+        platform: String(p.platform || p.Platform || surfCfg.platform).toLowerCase(),
+        category: p.category || p.Category || surfCfg.topic || 'Xu hướng lướt',
+        thumbnailUrl: p.thumbnailUrl || p.ThumbnailUrl || '',
+        authorName: p.authorName || p.AuthorName || '',
+        authorUrl: p.authorUrl || p.AuthorUrl || '',
+        likesCount: Math.min(200000000, Math.max(0, Math.round(Number(p.likesCount ?? p.LikesCount) || 0))),
+        commentsCount: Math.min(200000000, Math.max(0, Math.round(Number(p.commentsCount ?? p.CommentsCount) || 0))),
+        sharesCount: Math.min(200000000, Math.max(0, Math.round(Number(p.sharesCount ?? p.SharesCount) || 0)))
+      })).filter(p => p.postUrl && p.title)
+      await apiJson('/api/admin/social/viral/import-real', {
+        method: 'POST', headers: { 'x-csrf-token': csrfToken },
+        body: JSON.stringify({ posts: postsToSave })
+      })
+      const savedUrls = postsToSave.map(p => p.postUrl.toLowerCase())
+      setSavedSurfPostUrls(prev => new Set([...prev, ...savedUrls]))
+      onSurfSaved?.()
+      showNotice(`✅ Đã lưu toàn bộ ${postsToSave.length} bài lướt vào Kho bài Viral!`)
+    } catch (err) { showNotice(err.message || 'Lỗi lưu tất cả vào Kho Viral.', 'error') }
+  }
+
+  function handleClearSurfResult() {
+    setSurfResult(null)
+    try { localStorage.removeItem('omnicart_last_surf_result') } catch (_) {}
+  }
 
   async function handleRunWatch(e) {
     e.preventDefault()
@@ -275,21 +413,47 @@ export function AutomationSuitePanels({ csrfToken, sendExtensionMessage, viralPo
   }
 
   async function handleSurfAndRank(e) {
-    e.preventDefault()
+    if (e && e.preventDefault) e.preventDefault()
+    if (typeof onSurfAndRank === 'function') {
+      return onSurfAndRank(surfCfg)
+    }
     setSurfBusy(true)
     try {
       const surfed = await sendExtensionMessage('SURF_AND_COLLECT', surfCfg)
       if (!surfed?.ok) throw new Error(surfed?.error || 'Không lướt được feed.')
-      const analyzed = await apiJson('/api/admin/social/ai/analyze-surf', {
-        method: 'POST', headers: { 'x-csrf-token': csrfToken },
-        body: JSON.stringify({
-          platform: surfCfg.platform, targetTopic: surfCfg.topic || 'all',
-          durationMinutes: Number(surfCfg.durationMinutes) || 3, posts: surfed.data?.posts || []
+      const rawPosts = surfed?.data?.posts || surfed?.posts || []
+
+      let analyzed = null
+      try {
+        analyzed = await apiJson('/api/admin/social/ai/analyze-surf', {
+          method: 'POST', headers: { 'x-csrf-token': csrfToken },
+          body: JSON.stringify({
+            platform: surfCfg.platform, targetTopic: surfCfg.topic || 'all',
+            durationMinutes: Number(surfCfg.durationMinutes) || 3, posts: rawPosts
+          })
         })
+      } catch (aiErr) {
+        console.warn('AI analyze-surf failed or timed out, falling back to raw posts:', aiErr)
+      }
+
+      const postList = Array.isArray(analyzed?.topPosts) && analyzed.topPosts.length > 0
+        ? analyzed.topPosts
+        : rawPosts
+      const finalResult = normalizeSurfResult({
+        ok: true,
+        platform: surfCfg.platform,
+        topic: surfCfg.topic || 'Tất cả',
+        durationMinutes: Number(surfCfg.durationMinutes) || 3,
+        scannedCount: rawPosts.length,
+        matchedCount: postList.length,
+        topTopics: analyzed?.topTopics || [{ topic: surfCfg.topic || 'Xu hướng lướt', postCount: postList.length }],
+        topPosts: postList,
+        generatedBy: analyzed?.generatedBy || 'OmniVision Extension'
       })
-      setSurfResult(analyzed)
+      setSurfResult(finalResult)
+      try { localStorage.setItem('omnicart_last_surf_result', JSON.stringify(finalResult)) } catch (_) {}
       onSurfSaved?.()
-      showNotice(`✅ Lướt đủ ${surfCfg.durationMinutes} phút — lọc được ${analyzed.matchedCount} bài!`)
+      showNotice(`✅ Lướt đủ ${surfCfg.durationMinutes} phút — thu thập được ${finalResult?.topPosts?.length || 0} bài!`)
     } catch (err) { showNotice(err.message, 'error') }
     finally { setSurfBusy(false) }
   }
@@ -379,26 +543,94 @@ export function AutomationSuitePanels({ csrfToken, sendExtensionMessage, viralPo
         </form>
         {surfResult && (
           <div style={{ display: 'grid', gap: '10px', marginTop: '12px' }}>
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-              {(surfResult.topTopics || []).map((t, i) => (
-                <span key={i} className="status-tag status-tag--published">#{i + 1} {t.topic} ({t.postCount})</span>
-              ))}
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#38bdf8' }}>
+                  🧭 {surfResult.platform === 'facebook' ? 'Facebook' : 'TikTok'} · {surfResult.topPosts?.length || 0} bài đã lưu
+                </span>
+                {(surfResult.topTopics || []).map((t, i) => (
+                  <span key={i} className="status-tag status-tag--published">#{i + 1} {t.topic} ({t.postCount})</span>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="social-action-btn social-action-btn--primary"
+                  style={{ fontSize: '11px', padding: '4px 10px' }}
+                  onClick={handleSaveAllSurfToViral}
+                  disabled={!surfResult.topPosts?.length}
+                  title="Lưu toàn bộ bài trong bảng này vào Kho bài Viral"
+                >
+                  📥 Lưu vào Kho Viral ({surfResult.topPosts?.length || 0})
+                </button>
+                <button
+                  type="button"
+                  className="social-action-btn social-action-btn--danger"
+                  style={{ fontSize: '11px', padding: '4px 8px' }}
+                  onClick={handleClearSurfResult}
+                  title="Xóa bảng kết quả lướt hiện tại"
+                >
+                  ✕ Đóng
+                </button>
+              </div>
             </div>
-            <div className="social-table-shell social-table-shell--compact" style={{ maxHeight: '260px' }}>
+            <div className="social-table-shell social-table-shell--compact" style={{ maxHeight: '280px' }}>
               <table className="social-table">
-                <thead><tr><th>Top</th><th>Bài nổi bật</th><th>Tương tác</th><th>Mở</th></tr></thead>
+                <thead><tr><th>#</th><th>Bài nổi bật</th><th>Tương tác</th><th>Thao tác</th></tr></thead>
                 <tbody>
-                  {(surfResult.topPosts || []).map((p, i) => (
-                    <tr key={p.id || i}>
-                      <td><strong>#{i + 1}</strong></td>
-                      <td><strong>{p.title}</strong></td>
-                      <td style={{ whiteSpace: 'nowrap' }}>❤️ {Number(p.likesCount || 0).toLocaleString('vi-VN')} · 💬 {Number(p.commentsCount || 0).toLocaleString('vi-VN')}</td>
-                      <td><button type="button" className="social-action-btn social-table-link" onClick={() => onOpenSingleTab(p.postUrl, p.platform)}>Mở ↗</button></td>
-                    </tr>
-                  ))}
+                  {(surfResult.topPosts || []).map((p, i) => {
+                    const postTitle = p.title || p.Title || 'Bài viết lướt feed'
+                    const postUrl = p.postUrl || p.PostUrl || ''
+                    const postThumb = p.thumbnailUrl || p.ThumbnailUrl || ''
+                    const postAuthor = p.authorName || p.AuthorName || ''
+                    const postPlat = String(p.platform || p.Platform || surfResult.platform || 'tiktok').toLowerCase()
+                    const postLikes = Number(p.likesCount ?? p.LikesCount ?? 0)
+                    const postComments = Number(p.commentsCount ?? p.CommentsCount ?? 0)
+                    const isAlreadySaved = Boolean(postUrl && (savedSurfPostUrls.has(postUrl.toLowerCase()) || (viralPosts || []).some(v => String(v.postUrl || '').toLowerCase() === postUrl.toLowerCase())))
+                    return (
+                      <tr key={p.id || p.Id || postUrl || i}>
+                        <td><strong>#{i + 1}</strong></td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {postThumb
+                              ? <img src={postThumb} alt="" referrerPolicy="no-referrer" style={{ width: '34px', height: '34px', objectFit: 'cover', borderRadius: '4px', flexShrink: 0 }} onError={e => { e.currentTarget.style.display = 'none' }} />
+                              : <span style={{ fontSize: '16px' }}>{postPlat === 'facebook' ? '📘' : '🎵'}</span>}
+                            <div style={{ overflow: 'hidden' }}>
+                              <div style={{ fontWeight: 600, fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '280px' }}>{postTitle}</div>
+                              {postAuthor && <div style={{ fontSize: '11px', color: '#64748b' }}>👤 {postAuthor}</div>}
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>❤️ {postLikes.toLocaleString('vi-VN')} · 💬 {postComments.toLocaleString('vi-VN')}</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: '4px' }}>
+                            <button
+                              type="button"
+                              className={'social-action-btn' + (isAlreadySaved ? ' is-saved' : '')}
+                              title={isAlreadySaved ? 'Bài này đã có trong Kho Viral' : 'Lưu bài này vào Kho bài Viral'}
+                              disabled={isAlreadySaved}
+                              style={isAlreadySaved ? { opacity: 0.65, cursor: 'default' } : undefined}
+                              onClick={() => handleSaveSurfPostToViral(p)}
+                            >
+                              {isAlreadySaved ? '✅ Đã lưu' : '📥 Lưu'}
+                            </button>
+                            {postUrl && <button type="button" className="social-action-btn social-table-link" onClick={() => onOpenSingleTab(postUrl, postPlat)}>Mở ↗</button>}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {(!surfResult.topPosts || surfResult.topPosts.length === 0) && (
+                    <tr><td colSpan={4} className="social-table-empty">Chưa có bài viết nào trong phiên lướt. Hãy thử tăng thời gian lướt hoặc kiểm tra từ khóa.</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+        {!surfResult && (
+          <div style={{ marginTop: '10px', fontSize: '12px', color: '#64748b' }}>
+            ℹ️ Bấm &quot;🧭 Bắt đầu lướt&quot; để tự động lướt và thu thập bài theo thời gian &amp; chủ đề. Dữ liệu sẽ được lưu tự động và không bị mất khi chuyển tab.
           </div>
         )}
       </section>

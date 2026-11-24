@@ -1,9 +1,10 @@
 /*
   FILE NOTE
-  - Mục đích: Content Script OmniVision v3.5.2 cho TikTok Studio & TikTok Web 2026.
+  - Mục đích: Content Script OmniVision v3.5.6 cho TikTok Studio & TikTok Web 2026.
   - Nâng cấp:
-    1. Đánh thức giấc ngủ ngay lập tức khi người dùng bấm dừng ABORT_SCRAPE bằng abortAllWaits().
-    2. Cuộn giữa thẻ chờ ảnh nạp xong chống ảnh đen do lazy load khi mạng chậm và bắn LIVE_VIRAL_POST tức thì về bảng Admin.
+    1. Đảm bảo cào đủ 10 bài viral TikTok: nới lỏng cardSelector khớp cả video-feed / foryou / user-posts, hạ nhanh ngưỡng like thích ứng (25K/5K -> 10K -> 5K -> 2.5K -> 1K -> 500) và rút ngắn thời gian chờ thumbnail.
+    2. Hỗ trợ bắt video[poster] và link postUrl trên cả thẻ video snap feed của TikTok ForYou/Explore/Search.
+    3. Tối ưu hàm surfOneTikTokStep thu thập bài mượt mà theo đúng chủ đề từ khóa.
   - Liên kết trực tiếp: extension/vision-engine.js, extension/content-media.js, extension/background.js
   - Vùng ảnh hưởng khi sửa: Toàn bộ tương tác tự động với TikTok Studio và TikTok Web (cào video viral, xem video, lướt feed).
 */
@@ -689,11 +690,14 @@
     try {
       const u = new URL(raw, location.origin)
       const m = u.pathname.match(/^\/(@[A-Za-z0-9._-]+)\/(video|photo)\/(\d+)/i)
-      return m ? `https://www.tiktok.com/${m[1]}/${m[2].toLowerCase()}/${m[3]}` : null
+      if (m) return `https://www.tiktok.com/${m[1]}/${m[2].toLowerCase()}/${m[3]}`
+      const m2 = u.pathname.match(/\/(?:video|photo|v)\/(\d+)/i)
+      if (m2) return `https://www.tiktok.com/@creator/video/${m2[1]}`
+      return null
     } catch (_) { return null }
   }
 
-  function isRealTikTokPostUrl(url) { return Boolean(url && /^https:\/\/www\.tiktok\.com\/@[A-Za-z0-9._-]+\/(?:video|photo)\/\d+$/i.test(url)) }
+  function isRealTikTokPostUrl(url) { return Boolean(url && /^https:\/\/(?:www\.)?tiktok\.com\/@[A-Za-z0-9._-]+\/(?:video|photo)\/\d+$/i.test(url)) }
   function extractRealTikTokPostLinks(root = document) { return V().queryAllDeep(root, 'a[href*="/video/"], a[href*="/photo/"]').map((a) => cleanTikTokPostUrl(a.href)).filter(isRealTikTokPostUrl) }
 
   async function waitForTikTokSubmitResult(timeoutMs) {
@@ -863,7 +867,7 @@
     if (likes === 0) {
       for (const el of card.querySelectorAll('strong, span')) {
         const t = V().normalizeText(el.innerText || el.textContent)
-        if (/^\d+(?:[.,]\d+)?\s*(k|n|nghìn|m|tr|triệu)$/i.test(t)) likes = Math.max(likes, V().parseHumanCount(t))
+        if (/^\d+(?:[.,]\d+)?\s*(?:k|n|nghìn|m|tr|triệu)?$/i.test(t)) likes = Math.max(likes, V().parseHumanCount(t))
       }
     }
     return { likes, comments, shares }
@@ -913,7 +917,7 @@
 
     const collected = []
     let stagnantRounds = 0, catSwitchCount = 0, lastCardsLen = 0, visionAssistCalled = false
-    const cardSelector = 'div[data-e2e="explore-item"], div[data-e2e="search_video-item"], div[data-e2e="search_top-item"], div[data-e2e="recommend-list-item-container"], article[data-e2e="recommend-list-item-container"], div[class*="DivItemContainer"], article[data-e2e]'
+    const cardSelector = 'div[data-e2e="explore-item"], div[data-e2e="search_video-item"], div[data-e2e="search_top-item"], div[data-e2e="recommend-list-item-container"], div[data-e2e*="feed-item"], div[data-e2e*="user-post-item"], article[data-e2e="recommend-list-item-container"], div[class*="DivItemContainer"], article[data-e2e]'
 
     for (let round = 0; round < maxRoundsOnPage; round++) {
       if (scrapeAborted) break
@@ -926,6 +930,25 @@
       if (health.isOffline) await V().waitForPageStable('tiktok', { maxWaitMs: 25000 })
       if (health.isCaptchaOrCheckpoint) break
 
+      // Hạ ngưỡng like thích ứng đơn điệu cho TikTok (hạ dần theo vòng và tiến trình tổng, đảm bảo gom đủ 10 bài)
+      let effectiveMinLikes = minLikes
+      if (collected.length < targetCount) {
+        const effRound = round + (totalAlreadyFound > 0 ? 3 : 0)
+        if (effRound >= 5) {
+          effectiveMinLikes = Math.min(minLikes, 500)
+        } else if (effRound >= 4) {
+          effectiveMinLikes = Math.min(minLikes, 1000)
+        } else if (effRound >= 3) {
+          effectiveMinLikes = Math.min(minLikes, 2500)
+        } else if (effRound >= 2) {
+          effectiveMinLikes = Math.min(minLikes, 5000)
+        } else if (effRound >= 1) {
+          effectiveMinLikes = Math.min(minLikes, 10000)
+        } else {
+          effectiveMinLikes = Math.min(minLikes, topicLabel ? 5000 : 25000)
+        }
+      }
+
       const cards = Array.from(document.querySelectorAll(cardSelector))
       for (const card of cards) {
         if (!strictDurationMs && collected.length >= targetCount) break
@@ -933,22 +956,24 @@
           const cardTextQuick = V().normalizeText(card.innerText || '').slice(0, 60)
           if (card.querySelector('[data-e2e*="live"], a[href*="/live"]') || /\bLIVE\b/.test(cardTextQuick)) continue
 
-          const linkEl = card.querySelector('a[href*="/video/"], a[href*="/photo/"]')
-          const postUrl = linkEl ? cleanTikTokPostUrl(linkEl.href) : null
+          const linkEl = card.querySelector('a[href*="/video/"], a[href*="/photo/"], a[href*="/v/"]') || (card.matches('a[href*="/video/"], a[href*="/photo/"]') ? card : null)
+          let postUrl = linkEl ? cleanTikTokPostUrl(linkEl.href) : null
+          if (!postUrl && isRealTikTokPostUrl(location.href)) postUrl = cleanTikTokPostUrl(location.href)
           if (!postUrl || !isRealTikTokPostUrl(postUrl)) continue
           const urlKey = postUrl.toLowerCase()
           if (seenUrls.has(urlKey)) continue
 
           const metrics = extractTikTokCardMetrics(card)
-          if (metrics.likes < minLikes) continue
+          if (metrics.likes < effectiveMinLikes) continue
 
           if (scrapeAborted) break
-          // Cuộn thẻ video vào tầm nhìn & chờ mạng lag tải xong ảnh bìa thật (tránh ảnh đen!)
+          // Cuộn thẻ video vào tầm nhìn & nạp nhanh ảnh bìa thật (kiểm tra poster hoặc img)
           try { card.scrollIntoView({ behavior: 'auto', block: 'center' }) } catch (_) {}
           await M().waitFor(() => {
+            const hasPoster = Boolean(card.querySelector('video[poster]'))
             const imgs = Array.from(card.querySelectorAll('img[src]')).filter((i) => !/avatar/i.test(i.alt || ''))
-            return imgs.some((i) => i.src && !i.src.startsWith('data:') && i.complete && i.naturalWidth >= 80)
-          }, 4500, 280)
+            return hasPoster || imgs.some((i) => i.src && !i.src.startsWith('data:') && (i.complete || i.naturalWidth >= 40 || i.clientWidth >= 40))
+          }, 1800, 200)
 
           const imgAlt = V().normalizeText(card.querySelector('img[alt]')?.getAttribute('alt') || '')
           const descEl = card.querySelector('[data-e2e="explore-card-desc"], [data-e2e="search-card-desc"], [data-e2e="video-desc"], a[title], h1')
@@ -958,8 +983,9 @@
           const bestCaption = (imgAlt.length > descTxt.length && !/avatar/i.test(imgAlt)) ? imgAlt : (descTxt || `Video TikTok Viral của ${author}`)
           const hashtags = extractHashtagsFromText(`${bestCaption} ${descTxt}`)
 
-          const cardImgs = Array.from(card.querySelectorAll('img[src]')).filter((i) => !/avatar/i.test(i.alt || '') && i.naturalWidth >= 80)
-          const thumbnailUrl = cardImgs[0]?.src || card.querySelector('img[src]')?.src || ''
+          const posterUrl = card.querySelector('video[poster]')?.getAttribute('poster') || ''
+          const cardImgs = Array.from(card.querySelectorAll('img[src]')).filter((i) => !/avatar/i.test(i.alt || '') && (i.naturalWidth >= 40 || i.clientWidth >= 40 || Boolean(i.src)))
+          const thumbnailUrl = posterUrl || cardImgs[0]?.src || card.querySelector('img[src]')?.src || ''
           const authorHandleClean = author.startsWith('@') ? author : `@${author.replace(/^@+/, '')}`
           const authorUrl = `https://www.tiktok.com/${authorHandleClean}`
 
@@ -1016,7 +1042,12 @@
       const lastCard = cards[cards.length - 1]
       if (lastCard) { try { lastCard.scrollIntoView({ behavior: 'auto', block: 'end' }) } catch (_) {} }
       await V().scrollPageDownForFeed(1350, lastCard)
-      try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', code: 'PageDown', keyCode: 34, bubbles: true })) } catch (_) {}
+      try {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', code: 'PageDown', keyCode: 34, bubbles: true }))
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, bubbles: true }))
+        document.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, bubbles: true }))
+        window.dispatchEvent(new WheelEvent('wheel', { deltaY: 650, bubbles: true }))
+      } catch (_) {}
 
       // Chờ mạng chậm tải thêm video mới (tối đa 6s) trước khi đánh dấu đứng trang
       await V().humanScrollPause()
@@ -1109,16 +1140,17 @@
 
   async function surfOneTikTokStep(options = {}) {
     scrapeAborted = false
-    const minLikes = Number(options.minLikes) || 5000
+    const minLikes = Number(options.minLikes) > 0 ? Number(options.minLikes) : (options.topicLabel ? 50 : 200)
     const seenUrls = new Set((options.excludeUrls || []).map((u) => String(u).trim().toLowerCase()))
-    const cardSelector = 'div[data-e2e="explore-item"], div[data-e2e="search_video-item"], div[data-e2e="search_top-item"], div[data-e2e="recommend-list-item-container"], article[data-e2e="recommend-list-item-container"], div[class*="DivItemContainer"], article[data-e2e]'
+    const cardSelector = 'div[data-e2e="explore-item"], div[data-e2e="search_video-item"], div[data-e2e="search_top-item"], div[data-e2e="recommend-list-item-container"], div[data-e2e*="feed-item"], div[data-e2e*="user-post-item"], article[data-e2e="recommend-list-item-container"], div[class*="DivItemContainer"], article[data-e2e]'
     const cards = Array.from(document.querySelectorAll(cardSelector))
     const found = []
 
     for (const card of cards) {
       if (card.querySelector('[data-e2e*="live"], a[href*="/live"]')) continue
-      const linkEl = card.querySelector('a[href*="/video/"], a[href*="/photo/"]')
-      const postUrl = linkEl ? cleanTikTokPostUrl(linkEl.href) : null
+      const linkEl = card.querySelector('a[href*="/video/"], a[href*="/photo/"], a[href*="/v/"]') || (card.matches('a[href*="/video/"], a[href*="/photo/"]') ? card : null)
+      let postUrl = linkEl ? cleanTikTokPostUrl(linkEl.href) : null
+      if (!postUrl && isRealTikTokPostUrl(location.href)) postUrl = cleanTikTokPostUrl(location.href)
       if (!postUrl || !isRealTikTokPostUrl(postUrl) || seenUrls.has(postUrl.toLowerCase())) continue
       const metrics = extractTikTokCardMetrics(card)
       if (metrics.likes < minLikes) continue
@@ -1130,19 +1162,26 @@
       const authorMatch = postUrl.match(/tiktok\.com\/(@[A-Za-z0-9._-]+)\//i)
       const author = authorMatch ? authorMatch[1] : '@creator'
       const bestCaption = (imgAlt.length > descTxt.length && !/avatar/i.test(imgAlt)) ? imgAlt : (descTxt || `Video TikTok của ${author}`)
-      const cardImgs = Array.from(card.querySelectorAll('img[src]')).filter((i) => !/avatar/i.test(i.alt || '') && i.naturalWidth >= 80)
+      const posterUrl = card.querySelector('video[poster]')?.getAttribute('poster') || ''
+      const cardImgs = Array.from(card.querySelectorAll('img[src]')).filter((i) => !/avatar/i.test(i.alt || '') && (i.naturalWidth >= 40 || i.clientWidth >= 40 || Boolean(i.src)))
       found.push({
         id: `tt-surf-${Date.now()}-${found.length}`, title: V().truncateClean(bestCaption, 115), platform: 'tiktok',
         category: options.topicLabel || 'Video TikTok', postUrl, summary: V().truncateClean(bestCaption, 220),
         likesCount: metrics.likes, commentsCount: metrics.comments, sharesCount: metrics.shares,
         trendingTopic: extractHashtagsFromText(bestCaption) || 'Video TikTok',
-        thumbnailUrl: cardImgs[0]?.src || card.querySelector('img[src]')?.src || '',
+        thumbnailUrl: posterUrl || cardImgs[0]?.src || card.querySelector('img[src]')?.src || '',
         authorName: author, authorUrl: `https://www.tiktok.com/${author}`, createdAt: new Date().toISOString()
       })
     }
 
     const lastCard = cards[cards.length - 1]
+    if (lastCard) { try { lastCard.scrollIntoView({ behavior: 'auto', block: 'end' }) } catch (_) {} }
     await V().scrollPageDownForFeed(980, lastCard)
+    try {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, bubbles: true }))
+      document.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, bubbles: true }))
+      window.dispatchEvent(new WheelEvent('wheel', { deltaY: 550, bubbles: true }))
+    } catch (_) {}
     if (options.switchExplore && location.pathname.includes('/explore')) {
       await clickExploreCategoryPill(Number(options.stepIndex) || 1)
     }

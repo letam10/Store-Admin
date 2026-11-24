@@ -1,11 +1,10 @@
 /*
   FILE NOTE
-  - Mục đích: Truy cập dữ liệu SQL Server cho Tự động hóa đăng bài MXH đa tài khoản v3.1.0 (không hardcode tên/ID nick).
-  - Nâng cấp v3.1.0:
-    1. ImportRealGroupTargets chống trùng theo cả URL lẫn Tên nhóm + cập nhật số thành viên nếu nhóm cũ từng bị 0.
-    2. IsRealSocialPostPermalink chấp nhận link bài viết thật từ BẤT KỲ tài khoản Facebook hoặc TikTok nào (@any_handle/video|photo/id).
-    3. Hỗ trợ trạng thái pending_review (chờ TikTok duyệt 3-5 phút).
-    4. Thêm DeleteAllSocialPosts(), DeleteAllSocialViralPosts(), ImportRealGroupTargets() và ImportRealViralPosts().
+  - Mục đích: Truy cập dữ liệu SQL Server cho Tự động hóa đăng bài MXH đa tài khoản v3.5.6 (không hardcode tên/ID nick).
+  - Nâng cấp:
+    1. AddSocialViralPost cơ chế UPSERT thông minh: tự động UPDATE nếu bài viết đã tồn tại (theo post_url hoặc id) hoặc INSERT nếu chưa có, ngăn chặn triệt để lỗi xung đột Primary Key làm sập import bài cào 500.
+    2. ImportRealViralPosts xử lý an toàn từng bài viết trong khối try-catch độc lập, bảo đảm cào đủ 10 bài viral Facebook và TikTok mà không bị rớt bài do lỗi chập chờn.
+    3. Cắt tỉa chuỗi (title, thumbnail_url, url) an toàn chống tràn cột SQL Server khi cào hàng loạt bài viral.
   - Liên kết trực tiếp: Store-Admin/server-dotnet/Controllers/AdminSocialController.cs, Store-Admin/server-dotnet/Models/SocialAutomationModels.cs
   - Vùng ảnh hưởng khi sửa: Dữ liệu đăng bài tự động, nhóm Facebook mục tiêu, bài viết viral và cấu hình chiến dịch.
 */
@@ -685,30 +684,63 @@ public sealed partial class StoreDb
         if (string.IsNullOrWhiteSpace(viral.Id)) viral.Id = "viral-" + Guid.NewGuid().ToString("N")[..8];
         if (string.IsNullOrWhiteSpace(viral.CreatedAt)) viral.CreatedAt = DateTimeOffset.UtcNow.ToString("o");
 
+        var title = viral.Title?.Length > 500 ? viral.Title[..500] : (viral.Title ?? "");
+        var platform = viral.Platform?.Length > 50 ? viral.Platform[..50] : (viral.Platform ?? "facebook");
+        var category = (viral.Category ?? "Xu hướng thực tế").Trim();
+        if (category.Length > 100) category = category[..100];
+        var postUrl = viral.PostUrl?.Length > 500 ? viral.PostUrl[..500] : (viral.PostUrl ?? "");
+        var summary = viral.Summary ?? "";
+        var trendingTopic = (viral.TrendingTopic ?? "Viral thực tế").Trim();
+        if (trendingTopic.Length > 255) trendingTopic = trendingTopic[..255];
+        var thumbUrl = viral.ThumbnailUrl?.Length > 1000 ? viral.ThumbnailUrl[..1000] : viral.ThumbnailUrl;
+        var authorName = viral.AuthorName?.Length > 255 ? viral.AuthorName[..255] : viral.AuthorName;
+        var authorUrl = viral.AuthorUrl?.Length > 500 ? viral.AuthorUrl[..500] : viral.AuthorUrl;
+        var createdAt = viral.CreatedAt?.Length > 100 ? viral.CreatedAt[..100] : viral.CreatedAt;
+
         using var db = Open();
         using var command = db.CreateCommand();
         command.CommandText = """
-            INSERT INTO social_viral_posts (
-                id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, thumbnail_url, author_name, author_url, created_at
-            ) VALUES (
-                @id, @title, @platform, @category, @post_url, @summary, @virality_score, @likes_count, @shares_count, @comments_count, @trending_topic, @thumbnail_url, @author_name, @author_url, @created_at
-            );
+            IF EXISTS (SELECT 1 FROM social_viral_posts WHERE post_url = @post_url OR id = @id)
+            BEGIN
+                UPDATE social_viral_posts
+                SET title = @title,
+                    platform = @platform,
+                    category = @category,
+                    summary = @summary,
+                    virality_score = @virality_score,
+                    likes_count = @likes_count,
+                    shares_count = @shares_count,
+                    comments_count = @comments_count,
+                    trending_topic = @trending_topic,
+                    thumbnail_url = COALESCE(@thumbnail_url, thumbnail_url),
+                    author_name = COALESCE(@author_name, author_name),
+                    author_url = COALESCE(@author_url, author_url)
+                WHERE post_url = @post_url OR id = @id;
+            END
+            ELSE
+            BEGIN
+                INSERT INTO social_viral_posts (
+                    id, title, platform, category, post_url, summary, virality_score, likes_count, shares_count, comments_count, trending_topic, thumbnail_url, author_name, author_url, created_at
+                ) VALUES (
+                    @id, @title, @platform, @category, @post_url, @summary, @virality_score, @likes_count, @shares_count, @comments_count, @trending_topic, @thumbnail_url, @author_name, @author_url, @created_at
+                );
+            END
             """;
         command.Parameters.Add(new SqlParameter("@id", SqlDbType.NVarChar, 100) { Value = viral.Id });
-        command.Parameters.Add(new SqlParameter("@title", SqlDbType.NVarChar, 500) { Value = viral.Title });
-        command.Parameters.Add(new SqlParameter("@platform", SqlDbType.NVarChar, 50) { Value = viral.Platform });
-        command.Parameters.Add(new SqlParameter("@category", SqlDbType.NVarChar, 100) { Value = viral.Category ?? "Xu hướng thực tế" });
-        command.Parameters.Add(new SqlParameter("@post_url", SqlDbType.NVarChar, 500) { Value = viral.PostUrl });
-        command.Parameters.Add(new SqlParameter("@summary", SqlDbType.NVarChar, -1) { Value = viral.Summary ?? "" });
+        command.Parameters.Add(new SqlParameter("@title", SqlDbType.NVarChar, 500) { Value = title });
+        command.Parameters.Add(new SqlParameter("@platform", SqlDbType.NVarChar, 50) { Value = platform });
+        command.Parameters.Add(new SqlParameter("@category", SqlDbType.NVarChar, 100) { Value = category });
+        command.Parameters.Add(new SqlParameter("@post_url", SqlDbType.NVarChar, 500) { Value = postUrl });
+        command.Parameters.Add(new SqlParameter("@summary", SqlDbType.NVarChar, -1) { Value = summary });
         command.Parameters.Add(new SqlParameter("@virality_score", SqlDbType.Int) { Value = viral.ViralityScore });
         command.Parameters.Add(new SqlParameter("@likes_count", SqlDbType.Int) { Value = viral.LikesCount });
         command.Parameters.Add(new SqlParameter("@shares_count", SqlDbType.Int) { Value = viral.SharesCount });
         command.Parameters.Add(new SqlParameter("@comments_count", SqlDbType.Int) { Value = viral.CommentsCount });
-        command.Parameters.Add(new SqlParameter("@trending_topic", SqlDbType.NVarChar, 255) { Value = viral.TrendingTopic ?? "Viral thực tế" });
-        command.Parameters.Add(new SqlParameter("@thumbnail_url", SqlDbType.NVarChar, 1000) { Value = (object?)viral.ThumbnailUrl ?? DBNull.Value });
-        command.Parameters.Add(new SqlParameter("@author_name", SqlDbType.NVarChar, 255) { Value = (object?)viral.AuthorName ?? DBNull.Value });
-        command.Parameters.Add(new SqlParameter("@author_url", SqlDbType.NVarChar, 500) { Value = (object?)viral.AuthorUrl ?? DBNull.Value });
-        command.Parameters.Add(new SqlParameter("@created_at", SqlDbType.NVarChar, 100) { Value = viral.CreatedAt });
+        command.Parameters.Add(new SqlParameter("@trending_topic", SqlDbType.NVarChar, 255) { Value = trendingTopic });
+        command.Parameters.Add(new SqlParameter("@thumbnail_url", SqlDbType.NVarChar, 1000) { Value = (object?)thumbUrl ?? DBNull.Value });
+        command.Parameters.Add(new SqlParameter("@author_name", SqlDbType.NVarChar, 255) { Value = (object?)authorName ?? DBNull.Value });
+        command.Parameters.Add(new SqlParameter("@author_url", SqlDbType.NVarChar, 500) { Value = (object?)authorUrl ?? DBNull.Value });
+        command.Parameters.Add(new SqlParameter("@created_at", SqlDbType.NVarChar, 100) { Value = createdAt });
         command.ExecuteNonQuery();
 
         return viral;
@@ -754,11 +786,19 @@ public sealed partial class StoreDb
         {
             if (string.IsNullOrWhiteSpace(post.Title) || string.IsNullOrWhiteSpace(post.PostUrl)) continue;
             var key = post.PostUrl.Trim().TrimEnd('/').ToLowerInvariant();
-            if (existingUrls.Contains(key)) continue;
-
-            AddSocialViralPost(post);
-            existingUrls.Add(key);
-            count++;
+            try
+            {
+                AddSocialViralPost(post);
+                if (!existingUrls.Contains(key))
+                {
+                    existingUrls.Add(key);
+                    count++;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[StoreDb] ImportRealViralPost warning: {ex.Message}");
+            }
         }
         return count;
     }

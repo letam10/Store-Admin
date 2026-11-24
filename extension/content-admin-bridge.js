@@ -1,7 +1,9 @@
 /*
   FILE NOTE
-  - Mục đích: Cầu nối bền vững 24/7 v3.5.0 giữa Store-Admin và Service Worker.
-  - Hỗ trợ: BRIDGE_API_FETCH (gọi API Vision AI / Knowledge kèm CSRF tự động), VIRAL_BATCH_READY (hiện ngay nền tảng xong trước), OMNICART_POST_VERIFIED.
+  - Mục đích: Cầu nối bền vững 24/7 v3.5.6 giữa Store-Admin và Service Worker.
+  - Hỗ trợ: BRIDGE_API_FETCH (gọi API Vision AI / Knowledge kèm CSRF tự động), VIRAL_BATCH_READY (hiện ngay nền tảng xong trước), SURF_SESSION_DONE (chuyển kết quả lướt feed về Admin), OMNICART_POST_VERIFIED.
+  - Liên kết trực tiếp: extension/background.js, src/pages/AdminSocialAutomation.jsx
+  - Vùng ảnh hưởng khi sửa: Toàn bộ truyền tin giữa Admin dashboard và Extension background worker.
 */
 
 ;(() => {
@@ -203,6 +205,10 @@
           window.postMessage({ source: 'OMNICART_VIRAL_BATCH', payload: msg.payload }, window.location.origin)
           return
         }
+        if (msg.type === 'SURF_SESSION_DONE' && msg.payload) {
+          window.postMessage({ source: 'OMNICART_SURF_DONE', payload: msg.payload }, window.location.origin)
+          return
+        }
         if (msg.type === 'POST_VERIFICATION_RESOLVED' && msg.payload) {
           forwardResolvedVerification(msg.payload)
           return
@@ -298,7 +304,8 @@
         action === 'AUTO_POST' ? `🚀 Đang đăng bài ${payload?.platform || ''}...`
           : action === 'SCRAPE_FB_GROUPS' ? '👥 Đang tìm 5 hội nhóm Facebook...'
             : action === 'FETCH_REAL_VIRAL' ? '🔥 Đang cào Viral (bên nào xong hiện ngay)...'
-              : '🤖 Đang chạy tác vụ tự động...',
+              : action === 'SURF_AND_COLLECT' ? `🏄 Đang lướt ${String(payload?.platform || 'MXH').toUpperCase()} theo thời gian...`
+                : '🤖 Đang chạy tác vụ tự động...',
         'busy'
       )
     }

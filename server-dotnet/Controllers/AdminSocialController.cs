@@ -1,10 +1,14 @@
 /*
   FILE NOTE
-  - Mục đích: Bộ điều khiển API Tự động hóa MXH v3.5.2 (tích hợp AI Local qwen3.5:4b, quản lý chiến dịch MXH, viral posts và lưu/đọc/xóa lịch sử lướt theo thời gian vào SQL Server).
+  - Mục đích: Bộ điều khiển API Tự động hóa MXH v3.5.6:
+    1. Quản lý chiến dịch MXH, viral posts và lưu/đọc/xóa lịch sử lướt theo thời gian vào SQL Server.
+    2. Luôn lưu và đồng bộ kết quả phiên lướt gần nhất (social.surf.last_result) với JsonSerializerOptions camelCase chuẩn, chống mất dữ liệu khi chuyển tab hoặc tải lại trang.
+    3. AnalyzeSurf fallback an toàn không bao giờ throw 500 khi AI phân tích phiên lướt gặp sự cố; hỗ trợ import viral chống trùng ID/URL.
   - Liên kết trực tiếp: server-dotnet/Services/SocialCopywriterService.cs, server-dotnet/Data/StoreDb.cs, src/pages/AdminSocialAutomation.jsx
   - Vùng ảnh hưởng khi sửa: Toàn bộ API endpoint quản trị mạng xã hội (/api/admin/social/*), bao gồm import viral, phân tích lướt và lịch sử lướt.
 */
 
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using StoreApi.Data;
@@ -22,6 +26,12 @@ public sealed class AdminSocialController(
     SocialCopywriterService copywriter,
     SocialAutoPostWorker worker) : ControllerBase
 {
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
+
     public const string DefaultFacebookProfileUrl = "https://www.facebook.com/me";
     public const string DefaultTikTokProfileUrl = "https://www.tiktok.com/";
 
@@ -372,7 +382,31 @@ public sealed class AdminSocialController(
     public async Task<IActionResult> AnalyzeSurf([FromBody] AnalyzeSurfFeedRequest request)
     {
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
-        var result = await copywriter.AnalyzeSurfSessionAsync(request);
+
+        object result;
+        try
+        {
+            result = await copywriter.AnalyzeSurfSessionAsync(request);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AdminSocial] AnalyzeSurf fallback: {ex.Message}");
+            var rawList = (request.Posts ?? []).OrderByDescending(p => p.LikesCount).ToList();
+            var topTopics = rawList.GroupBy(p => string.IsNullOrWhiteSpace(p.Category) ? (string.IsNullOrWhiteSpace(request.TargetTopic) ? "Xu hướng chung" : request.TargetTopic) : p.Category)
+                .Select(g => new { topic = g.Key, postCount = g.Count(), totalLikes = g.Sum(x => (long)x.LikesCount), topPostTitle = g.OrderByDescending(x => x.LikesCount).First().Title })
+                .OrderByDescending(x => x.totalLikes).Take(8).ToArray();
+            result = new
+            {
+                ok = true,
+                platform = request.Platform,
+                durationMinutes = request.DurationMinutes,
+                scannedCount = rawList.Count,
+                matchedCount = rawList.Count,
+                topTopics,
+                topPosts = rawList.ToArray(),
+                generatedBy = "Fallback Rules"
+            };
+        }
 
         // Lưu toàn bộ bài vừa lướt vào lịch sử bền vững để hiển thị bên Tab Nhật ký & Báo cáo
         var incoming = request.Posts ?? [];
@@ -388,19 +422,31 @@ public sealed class AdminSocialController(
                 byUrl[post.PostUrl.Trim().ToLowerInvariant()] = post;
             }
             var merged = byUrl.Values.OrderByDescending(p => p.CreatedAt).Take(500).ToList();
-            db.SetSetting("social.surf.history", System.Text.Json.JsonSerializer.Serialize(merged));
+            db.SetSetting("social.surf.history", JsonSerializer.Serialize(merged, _jsonOptions));
         }
+        // Luôn lưu last_result để lưu bền vững trạng thái phiên lướt gần nhất chuẩn camelCase
+        db.SetSetting("social.surf.last_result", JsonSerializer.Serialize(result, _jsonOptions));
         return Ok(result);
     }
 
     [HttpGet("surf-history")]
-    public IActionResult GetSurfHistory() => Ok(new { ok = true, posts = ReadSurfHistory() });
+    public IActionResult GetSurfHistory()
+    {
+        var rawLast = db.GetSetting("social.surf.last_result");
+        object? lastResult = null;
+        if (!string.IsNullOrWhiteSpace(rawLast))
+        {
+            try { lastResult = JsonSerializer.Deserialize<JsonElement>(rawLast, _jsonOptions); } catch { }
+        }
+        return Ok(new { ok = true, posts = ReadSurfHistory(), lastResult });
+    }
 
     [HttpDelete("surf-history")]
     public IActionResult ClearSurfHistory()
     {
         if (!CsrfValid()) return StatusCode(403, new { error = "CSRF_INVALID" });
         db.SetSetting("social.surf.history", "[]");
+        db.SetSetting("social.surf.last_result", "");
         return Ok(new { ok = true });
     }
 
@@ -408,7 +454,7 @@ public sealed class AdminSocialController(
     {
         var raw = db.GetSetting("social.surf.history");
         if (string.IsNullOrWhiteSpace(raw)) return [];
-        try { return System.Text.Json.JsonSerializer.Deserialize<List<SocialViralPost>>(raw) ?? []; }
+        try { return JsonSerializer.Deserialize<List<SocialViralPost>>(raw, _jsonOptions) ?? []; }
         catch { return []; }
     }
 

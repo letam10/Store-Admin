@@ -1,19 +1,18 @@
 /*
   FILE NOTE
-  - Mục đích: Trang quản trị Tự động hóa Mạng xã hội v3.5.2 (AdminSocialAutomation).
+  - Mục đích: Trang quản trị Tự động hóa Mạng xã hội v3.5.6 (AdminSocialAutomation).
   - Nâng cấp:
-    1. Sắp xếp Mới lấy nhất (newest) mặc định cho cả 2 cột Viral FB & TikTok.
-    2. Bổ sung referrerPolicy="no-referrer" cho ảnh thumbnail, hiển thị giờ lấy bài.
-    3. Nút ⏹ Dừng FB và ⏹ Dừng TikTok luôn bấm được.
-    4. Thêm Panel Dữ liệu Lướt theo thời gian đầy đủ ở Tab Nhật ký & Báo cáo.
+    1. Sửa triệt để lỗi cào 10 bài chỉ hiện 3-4 bài: kết hợp UPSERT backend, mở rộng cardSelector TikTok feed/explore, hạ ngưỡng likes thích ứng đa nấc, và streaming functional state update.
+    2. Sửa lỗi lướt feed mất bảng kết quả khi chuyển tab: nâng cấp handleSurfAndRank lên cấp component cha, lắng nghe OMNICART_SURF_DONE, lưu trữ bền bỉ cấu hình surfCfg và surfResult qua localStorage và API social.surf.last_result.
+    3. Trạng thái nút "✅ Đã lưu" trực quan, chống lưu trùng bài viết.
   - Liên kết trực tiếp: src/pages/AdminSocialPowerPanels.jsx, src/pages/AdminSocialAutomation.css, src/pages/socialPrivacy.js, src/api/chat.js
-  - Vùng ảnh hưởng khi sửa: Toàn bộ giao diện tab Quản lý MXH, bảng bài viral song song 2 cột, bảng lịch sử lướt ở tab nhật ký.
+  - Vùng ảnh hưởng khi sửa: Toàn bộ giao diện Quản trị MXH (Cấu hình, Lướt Feed, Kho bài Viral song song 2 cột, Lịch sử lướt).
 */
 
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { apiJson } from '../api/chat'
 import { privacyForSocialPlatform } from './socialPrivacy'
-import { ViralSalesIdeasPanel, SmartProductVisionPanel, AutomationSuitePanels } from './AdminSocialPowerPanels'
+import { ViralSalesIdeasPanel, SmartProductVisionPanel, AutomationSuitePanels, normalizeSurfResult } from './AdminSocialPowerPanels'
 import './AdminSocialAutomation.css'
 
 export const copyPostToClipboard = async (text) => {
@@ -100,6 +99,28 @@ export default function AdminSocialAutomation({ csrfToken }) {
   const [surfHistory, setSurfHistory] = useState([])
   const [surfHistoryFilter, setSurfHistoryFilter] = useState('all')
   const [surfHistorySort, setSurfHistorySort] = useState('newest')
+  const [surfCfg, setSurfCfgState] = useState(() => {
+    try {
+      const cached = typeof window !== 'undefined' ? localStorage.getItem('omnicart_last_surf_cfg') : null
+      return cached ? JSON.parse(cached) : { platform: 'tiktok', fbMode: 'feed', ttSourceMode: 'explore', durationMinutes: 3, topic: '' }
+    } catch (_) {
+      return { platform: 'tiktok', fbMode: 'feed', ttSourceMode: 'explore', durationMinutes: 3, topic: '' }
+    }
+  })
+  const setSurfCfg = (newCfg) => {
+    setSurfCfgState(prev => {
+      const updated = typeof newCfg === 'function' ? newCfg(prev) : newCfg
+      try { localStorage.setItem('omnicart_last_surf_cfg', JSON.stringify(updated)) } catch (_) {}
+      return updated
+    })
+  }
+  const [surfBusy, setSurfBusy] = useState(false)
+  const [surfResult, setSurfResult] = useState(() => {
+    try {
+      const cached = typeof window !== 'undefined' ? localStorage.getItem('omnicart_last_surf_result') : null
+      return cached ? normalizeSurfResult(JSON.parse(cached)) : null
+    } catch (_) { return null }
+  })
   const [scrapingViralBusy, setScrapingViralBusy] = useState(false)
 
   const [extensionConnected, setExtensionConnected] = useState(false)
@@ -250,7 +271,18 @@ export default function AdminSocialAutomation({ csrfToken }) {
         apiJson('/api/admin/social/viral'),
         apiJson('/api/admin/products?offset=0&limit=100').catch(() => null)
       ])
-      apiJson('/api/admin/social/surf-history').then((res) => { if (res?.posts) setSurfHistory(res.posts) }).catch(() => {})
+      apiJson('/api/admin/social/surf-history').then((res) => {
+        if (res?.posts) setSurfHistory(res.posts)
+        const norm = normalizeSurfResult(res?.lastResult)
+        if (norm) {
+          setSurfResult(prev => prev || norm)
+          try {
+            if (!localStorage.getItem('omnicart_last_surf_result')) {
+              localStorage.setItem('omnicart_last_surf_result', JSON.stringify(norm))
+            }
+          } catch (_) {}
+        }
+      }).catch(() => {})
       if (resStats?.stats) setStats(resStats.stats)
       if (resSettings?.settings) {
         const nextPrivacy = resSettings.settings.privacy === 'public' ? 'public' : 'only_me'
@@ -314,27 +346,99 @@ export default function AdminSocialAutomation({ csrfToken }) {
       if (event.data?.source !== 'OMNICART_VIRAL_BATCH' || !event.data.payload?.posts?.length) return
       const batch = event.data.payload
       try {
-        let postsToSave = batch.posts
-        const classified = await apiJson('/api/admin/social/ai/classify-viral', {
-          method: 'POST', headers: { 'x-csrf-token': csrfToken },
-          body: JSON.stringify({ requestedTopic: batch.topic || 'all', requestedTopicLabel: batch.topicLabel || '', posts: postsToSave })
-        }).catch(() => null)
-        if (classified?.ok && Array.isArray(classified.posts)) postsToSave = classified.posts
+        const postsToSave = (batch.posts || []).map((p) => ({
+          ...p,
+          category: p.category || batch.topicLabel || 'Xu hướng chung',
+          likesCount: Math.min(200000000, Math.max(0, Math.round(Number(p.likesCount) || 0))),
+          commentsCount: Math.min(200000000, Math.max(0, Math.round(Number(p.commentsCount) || 0))),
+          sharesCount: Math.min(200000000, Math.max(0, Math.round(Number(p.sharesCount) || 0)))
+        }))
         if (postsToSave.length > 0) {
-          postsToSave = postsToSave.map((p) => ({
-            ...p,
-            likesCount: Math.min(200000000, Math.max(0, Math.round(Number(p.likesCount) || 0))),
-            commentsCount: Math.min(200000000, Math.max(0, Math.round(Number(p.commentsCount) || 0))),
-            sharesCount: Math.min(200000000, Math.max(0, Math.round(Number(p.sharesCount) || 0)))
-          }))
-          const saved = await apiJson('/api/admin/social/viral/import-real', {
+          // Hợp nhất ngay vào state React bằng functional update để chống race condition làm rớt bài
+          setViralPosts(cur => {
+            const map = new Map()
+            for (const p of cur) {
+              const k = String(p.postUrl || '').trim().toLowerCase()
+              if (k) map.set(k, p)
+            }
+            for (const p of postsToSave) {
+              const k = String(p.postUrl || '').trim().toLowerCase()
+              if (k) map.set(k, { ...(map.get(k) || {}), ...p })
+            }
+            return Array.from(map.values())
+          })
+          setViralFilterTopic('all')
+          setViralFbKindFilter('all')
+          setViralSearch('')
+          // Gửi ngầm tới backend, khi có kết quả hợp nhất bảo toàn số bài
+          apiJson('/api/admin/social/viral/import-real', {
             method: 'POST', headers: { 'x-csrf-token': csrfToken },
             body: JSON.stringify({ posts: postsToSave })
-          })
-          if (saved?.posts) setViralPosts(saved.posts)
+          }).then((saved) => {
+            if (saved?.posts) {
+              setViralPosts(cur => {
+                const map = new Map()
+                for (const p of saved.posts) {
+                  const k = String(p.postUrl || '').trim().toLowerCase()
+                  if (k) map.set(k, p)
+                }
+                for (const p of cur) {
+                  const k = String(p.postUrl || '').trim().toLowerCase()
+                  if (k && !map.has(k)) map.set(k, p)
+                }
+                return Array.from(map.values())
+              })
+            }
+          }).catch(() => {})
           showNotice(`⚡ ${batch.sourceLabel} vừa về: +${postsToSave.length} bài!`, 'info')
         }
       } catch (_) {}
+    }
+
+    const onSurfDone = async (event) => {
+      if (event.source !== window || event.origin !== window.location.origin) return
+      if (event.data?.source !== 'OMNICART_SURF_DONE' || !event.data.payload) return
+      const payload = event.data.payload
+      const rawPosts = payload?.posts || []
+      try {
+        let analyzed = null
+        try {
+          analyzed = await apiJson('/api/admin/social/ai/analyze-surf', {
+            method: 'POST', headers: { 'x-csrf-token': csrfToken },
+            body: JSON.stringify({
+              platform: payload.platform || surfCfg.platform,
+              targetTopic: surfCfg.topic || 'all',
+              durationMinutes: Number(surfCfg.durationMinutes) || 3,
+              posts: rawPosts
+            })
+          })
+        } catch (aiErr) {
+          console.warn('AI analyze-surf fallback in onSurfDone:', aiErr)
+        }
+        const postList = Array.isArray(analyzed?.topPosts) && analyzed.topPosts.length > 0
+          ? analyzed.topPosts
+          : rawPosts
+        const finalResult = normalizeSurfResult({
+          ok: true,
+          platform: payload.platform || surfCfg.platform,
+          topic: surfCfg.topic || 'Tất cả',
+          durationMinutes: Number(surfCfg.durationMinutes) || 3,
+          scannedCount: rawPosts.length,
+          matchedCount: postList.length,
+          topTopics: analyzed?.topTopics || [{ topic: surfCfg.topic || 'Xu hướng lướt', postCount: postList.length }],
+          topPosts: postList,
+          generatedBy: analyzed?.generatedBy || 'OmniVision Extension'
+        })
+        setSurfResult(finalResult)
+        try { localStorage.setItem('omnicart_last_surf_result', JSON.stringify(finalResult)) } catch (_) {}
+        setSurfBusy(false)
+        apiJson('/api/admin/social/surf-history').then((r) => {
+          if (r?.posts) setSurfHistory(r.posts)
+        }).catch(() => {})
+        showNotice(`✅ Lướt xong: đã thu thập được ${finalResult?.topPosts?.length || 0} bài!`)
+      } catch (_) {
+        setSurfBusy(false)
+      }
     }
 
     pingExtension()
@@ -343,6 +447,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
     window.addEventListener('omnicart-extension-ready', onReady)
     window.addEventListener('message', onPostVerified)
     window.addEventListener('message', onViralBatch)
+    window.addEventListener('message', onSurfDone)
     return () => {
       disposed = true
       clearInterval(pingTimer)
@@ -350,6 +455,7 @@ export default function AdminSocialAutomation({ csrfToken }) {
       window.removeEventListener('omnicart-extension-ready', onReady)
       window.removeEventListener('message', onPostVerified)
       window.removeEventListener('message', onViralBatch)
+      window.removeEventListener('message', onSurfDone)
     }
   }, [csrfToken]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -636,6 +742,59 @@ export default function AdminSocialAutomation({ csrfToken }) {
     showNotice(`⏹ Đã gửi lệnh dừng cào ${platform === 'facebook' ? 'Facebook' : 'TikTok'}.`, 'info')
   }
 
+  // Lướt theo thời gian (FB Feed / FB Reels / TikTok) và phân tích xếp hạng
+  const handleSurfAndRank = async (activeCfg = null) => {
+    const cfg = activeCfg || surfCfg
+    setSurfBusy(true)
+    try {
+      try { localStorage.setItem('omnicart_last_surf_cfg', JSON.stringify(cfg)) } catch (_) {}
+      showNotice(`🧭 Đang lướt ${cfg.platform === 'facebook' ? 'Facebook' : 'TikTok'} trong ${cfg.durationMinutes} phút...`, 'info')
+      const surfed = await sendExtensionMessage('SURF_AND_COLLECT', cfg)
+      if (!surfed?.ok) throw new Error(surfed?.error || 'Không lướt được feed.')
+      const rawPosts = surfed?.data?.posts || surfed?.posts || []
+
+      let analyzed = null
+      try {
+        analyzed = await apiJson('/api/admin/social/ai/analyze-surf', {
+          method: 'POST', headers: { 'x-csrf-token': csrfToken },
+          body: JSON.stringify({
+            platform: cfg.platform,
+            targetTopic: cfg.topic || 'all',
+            durationMinutes: Number(cfg.durationMinutes) || 3,
+            posts: rawPosts
+          })
+        })
+      } catch (aiErr) {
+        console.warn('AI analyze-surf fallback:', aiErr)
+      }
+
+      const postList = Array.isArray(analyzed?.topPosts) && analyzed.topPosts.length > 0
+        ? analyzed.topPosts
+        : rawPosts
+      const finalResult = normalizeSurfResult({
+        ok: true,
+        platform: cfg.platform,
+        topic: cfg.topic || 'Tất cả',
+        durationMinutes: Number(cfg.durationMinutes) || 3,
+        scannedCount: rawPosts.length,
+        matchedCount: postList.length,
+        topTopics: analyzed?.topTopics || [{ topic: cfg.topic || 'Xu hướng lướt', postCount: postList.length }],
+        topPosts: postList,
+        generatedBy: analyzed?.generatedBy || 'OmniVision Extension'
+      })
+      setSurfResult(finalResult)
+      try { localStorage.setItem('omnicart_last_surf_result', JSON.stringify(finalResult)) } catch (_) {}
+      apiJson('/api/admin/social/surf-history').then((r) => {
+        if (r?.posts) setSurfHistory(r.posts)
+      }).catch(() => {})
+      showNotice(`✅ Lướt đủ ${cfg.durationMinutes} phút — thu thập được ${finalResult?.topPosts?.length || 0} bài!`)
+    } catch (err) {
+      showNotice(err.message || 'Lỗi lướt feed.', 'error')
+    } finally {
+      setSurfBusy(false)
+    }
+  }
+
   // Cào Viral (FB Bài ≥ 1K • FB Reels ≥ 5K • TikTok ≥ 1M)
   const handleScrapeRealViralThroughExtension = async (overrideCfg = null) => {
     if (scrapingViralBusy) return
@@ -651,6 +810,9 @@ export default function AdminSocialAutomation({ csrfToken }) {
     try {
       setScrapingViralBusy(true)
       setScrapingPlatformBusy({ facebook: targetPlat !== 'tiktok', tiktok: targetPlat !== 'facebook' })
+      setViralFilterTopic('all')
+      setViralFbKindFilter('all')
+      setViralSearch('')
       const topicLabel = activeTopic === 'custom'
         ? activeCustomTopic
         : (VIRAL_TOPICS.find(([k]) => k === activeTopic)?.[1]?.replace(/^[^\p{L}\p{N}]+/u, '').trim() || '')
@@ -685,11 +847,61 @@ export default function AdminSocialAutomation({ csrfToken }) {
       })
       if (res?.error === 'EXTENSION_NOT_DETECTED') { setShowExtensionHelp(true); throw new Error('Chưa kết nối Chrome Extension.') }
 
-      const resViral = await apiJson('/api/admin/social/viral')
-      if (resViral?.posts) setViralPosts(resViral.posts)
-      const totalNew = (res?.data?.posts || []).length
-      showNotice(totalNew > 0 ? `✅ Hoàn tất cào Viral (+${totalNew} bài mới)!` : '✅ Đã đồng bộ xong danh sách bài Viral.')
+      const rawScraped = [
+        ...(Array.isArray(res?.data?.posts) ? res.data.posts : []),
+        ...(Array.isArray(res?.data?.facebookPosts) ? res.data.facebookPosts : []),
+        ...(Array.isArray(res?.data?.tiktokPosts) ? res.data.tiktokPosts : []),
+        ...(Array.isArray(res?.posts) ? res.posts : [])
+      ]
+      const uniqueScrapedMap = new Map()
+      for (const p of rawScraped) {
+        const u = String(p?.postUrl || '').trim().toLowerCase()
+        if (u && !uniqueScrapedMap.has(u)) uniqueScrapedMap.set(u, p)
+      }
+      const allScrapedList = Array.from(uniqueScrapedMap.values())
+
+      if (allScrapedList.length > 0) {
+        setViralPosts(cur => {
+          const map = new Map()
+          for (const p of cur) {
+            const k = String(p.postUrl || '').trim().toLowerCase()
+            if (k) map.set(k, p)
+          }
+          for (const p of allScrapedList) {
+            const k = String(p.postUrl || '').trim().toLowerCase()
+            if (k) map.set(k, { ...(map.get(k) || {}), ...p })
+          }
+          return Array.from(map.values())
+        })
+        const saved = await apiJson('/api/admin/social/viral/import-real', {
+          method: 'POST', headers: { 'x-csrf-token': csrfToken },
+          body: JSON.stringify({ posts: allScrapedList })
+        }).catch(() => null)
+        if (saved?.posts) {
+          setViralPosts(cur => {
+            const map = new Map()
+            for (const p of saved.posts) {
+              const k = String(p.postUrl || '').trim().toLowerCase()
+              if (k) map.set(k, p)
+            }
+            for (const p of cur) {
+              const k = String(p.postUrl || '').trim().toLowerCase()
+              if (k && !map.has(k)) map.set(k, p)
+            }
+            return Array.from(map.values())
+          })
+        }
+      } else {
+        const resViral = await apiJson('/api/admin/social/viral')
+        if (resViral?.posts) setViralPosts(resViral.posts)
+      }
+
+      setViralFilterTopic('all')
+      setViralFbKindFilter('all')
+      setViralSearch('')
       setActiveSubTab('groups')
+
+      showNotice(allScrapedList.length > 0 ? `✅ Hoàn tất cào Viral (+${allScrapedList.length} bài mới)!` : '✅ Đã đồng bộ xong danh sách bài Viral.')
     } catch (err) { showNotice(err.message || 'Lỗi cào bài viral.', 'error') }
     finally {
       setScrapingViralBusy(false)
@@ -848,11 +1060,21 @@ export default function AdminSocialAutomation({ csrfToken }) {
   }, [viralPosts])
 
   const matchesViralFilters = (v) => {
-    if (viralFilterTopic !== 'all' && String(v.category || '').trim().toLowerCase() !== viralFilterTopic.toLowerCase()) return false
+    if (viralFilterTopic !== 'all') {
+      const cat = String(v.category || '').trim().toLowerCase()
+      const filt = viralFilterTopic.toLowerCase()
+      const trend = String(v.trendingTopic || '').toLowerCase()
+      const strip = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      const catNorm = strip(cat)
+      const filtNorm = strip(filt)
+      const trendNorm = strip(trend)
+      if (cat !== filt && !cat.includes(filt) && !trend.includes(filt) && !catNorm.includes(filtNorm) && !trendNorm.includes(filtNorm)) return false
+    }
     if (viralSearch.trim()) {
       const q = viralSearch.trim().toLowerCase()
       const hay = `${v.title || ''} ${v.category || ''} ${v.trendingTopic || ''} ${v.summary || ''} ${v.authorName || ''}`.toLowerCase()
-      if (!hay.includes(q)) return false
+      const strip = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      if (!hay.includes(q) && !strip(hay).includes(strip(q))) return false
     }
     return true
   }
@@ -999,7 +1221,20 @@ export default function AdminSocialAutomation({ csrfToken }) {
             onCustomViralScrape={(cfg) => { setActiveSubTab('groups'); handleScrapeRealViralThroughExtension(cfg) }}
             onOpenSingleTab={handleOpenViralSingleTab}
             showNotice={showNotice}
-            onSurfSaved={() => apiJson('/api/admin/social/surf-history').then((r) => r?.posts && setSurfHistory(r.posts)).catch(() => {})}
+            onSurfSaved={() => {
+              apiJson('/api/admin/social/surf-history').then((r) => {
+                if (r?.posts) setSurfHistory(r.posts)
+                if (r?.lastResult) setSurfResult(normalizeSurfResult(r.lastResult))
+              }).catch(() => {})
+              apiJson('/api/admin/social/viral').then((r) => r?.posts && setViralPosts(r.posts)).catch(() => {})
+            }}
+            surfResult={surfResult}
+            setSurfResult={setSurfResult}
+            surfBusy={surfBusy}
+            setSurfBusy={setSurfBusy}
+            surfCfg={surfCfg}
+            setSurfCfg={setSurfCfg}
+            onSurfAndRank={handleSurfAndRank}
           />
         </div>
       )}
@@ -1479,6 +1714,8 @@ export default function AdminSocialAutomation({ csrfToken }) {
                     if (!window.confirm(`Xóa toàn bộ ${surfHistory.length} bài đã lướt?`)) return
                     await apiJson('/api/admin/social/surf-history', { method: 'DELETE', headers: { 'x-csrf-token': csrfToken } })
                     setSurfHistory([])
+                    setSurfResult(null)
+                    try { localStorage.removeItem('omnicart_last_surf_result') } catch (_) {}
                   }}
                 >
                   🗑️ Xóa ({surfHistory.length})
