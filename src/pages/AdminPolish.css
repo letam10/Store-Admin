@@ -1279,6 +1279,8 @@ select option,
   z-index: 0 !important;
 }
 
+.admin-video-bg__media,
+.admin-video-bg video,
 .admin-photo-bg__image,
 .admin-video-bg img {
   position: absolute !important;

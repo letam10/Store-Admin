@@ -53,3 +53,6 @@ __pycache__/
 # Ảnh dùng bởi ứng dụng trong public/products vẫn được commit.
 /work/**/generated-originals/
 /work/product-image-preview-*/
+
+# Large media assets (>100MB)
+*.mp4

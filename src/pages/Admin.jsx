@@ -440,16 +440,24 @@ export default function Admin() {
   }
 
   // Edge case: điều kiện ngay sau chú thích là chốt bảo vệ; dữ liệu thiếu, sai, hết hạn, bị hủy hoặc không an toàn phải dừng tại đây.
-  const loginPhotoBg = (
-    <div className="admin-photo-bg" aria-hidden="true">
-      <img src="/auth-bg.jpg" alt="" className="admin-photo-bg__image" />
-      <div className="admin-photo-overlay" />
+  const loginVideoBg = (
+    <div className="admin-video-bg" aria-hidden="true">
+      <video
+        className="admin-video-bg__media"
+        src="/auth-bg.mp4"
+        poster="/auth-bg.jpg"
+        autoPlay
+        loop
+        muted
+        playsInline
+      />
+      <div className="admin-video-overlay" />
     </div>
   )
 
   if (session === null) return (
     <main className="admin-shell admin-shell--login">
-      {loginPhotoBg}
+      {loginVideoBg}
       <div className="admin-login-card admin-loading-state">
         <div className="admin-login-card__preferences"><ThemeLanguageControls showTheme={false} /></div>
         <p>Đang kiểm tra phiên quản trị…</p>
@@ -458,7 +466,7 @@ export default function Admin() {
   )
   if (!session?.authenticated) return (
     <main className="admin-shell admin-shell--login">
-      {loginPhotoBg}
+      {loginVideoBg}
       <div className="admin-login-card">
         <div className="admin-login-card__preferences"><ThemeLanguageControls showTheme={false} /></div>
         <form className="admin-login" onSubmit={login}>
