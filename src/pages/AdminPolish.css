@@ -2431,8 +2431,7 @@ html[data-admin-theme="dark"] .admin-staff-edit-btn:hover {
 .admin-staff-form,
 .admin-customer-detail,
 .admin-order-detail,
-.voucher-management #voucher-editor,
-.admin-offer-form {
+.voucher-management #voucher-editor {
   margin: 22px 0 26px 0 !important;
   padding: 24px 26px !important;
   border-radius: 18px !important;
@@ -2469,8 +2468,7 @@ html[data-admin-theme="dark"] .admin-staff-edit-btn:hover {
 .admin-staff-form,
 .admin-customer-detail,
 .admin-order-detail,
-.voucher-management #voucher-editor,
-.admin-offer-form {
+.voucher-management #voucher-editor {
   background: linear-gradient(175deg, #f2f7f4 0%, #e9f2ec 100%) !important;
   border: 1.5px solid #bcdac7 !important;
   box-shadow: 0 8px 26px rgba(20, 55, 38, 0.08), 0 2px 6px rgba(20, 55, 38, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.85) !important;
@@ -2506,8 +2504,7 @@ html[data-admin-theme="dark"] .admin-staff-edit-btn:hover {
 .admin-editor-grid label,
 .admin-commerce-form label,
 .admin-staff-form label:not(.admin-staff-active-toggle),
-.admin-order-detail label,
-.admin-offer-form label {
+.admin-order-detail label {
   color: #133a25 !important;
   font-size: 12.5px !important;
   font-weight: 700 !important;
@@ -2525,8 +2522,7 @@ html[data-admin-theme="dark"] .admin-staff-edit-btn:hover {
 .admin-commerce-list textarea,
 .admin-staff-form input:not([type="checkbox"]),
 .admin-order-detail input,
-.admin-order-detail textarea,
-.admin-offer-form input {
+.admin-order-detail textarea {
   background: #ffffff !important;
   border: 1.5px solid #bcd7c5 !important;
   border-radius: 10px !important;
@@ -2545,8 +2541,7 @@ html[data-admin-theme="dark"] .admin-staff-edit-btn:hover {
 .admin-commerce-list textarea:focus,
 .admin-staff-form input:focus,
 .admin-order-detail input:focus,
-.admin-order-detail textarea:focus,
-.admin-offer-form input:focus {
+.admin-order-detail textarea:focus {
   border-color: #257045 !important;
   outline: none !important;
   box-shadow: 0 0 0 3px rgba(37, 112, 69, 0.18), 0 2px 8px rgba(37, 112, 69, 0.1) !important;
@@ -2636,8 +2631,7 @@ html[data-admin-theme="dark"] .admin-detail-panel,
 html[data-admin-theme="dark"] .admin-staff-form,
 html[data-admin-theme="dark"] .admin-customer-detail,
 html[data-admin-theme="dark"] .admin-order-detail,
-html[data-admin-theme="dark"] .voucher-management #voucher-editor,
-html[data-admin-theme="dark"] .admin-offer-form {
+html[data-admin-theme="dark"] .voucher-management #voucher-editor {
   background: linear-gradient(165deg, #132a1e 0%, #0c1a13 100%) !important;
   border: 1.5px solid #285438 !important;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
@@ -2661,8 +2655,7 @@ html[data-admin-theme="dark"] .admin-order-detail h3 {
 html[data-admin-theme="dark"] .admin-editor-grid label,
 html[data-admin-theme="dark"] .admin-commerce-form label,
 html[data-admin-theme="dark"] .admin-staff-form label:not(.admin-staff-active-toggle),
-html[data-admin-theme="dark"] .admin-order-detail label,
-html[data-admin-theme="dark"] .admin-offer-form label {
+html[data-admin-theme="dark"] .admin-order-detail label {
   color: #bbf0cc !important;
 }
 
@@ -2675,8 +2668,7 @@ html[data-admin-theme="dark"] .admin-commerce-form select,
 html[data-admin-theme="dark"] .admin-commerce-list textarea,
 html[data-admin-theme="dark"] .admin-staff-form input:not([type="checkbox"]),
 html[data-admin-theme="dark"] .admin-order-detail input,
-html[data-admin-theme="dark"] .admin-order-detail textarea,
-html[data-admin-theme="dark"] .admin-offer-form input {
+html[data-admin-theme="dark"] .admin-order-detail textarea {
   background: #08150f !important;
   border: 1.5px solid #275238 !important;
   color: #f0faf3 !important;
@@ -2691,8 +2683,7 @@ html[data-admin-theme="dark"] .admin-commerce-form select:focus,
 html[data-admin-theme="dark"] .admin-commerce-list textarea:focus,
 html[data-admin-theme="dark"] .admin-staff-form input:focus,
 html[data-admin-theme="dark"] .admin-order-detail input:focus,
-html[data-admin-theme="dark"] .admin-order-detail textarea:focus,
-html[data-admin-theme="dark"] .admin-offer-form input:focus {
+html[data-admin-theme="dark"] .admin-order-detail textarea:focus {
   border-color: #4ade80 !important;
   box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.25) !important;
   background: #0b1c14 !important;
@@ -2938,6 +2929,157 @@ html[data-admin-theme="dark"] .admin-voucher-list code {
   color: #4ade80 !important;
   border: 1px solid #254d35 !important;
 }
+
+/* 10.4 Bảng hàng hóa & Ô sản phẩm (Product Cell) - Rõ nét, không bị teo nhỏ */
+.admin-product-cell {
+  display: flex !important;
+  align-items: center !important;
+  gap: 14px !important;
+  min-width: 260px !important;
+}
+
+.admin-product-cell img {
+  width: 58px !important;
+  height: 58px !important;
+  min-width: 58px !important;
+  min-height: 58px !important;
+  border-radius: 12px !important;
+  object-fit: cover !important;
+  background: #102419 !important;
+  border: 1.5px solid rgba(74, 222, 128, 0.28) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35) !important;
+  flex-shrink: 0 !important;
+  transition: transform 0.2s ease, border-color 0.2s ease !important;
+}
+
+.admin-product-cell img:hover {
+  transform: scale(1.06) !important;
+  border-color: #4ade80 !important;
+}
+
+.admin-product-cell span {
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  color: #eaf6ee !important;
+  line-height: 1.4 !important;
+}
+
+html:not([data-admin-theme="dark"]) .admin-product-cell img {
+  background: #f0f7f3 !important;
+  border-color: #bcdac7 !important;
+  box-shadow: 0 2px 8px rgba(20, 55, 38, 0.08) !important;
+}
+
+html:not([data-admin-theme="dark"]) .admin-product-cell span {
+  color: #163e29 !important;
+}
+
+/* Form chỉnh sửa ưu đãi/tồn kho inline trong bảng (Offer Form) */
+.admin-offer-form {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  padding: 6px 12px !important;
+  border-radius: 12px !important;
+  box-sizing: border-box !important;
+  clear: none !important;
+  width: fit-content !important;
+  background: rgba(14, 38, 26, 0.55) !important;
+  border: 1px solid rgba(74, 222, 128, 0.22) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+}
+
+html:not([data-admin-theme="dark"]) .admin-offer-form {
+  background: #f4f8f5 !important;
+  border: 1px solid #c5ddce !important;
+  box-shadow: 0 1px 4px rgba(20, 55, 38, 0.06) !important;
+}
+
+.admin-offer-form label {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 3px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #86efac !important;
+  letter-spacing: 0.2px !important;
+}
+
+html:not([data-admin-theme="dark"]) .admin-offer-form label {
+  color: #1b5e39 !important;
+}
+
+.admin-offer-form input {
+  width: 62px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 2px 6px !important;
+  border-radius: 6px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  text-align: center !important;
+  background: #08150f !important;
+  border: 1.5px solid #275238 !important;
+  color: #f0faf3 !important;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5) !important;
+}
+
+html:not([data-admin-theme="dark"]) .admin-offer-form input {
+  background: #ffffff !important;
+  border: 1.5px solid #bcd7c5 !important;
+  color: #113421 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+}
+
+.admin-offer-form input:focus {
+  border-color: #4ade80 !important;
+  outline: none !important;
+  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.25) !important;
+}
+
+html:not([data-admin-theme="dark"]) .admin-offer-form input:focus {
+  border-color: #257045 !important;
+  box-shadow: 0 0 0 2px rgba(37, 112, 69, 0.2) !important;
+}
+
+.admin-offer-form button[type="submit"] {
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 14px !important;
+  margin: 0 !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  background: #22c55e !important;
+  color: #052e16 !important;
+  border: none !important;
+  cursor: pointer !important;
+  transition: all 0.18s ease !important;
+  box-shadow: 0 2px 6px rgba(34, 197, 94, 0.3) !important;
+}
+
+.admin-offer-form button[type="submit"]:hover {
+  background: #4ade80 !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 10px rgba(34, 197, 94, 0.4) !important;
+}
+
+.admin-offer-form button[type="submit"]:active {
+  transform: translateY(0) !important;
+}
+
+.admin-offer-form small {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: #86efac !important;
+  margin-left: 2px !important;
+}
+
+html:not([data-admin-theme="dark"]) .admin-offer-form small {
+  color: #1b5e39 !important;
+}
+
 
 
 
