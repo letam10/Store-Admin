@@ -471,7 +471,10 @@ export default function Admin() {
             <img src="/brand-logo-square.jpg" alt="OmniCart" className="admin-login__brand-logo" />
             <span className="admin-login__brand-title">OmniCart<span>.</span></span>
           </div>
-          <p className="admin-eyebrow">QUẢN TRỊ STORE</p><h1>{copy.login}</h1><p>{copy.adminOnly}</p>
+          <div className="admin-login__header">
+            <h1>{copy.login}</h1>
+            <p>{copy.adminOnly}</p>
+          </div>
           <label>{copy.account}<input autoComplete="username" value={credentials.username} onChange={(event) => setCredentials((current) => ({ ...current, username: event.target.value }))} /></label>
           <label>{copy.password}<input type="password" autoComplete="current-password" value={credentials.password} onChange={(event) => setCredentials((current) => ({ ...current, password: event.target.value }))} /></label>
           {loginError && <p className="admin-error" role="alert">{language === 'en' && loginError === 'Sai tài khoản hoặc mật khẩu.' ? copy.wrongLogin : loginError}</p>}<button type="submit">{copy.login}</button><a href={import.meta.env?.VITE_STOREFRONT_URL || 'http://localhost:5173'}>{copy.backStore}</a>
