@@ -1,15 +1,17 @@
 /*
   FILE NOTE
-  - Mục đích: Bộ 5 Panel Tự động hóa MXH v3.5.6 (AdminSocialPowerPanels).
+  - Mục đích: Bộ 5 Panel Tự động hóa MXH v3.5.6 (AdminSocialPowerPanels), hỗ trợ thông báo đồng bộ catalog khi tạo sản phẩm hoặc áp dụng giảm giá.
   - Nâng cấp:
     1. Nhận state surfResult, surfBusy, surfCfg và onSurfAndRank từ component cha (AdminSocialAutomation) để bảo toàn 100% dữ liệu và quá trình lướt khi chuyển qua lại giữa các tab.
     2. Hàm normalizeSurfResult giải mã an toàn JSON string / object, chuẩn hóa hai chiều camelCase lẫn PascalCase từ C# backend/localStorage.
     3. Hỗ trợ hiển thị trạng thái đã lưu vào Kho Viral cho từng bài lướt feed.
-  - Liên kết trực tiếp: src/pages/AdminSocialAutomation.jsx, src/pages/AdminSocialAutomation.css
-  - Vùng ảnh hưởng khi sửa: Giao diện Panel Lấy bài Viral tùy chỉnh và Panel Lướt theo thời gian thực tế.
+    4. Tích hợp notifyCatalogChange phát tín hiệu đồng bộ realtime sang Storefront khách hàng.
+  - Liên kết trực tiếp: src/pages/AdminSocialAutomation.jsx, src/pages/AdminSocialAutomation.css, src/services/catalogSync.js
+  - Vùng ảnh hưởng khi sửa: Giao diện Panel Lấy bài Viral tùy chỉnh và Panel Lướt theo thời gian thực tế, đồng bộ danh mục.
 */
 import { useEffect, useState } from 'react'
 import { apiJson } from '../api/chat'
+import { notifyCatalogChange } from '../services/catalogSync'
 
 const money = (v) => new Intl.NumberFormat('vi-VN').format(Number(v || 0)) + 'đ'
 
@@ -164,6 +166,7 @@ export function SmartProductVisionPanel({ csrfToken, onProductCreated, onSelectF
       })
       if (res?.product) {
         setNotice(`✅ Đã thêm "${res.product.name}" vào kho!`)
+        notifyCatalogChange()
         onProductCreated?.(res.product)
         if (andCreatePost) onSelectForPost?.(res.product)
       }
@@ -178,6 +181,7 @@ export function SmartProductVisionPanel({ csrfToken, onProductCreated, onSelectF
         body: JSON.stringify({ discountPercent: item.suggestedDiscount || 15 })
       })
       setNotice(`✅ Đã giảm ${item.suggestedDiscount || 15}% cho "${item.name}".`)
+      notifyCatalogChange()
       const refreshed = await apiJson('/api/admin/social/ai/inventory-recommendations')
       setInvAdvice(refreshed)
     } catch (e) { setNotice('⚠️ ' + e.message) }

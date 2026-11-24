@@ -1,8 +1,8 @@
 /*
   FILE NOTE
-  - Mục đích: Bộ điều hướng và hiển thị các module quản trị Store-Admin theo quyền hạn (role).
-  - Liên kết trực tiếp: Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/src/pages/AdminOrderWorkflow.jsx, Store-Admin/src/pages/AdminStaff.jsx
-  - Vùng ảnh hưởng khi sửa: Các module quản trị được nạp và quyền thao tác (role) truyền vào từng module.
+  - Mục đích: Bộ điều hướng và hiển thị các module quản trị Store-Admin theo quyền hạn (role), hỗ trợ đồng bộ danh mục tức thì sang Storefront khi thêm/sửa/xóa sản phẩm.
+  - Liên kết trực tiếp: Store-Admin/src/pages/AdminCommerce.jsx, Store-Admin/src/pages/AdminOrderWorkflow.jsx, Store-Admin/src/pages/AdminStaff.jsx, Store-Admin/src/services/catalogSync.js
+  - Vùng ảnh hưởng khi sửa: Các module quản trị được nạp, quyền thao tác (role) truyền vào từng module, thông báo đồng bộ realtime sang Storefront.
 */
 
 /**
@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiJson } from '../api/chat'
 import { normalizeSearch } from '../services/storefrontState'
+import { notifyCatalogChange } from '../services/catalogSync'
 import { AdminCustomers, AdminFavorites, AdminOrders, AdminReviews, AdminVouchers } from './AdminCommerce'
 import './AdminModules.css'
 import ThemeEditor from './ThemeEditor'
@@ -76,6 +77,7 @@ function ProductOfferRow({ product, csrfToken, onSaved, onEdit, onDelete, readOn
       if (Object.keys(offer).length) {
         const payload = await apiJson('/api/admin/products/' + encodeURIComponent(product.id) + '/offer', { method: 'PATCH', headers: { 'x-csrf-token': csrfToken }, body: JSON.stringify(offer) })
         onSaved(product.id, payload.offer)
+        notifyCatalogChange()
         setDiscountPercent(null)
         setStockCount(null)
       }
@@ -198,6 +200,7 @@ function ProductsCatalog({ csrfToken, readOnly = false }) {
       setProducts((current) => current.filter((item) => item.id !== product.id))
       setTotal((current) => Math.max(0, current - 1))
       setPendingDelete(null)
+      notifyCatalogChange()
     } catch (failure) { setError(failure.message) }
   }
 
@@ -207,6 +210,7 @@ function ProductsCatalog({ csrfToken, readOnly = false }) {
       : [product, ...current])
     setTotal((current) => products.some((item) => item.id === product.id) ? current : current + 1)
     setEditor(null)
+    notifyCatalogChange()
   }
 
   return <section className="admin-module-card"><div className="admin-module-head"><div><p className="admin-eyebrow">DANH MỤC ĐỒNG BỘ</p><h2>Quản lý hàng hóa</h2><p>{readOnly ? 'Xem thông tin, giá, ưu đãi và tồn kho cập nhật từ hệ thống.' : 'Thêm, sửa, xóa, tìm kiếm, tồn kho và giảm giá. Dữ liệu được tải từng phần để bảng luôn nhẹ.'}</p></div><div className="admin-head-actions"><span className="admin-preview-badge">{products.length}/{total} sản phẩm</span>{!readOnly && <button type="button" onClick={() => setEditor({})}>+ Thêm sản phẩm</button>}</div></div>{pendingDelete && <ConfirmRemoval name={pendingDelete.name} onConfirm={() => remove(pendingDelete)} onCancel={() => setPendingDelete(null)} />}{editor && <ProductEditor product={editor.id ? editor : null} csrfToken={csrfToken} onSaved={savedProduct} onCancel={() => setEditor(null)} />}<div className="admin-module-toolbar"><label><span className="sr-only">Tìm sản phẩm</span><input className="admin-wide-search" type="search" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Tìm tên, thương hiệu, danh mục hoặc mã sản phẩm…" /></label><span>{products.length}/{total} mục đã tải</span></div>{loading && <p>Đang tải phần đầu danh mục…</p>}{error && <p role="alert">Không tải được danh mục: {error}</p>}{!loading && !error && <div ref={tableRef} className="admin-table-wrap admin-product-table-wrap"><table><caption className="sr-only">Sản phẩm đã nhập</caption><thead><tr><th>Sản phẩm</th><th>Danh mục</th><th>Giá gốc</th><th>Giảm giá / tồn kho</th><th>Lượt xem</th><th>Thao tác</th></tr></thead><tbody>{products.map((product) => <ProductOfferRow readOnly={readOnly} key={product.id} product={product} csrfToken={csrfToken} onSaved={(id, offer) => setProducts((current) => current.map((item) => item.id === id ? { ...item, ...offer } : item))} onEdit={setEditor} onDelete={setPendingDelete} />)}</tbody></table>{products.length < total && <div data-products-sentinel className="admin-load-sentinel" aria-live="polite">{loadingMore ? 'Đang tải thêm…' : 'Đang chờ phần tiếp theo…'}</div>}{products.length === 0 && <p className="admin-empty">Không có sản phẩm phù hợp.</p>}</div>}<p className="admin-demo-note">Ảnh và thông tin mô tả là dữ liệu mẫu; không đại diện tồn kho kinh doanh thực tế.</p></section>
