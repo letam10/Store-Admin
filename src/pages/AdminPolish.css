@@ -1288,7 +1288,7 @@ select option,
   object-fit: cover !important;
   object-position: center !important;
   image-rendering: auto !important;
-  filter: saturate(1.08) brightness(0.88) !important;
+  filter: saturate(1.05) brightness(0.92) !important;
   transform: translateZ(0) !important;
   backface-visibility: hidden !important;
 }
